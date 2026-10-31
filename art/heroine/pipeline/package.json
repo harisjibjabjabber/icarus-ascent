@@ -1,0 +1,8 @@
+{
+  "name": "icarus-heroine-pipeline",
+  "private": true,
+  "type": "module",
+  "description": "Offline VRM optimiser for the Ao heroine (art pipeline, not shipped)",
+  "scripts": { "build": "node optimize-vrm.mjs" },
+  "dependencies": { "meshoptimizer": "^0.22.0", "sharp": "^0.34.0", "three": "0.187.0", "three-mesh-bvh": "^0.9.1" }
+}

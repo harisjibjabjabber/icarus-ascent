@@ -14,6 +14,7 @@ import { GameView, snap, type Snapshot } from './render/view';
 import { newSeed } from './rng';
 import { Autopilot } from './diag/autopilot';
 import { Sfx } from './audio/sfx';
+import { LOOKS, nextLook } from './render/heroine/looks';
 
 type Mode = 'opening' | 'endless' | 'lab';
 const NEXT_MODE: Record<Mode, Mode> = { opening: 'endless', endless: 'lab', lab: 'opening' };
@@ -75,7 +76,7 @@ export class Game {
       <div class="start"><div class="start-title">Icarus's Ascent</div><div class="start-sub">Swipe down to start the course</div>
         <div class="start-buttons"><button data-act="endless">Endless</button><button data-act="lab">Lab</button></div></div>
       <div class="distance"></div>
-      <div class="buttons"><button data-act="sound" class="sound"></button><button data-act="mode" class="mode"></button><button data-act="new" class="new">New run</button><button data-act="dev">Dev</button></div>
+      <div class="buttons"><button data-act="sound" class="sound"></button><button data-act="mode" class="mode"></button><button data-act="look" class="look"></button><button data-act="new" class="new">New run</button><button data-act="dev">Dev</button></div>
       <div class="speed"></div>
       <div class="version"></div>`;
     root.appendChild(hud);
@@ -96,6 +97,7 @@ export class Game {
         if (act === 'new') this.newRun();
         if (act === 'dev') this.toggleDev();
         if (act === 'sound') this.toggleSound();
+        if (act === 'look') this.toggleLook();
         if (act === 'mode') this.setMode(NEXT_MODE[this.mode]);
         if (act === 'again') { this.cpIndex = 0; this.startRun(); }
         if (act === 'lab') this.setMode('lab');
@@ -103,7 +105,7 @@ export class Game {
         (b as HTMLElement).blur();
       });
     }
-    this.updateSoundButton();
+    this.updateSoundButton(); this.updateLookButton();
     const params = new URLSearchParams(location.search);
     this.seed = params.has('seed') ? Number(params.get('seed')) >>> 0 : newSeed();
     this.mode = params.has('lab') ? 'lab' : params.has('endless') ? 'endless' : 'opening';
@@ -152,6 +154,17 @@ export class Game {
     this.sfx.unlock();
     this.sfx.setMuted(!this.sfx.muted);
     this.updateSoundButton();
+  }
+
+  /** Switch Ao's outfit (the other look lazy-loads; the current one rides until it is ready). */
+  private toggleLook(): void {
+    void this.view.rider.setLook(nextLook(this.view.rider.look));
+    this.updateLookButton();
+  }
+
+  private updateLookButton(): void {
+    const b = document.querySelector('button.look');
+    if (b) b.textContent = LOOKS[nextLook(this.view.rider.look)].label;
   }
 
   private updateSoundButton(): void {

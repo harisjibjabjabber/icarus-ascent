@@ -31,3 +31,15 @@ Art. 11 / VRM Public License with modification + redistribution allowed". Nothin
 | Candidates (tested, no login): VRoid AvatarSample_A / _B (pixiv) | mirror github.com/madjin/vrm-samples vroid/stable | pixiv sample terms: free incl. commercial, no credit; no CC0 relicensing, no paid redistribution | vroid.pixiv.help article 4402394424089 | candidate (BEST_HEROINE_CANDIDATES.md) |
 | Candidates (tested, no login): Vivi, Vita, Victoria Rubin (old VRoid alpha/beta samples) | mirror github.com/madjin/vrm-samples vroid/beta | CC0 (in-file VRM meta; OpenGameArt "VRoid Studio CC0 models"; VRoid Hub 歴代サンプルモデル note) | in-file meta | candidate |
 | Candidates (login-only, not downloaded): Ao (白い白米), Hikari (あわ), Elf woman (りん, credit required), Yuzuki (Tovie), beta AvatarSample_4 | hub.vroid.com model pages listed in BEST_HEROINE_CANDIDATES.md | VRoid Hub panel: commercial + redistribution + modification allowed | API licence fields, 2026-10-31 | not yet downloaded |
+
+### Shipped heroine: Ao (branch `art/heroine-ao`, chosen by Haris 2026-10-31)
+
+| Asset | Where | Licence | Evidence | Ships? |
+|---|---|---|---|---|
+| `public/heroine/ao-longhair.vrm` (main look), optimised from VRoid Hub model 8534999798317965556 | Creator **白い白米 (siroihakumai)**. https://hub.vroid.com/en/characters/-/models/8534999798317965556 | VRoid Hub VRM 0.0 licence panel: avatar use allowed (everyone); **corporate and individual commercial use allowed**; **redistribution allowed**; **alterations allowed**; credit **not required**. Embedded `otherPermissionUrl` also lists sexual_expression=allow, violent_expression=allow. Character page note: "In-game data usage OK … Use the above with modifications OK" | VRM meta read on the box from the downloaded file; VRoid Hub page and API licence fields, 2026-10-31. Downloaded through the signed-in VRoid Hub browser session (no purchase) | **yes** (branch only) |
+| `public/heroine/ao-witch.vrm` (selectable look, `?look=witch` or the Outfit button), optimised from model 2338813411564378208 | 白い白米. https://hub.vroid.com/en/characters/-/models/2338813411564378208 | same panel as above | same | **yes** (branch only) |
+| Ao dress-style model 4502686513672574798 (looked at, not used) | 白い白米. https://hub.vroid.com/en/characters/-/models/4502686513672574798 | same panel as above | same | no |
+| Modifications made | `art/heroine/pipeline/optimize-vrm.mjs`: hidden-skin removal, meshopt simplification, texture atlasing + WebP, material merge, meshopt compression, bust spring chains removed; our own animation clips (`src/render/heroine/clips.ts`) | Alterations are allowed by the panel above. Source VRMs are not committed (rebuild with `art/heroine/pipeline/build.sh`) | — | — |
+| meshoptimizer, sharp, three-mesh-bvh (pipeline tools) | npm | MIT (meshoptimizer, three-mesh-bvh), Apache-2.0 (sharp) | package licences | tool only |
+
+Content rule kept: Ao is an adult-presenting character; animations are playful but non-explicit.
