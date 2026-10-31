@@ -76,6 +76,9 @@ export const TUNING = {
      *  remembered and fires on contact. Earlier presses are rejected (and in M2
      *  become the backflip), so a mid-air press never turns into a surprise jump. */
     jumpBufferTime: 0.12,
+    /** Pushes fall off as 1 - (v/softCap)^pushFalloffExponent. 3 (was 2) keeps pushes useful in
+     *  the 17-20 m/s band, so holding speed on flats isn't frantic; the soft cap still holds. */
+    pushFalloffExponent: 3,
 
     // --- Landing ---
     /** Landing keeps the surface-tangent component of velocity, but never less than
@@ -102,7 +105,14 @@ export const TUNING = {
     /** One committed flip per jump (brief: add multiple rotations later). */
     maxFlipsPerJump: 1,
 
+    /** An airborne Up that could not complete a flip before the (predicted) touchdown is taken as
+     *  a buffered jump on landing instead of a doomed flip. */
     // --- Landing preparation (airborne Down): rail catch / heel skim ---
+    /** A Down stroke that began at most this long (s) before touchdown is a late PUSH, not a
+     *  landing prep: released before / shortly after contact it pushes on landing. */
+    latePushWindow: 0.25,
+    /** ...if still held this long (s) after contact it is a heel skim after all. */
+    latePushConfirm: 0.15,
     /** A fresh airborne Down keeps the catch armed for this long (s) even after the
      *  finger lifts; holding keeps it armed indefinitely. */
     prepArmWindow: 0.4,
@@ -134,6 +144,11 @@ export const TUNING = {
     wallBandTop: 0.6,
     /** Catch area: within the wall's span, entering no later than this before its end (m). */
     wallCatchEndMargin: 3,
+    /** Wall context for touch: an airborne UP stroke leaning right by at least this much (unit-vector
+     *  x, 0.17 ≈ 10° off vertical) beside a right-hand wall, or with one within wallUpLookahead m
+     *  ahead, is a right hold (wall ride), never a flip. */
+    wallUpLean: 0.17,
+    wallUpLookahead: 12,
     /** Reduced gravity on the wall: the ride slowly sinks, so entry speed and height matter. */
     wallGravity: 2,
     /** Along-wall friction (m/s^2). Consistent; no speed refill. */
@@ -186,6 +201,19 @@ export const TUNING = {
     /** Moving back against the committed direction by this much (vu) from the stroke's
      *  furthest point ends the stroke and starts a new one (direction hysteresis). */
     reversalDistance: 0.03,
+    /** ...but only if the finger is moving back with intent: its speed against the stroke over
+     *  the last reversalSpeedWindowMs must be at least this (vu/s). A real push->jump reversal is a
+     *  flick (~1-3 vu/s); a thumb relaxing during a hold (wall ride, grab, catch) drifts at ~0.1. */
+    reversalMinSpeed: 0.35,
+    reversalSpeedWindowMs: 70,
+    /** A slow drift back this far (vu) still ends the stroke (a deliberate slow reversal). */
+    holdReversalDistance: 0.09,
+    /** After an UP stroke has fired, sideways travel of this much (vu) from its furthest point starts
+     *  a new sideways stroke without lifting (jump -> wall ride / grab as one L-shaped motion). */
+    turnDistance: 0.06,
+    /** Touches that begin in the bottom strip of the screen (fraction of its height) are ignored:
+     *  that edge belongs to the OS (iOS home indicator / Android gesture bar). */
+    bottomEdgeIgnore: 0.04,
     /** Push strength 0..1 maps linearly from fireDistance.down to this stroke length (vu). */
     pushFullLength: 0.22,
     /** Push strength stops growing after this long (ms) into a stroke, so a slow drag

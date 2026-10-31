@@ -66,6 +66,12 @@ export interface RiderState {
   prepTimer: number;
   /** True while the stroke that armed the prep is still held. */
   prepHeld: boolean;
+  /** Seconds since the prep stroke fired, and its (growing) stroke strength: a stroke begun just
+   *  before touchdown is a late push. */
+  prepAge: number;
+  prepStrength: number;
+  /** Heel skim that may still turn into the late push it started as (released quickly). */
+  skimPendingPush: boolean;
 
   // --- contacts ---
   railId: number;
@@ -80,6 +86,10 @@ export interface RiderState {
   /** True if a catch was armed at any point during the current flight. */
   prepTriedThisAir: boolean;
   sideTriedThisAir: boolean;
+  /** How the last wall ride ended (failure explanations). */
+  wallExit: 'none' | 'end' | 'release' | 'slid-off' | 'too-slow' | 'jump';
+  /** This flight reached a rail's catch band with the catch armed, but mid-flip. */
+  railBlockedByFlip: boolean;
 
   // --- obstacles ---
   /** Ids of obstacles broken this run. */

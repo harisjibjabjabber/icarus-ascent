@@ -14,7 +14,8 @@ export class VersionWatcher {
   private busy = false;
   latest: string | null = null;
 
-  constructor(private canReload: () => boolean, private intervalMs = 60_000) {}
+  /** `beforeReload` runs just before an update reload (the game persists its checkpoint there). */
+  constructor(private canReload: () => boolean, private intervalMs = 60_000, private beforeReload?: () => void) {}
 
   start(): void {
     if (BUILD_VERSION.startsWith('dev')) return; // dev server: no version.json
@@ -24,7 +25,7 @@ export class VersionWatcher {
   }
 
   /** Call at safe moments (run ended, back on the start screen). */
-  safePoint(): void { if (this.pending && this.canReload()) location.reload(); }
+  safePoint(): void { if (this.pending && this.canReload()) { this.beforeReload?.(); location.reload(); } }
 
   async check(): Promise<void> {
     if (this.busy) return;

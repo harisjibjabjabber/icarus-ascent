@@ -7,7 +7,7 @@ export function gestureToActions(e: GestureEvent): Action[] {
   switch (e.kind) {
     case 'fire':
       if (e.dir === 'down') return [{ type: 'down', strokeId: e.strokeId, strength: e.strength, fresh: true, source: 'touch' }];
-      if (e.dir === 'up') return [{ type: 'up', strokeId: e.strokeId, source: 'touch' }];
+      if (e.dir === 'up') return [{ type: 'up', strokeId: e.strokeId, source: 'touch', lean: e.lean }];
       return [{ type: 'side', side: e.dir, held: true, strokeId: e.strokeId, source: 'touch' }];
     case 'extend':
       return [{ type: 'down', strokeId: e.strokeId, strength: e.strength, fresh: false, source: 'touch' }];

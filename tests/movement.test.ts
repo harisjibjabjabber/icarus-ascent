@@ -195,11 +195,24 @@ describe('jump', () => {
   it('a high airborne Up is a backflip, not a buffered jump', () => {
     const sim = new Simulation(flatCourse());
     sim.enqueue(up()); sim.step();
-    stepUntil(sim, (s) => s.state.vy <= 0);
+    run(sim, 0.05); // early in a flat jump: ~0.56 s of air left, a flip (0.46 s) fits
     sim.drainEvents();
     sim.enqueue(up()); sim.step();
     expect(sim.drainEvents().some((e) => e.type === 'flip-start')).toBe(true);
     expect(sim.state.jumpBuffer).toBe(0);
+  });
+
+  it('an airborne Up too late for a flip to finish is a buffered jump (review H1)', () => {
+    const sim = new Simulation(flatCourse());
+    sim.enqueue(up()); sim.step();
+    stepUntil(sim, (s) => s.state.vy <= 0); // apex: ~0.3 s left
+    sim.drainEvents();
+    sim.enqueue(up());
+    stepUntil(sim, (s) => s.state.mode === 'grounded' || (s.state.vy > 0 && s.state.airTime < 0.1), 1);
+    const ev = sim.drainEvents();
+    expect(ev.some((e) => e.type === 'flip-start')).toBe(false);
+    expect(ev.some((e) => e.type === 'jump' && e.kind === 'buffered')).toBe(true);
+    expect(sim.state.mode).toBe('airborne');
   });
 });
 

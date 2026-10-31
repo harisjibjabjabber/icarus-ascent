@@ -18,7 +18,10 @@ import { Sfx } from './audio/sfx';
 type Mode = 'opening' | 'endless' | 'lab';
 const NEXT_MODE: Record<Mode, Mode> = { opening: 'endless', endless: 'lab', lab: 'opening' };
 const MODE_LABEL: Record<Mode, string> = { opening: 'Course', endless: 'Endless', lab: 'Lab' };
-const BEST_KEY = 'icarus.endless.best';
+/** Endless best = longest clean run (no fail) — v2 key: older bests included checkpoint retries. */
+const BEST_KEY = 'icarus.endless.bestClean';
+/** Checkpoint carried across an update reload (sessionStorage). */
+const RESUME_KEY = 'icarus.resume';
 const fmtKm = (m: number) => (m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(2)} km`);
 
 /** Composition root: owns the loop and wires input -> sim -> presentation/diagnostics. */
@@ -28,6 +31,8 @@ export class Game {
   private mode: Mode = 'opening';
   /** Endless: the furthest phrase checkpoint reached while grounded (retry point). */
   private endlessCp: { x: number; speed: number; title: string } | null = null;
+  /** Where the current attempt started: endless distance (and best) is the clean run since then. */
+  private attemptStartX = 0;
   /** Endless: distance shown in the HUD, and the local best. */
   private best = 0;
   private startScreen = true;
@@ -104,8 +109,9 @@ export class Game {
     this.mode = params.has('lab') ? 'lab' : params.has('endless') ? 'endless' : 'opening';
     this.startScreen = this.mode === 'opening';
     this.loadCourse();
+    this.resumeAfterReload();
     this.startRun();
-    this.versionWatcher = new VersionWatcher(() => this.canReload());
+    this.versionWatcher = new VersionWatcher(() => this.canReload(), undefined, () => this.saveResume());
     this.versionWatcher.start();
     bindInput(this.view.renderer.domElement, this.gestures, {
       onAction: (a) => this.onAction(a),
@@ -189,6 +195,24 @@ export class Game {
     this.ui.hint.style.display = this.mode === 'lab' ? '' : 'none';
   }
 
+  /** Before an update reload: remember where the player is so the reload doesn't cost progress. */
+  private saveResume(): void {
+    const finished = this.sim?.state.mode === 'finished';
+    try {
+      sessionStorage.setItem(RESUME_KEY, JSON.stringify({ mode: this.mode, seed: this.seed, cpIndex: finished ? 0 : this.cpIndex, endlessCp: this.endlessCp, at: Date.now() }));
+    } catch { /* storage blocked: reload anyway */ }
+  }
+
+  /** After an update reload: restore the checkpoint saved by saveResume (same mode and seed only). */
+  private resumeAfterReload(): void {
+    let r: { mode: Mode; seed: number; cpIndex: number; endlessCp: Game['endlessCp']; at: number } | null = null;
+    try { const raw = sessionStorage.getItem(RESUME_KEY); sessionStorage.removeItem(RESUME_KEY); r = raw ? JSON.parse(raw) : null; } catch { r = null; }
+    if (!r || Date.now() - r.at > 30 * 60_000 || r.mode !== this.mode || (r.mode !== 'opening' && r.seed !== this.seed)) return;
+    this.cpIndex = Math.max(0, Math.min(r.cpIndex | 0, Math.max(0, this.course.lessons.length - 1)));
+    this.endlessCp = r.endlessCp ?? null;
+    if (this.cpIndex > 0 || this.endlessCp) { this.startScreen = false; this.ui.start.classList.remove('show'); }
+  }
+
   private setMode(m: Mode): void {
     if (m === this.mode) return;
     this.mode = m;
@@ -208,8 +232,8 @@ export class Game {
     this.startRun();
   }
 
-  /** Endless distance from the start (m). */
-  private distance(): number { return Math.max(0, this.sim.state.x - this.course.startX); }
+  /** Endless: distance of the current clean run (since the attempt started; a retry starts a new one). */
+  private distance(): number { return Math.max(0, this.sim.state.x - this.attemptStartX); }
 
   private saveBest(): void {
     if (this.mode !== 'endless' || this.replayer) return;
@@ -235,6 +259,7 @@ export class Game {
     if (this.recorder && this.recorder.trace.entries.length && !this.replayer) this.lastTrace = this.recorder.finish(this.sim.state.tick);
     const start = replay ? replay.start : this.startPoint();
     this.sim = new Simulation(this.course, TUNING, start);
+    this.attemptStartX = this.sim.state.x;
     this.recorder = new Recorder(this.seed, this.course.kind, start);
     this.runStarted = false;
     this.replayer = replay ? new Replayer(replay) : null;
@@ -320,7 +345,7 @@ export class Game {
     if (this.mode === 'endless' && !finished) {
       this.saveBest();
       const cp = this.endlessCp;
-      this.ui.failSub.textContent = `${fmtKm(this.distance())}${this.distance() >= this.best - 0.5 && this.best > 0 ? ' · new best' : ` · best ${fmtKm(this.best)}`} — tap / ↑ to retry${cp ? ` from “${cp.title}”` : ''}`;
+      this.ui.failSub.textContent = `${fmtKm(this.distance())} clean run${this.distance() >= this.best - 0.5 && this.best > 0 ? ' · new best' : ` · best ${fmtKm(this.best)}`} — tap / ↑ to retry${cp ? ` from “${cp.title}”` : ''}`;
     }
     if (!this.replayer) this.lastTrace = this.recorder.finish(this.sim.state.tick);
     this.versionWatcher?.safePoint();

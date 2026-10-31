@@ -35,6 +35,8 @@ export class Simulation {
   readonly dt: number;
   /** Is a side (Left/Right) stroke currently held? Tracked so a hold can become a wall ride. */
   private sideHeld: { side: 'left' | 'right'; strokeId: number } | null = null;
+  /** An up stroke resolved as a right hold (wall context): its release ends the hold. */
+  private upAsSide = -1;
   private seenRevision = -1;
 
   /** `start` lets a run begin at a checkpoint (x on the ground, rolling at speed). */
@@ -57,6 +59,7 @@ export class Simulation {
       surfaceId: g.surface.id, seg: g.sample.seg, angle: Math.atan(g.sample.slope),
       airTime: 0, groundTime: 0, coyote: 0, jumpBuffer: 0, pushStrokeId: -1, pushApplied: 0, jumpStrokeId: -1,
       air: 'none', flip: 0, flipsThisJump: 0, sideStrokeId: -1, prepStrokeId: -1, prepTimer: 0, prepHeld: false,
+      prepAge: 0, prepStrength: 0, skimPendingPush: false, wallExit: 'none', railBlockedByFlip: false,
       railId: -1, wallId: -1, contactTime: 0, wallEntrySpeed: 0, lastContact: 'ground', lastContactId: g.surface.id,
       prepTriedThisAir: false, sideTriedThisAir: false,
       broken: [], trickCredit: 'none', creditGround: 0, grabbedThisAir: false,
@@ -68,6 +71,7 @@ export class Simulation {
   cloneFrom(other: Simulation): void {
     this.state = { ...other.state, broken: [...other.state.broken] };
     this.sideHeld = other.sideHeld ? { ...other.sideHeld } : null;
+    this.upAsSide = other.upAsSide;
   }
 
   enqueue(a: Action): void { this.queue.push(a); }
@@ -199,7 +203,7 @@ export class Simulation {
       return;
     }
     switch (a.type) {
-      case 'up': return this.onUp(name, a.strokeId);
+      case 'up': return this.onUp(name, a.strokeId, a.lean);
       case 'down': return this.onDown(name, a.strokeId, a.strength, a.fresh);
       case 'side': return a.held ? this.onSideHold(name, a.side, a.strokeId) : this.onSideRelease(a.side, a.strokeId);
       case 'release': return this.onRelease(a.dir, a.strokeId);
@@ -207,7 +211,7 @@ export class Simulation {
     }
   }
 
-  private onUp(name: string, strokeId: number): void {
+  private onUp(name: string, strokeId: number, lean?: number): void {
     const s = this.state, K = this.K;
     switch (s.mode) {
       case 'grounded': case 'heelSkim':
@@ -222,20 +226,60 @@ export class Simulation {
       case 'airborne': {
         if ((s.leftBy === 'edge' || s.leftBy === 'crest') && s.coyote > 0) { this.jump('coyote', strokeId); return this.resolve(name, 'coyote jump'); }
         if (strokeId === s.jumpStrokeId) return this.reject(name, 'same stroke as the jump (no double action)');
-        const h = this.heightAboveGround();
-        const ttl = this.timeToFall(h);
-        if (s.vy <= 0 && ttl <= this.M.jumpBufferTime) {
+        // wall context (touch): an up-right stroke beside / just before a right-hand wall is a wall
+        // ride, never a flip (brief §5, §12 "mobile wall gestures do not trigger flips")
+        if (lean !== undefined && lean >= K.wallUpLean && this.wallAhead()) {
+          this.upAsSide = strokeId;
+          this.sideHeld = { side: 'right', strokeId };
+          this.emit({ type: 'reject', action: name, reason: 'up-right stroke beside a wall → right hold (wall ride), not a flip' });
+          return this.onSideHold(name, 'right', strokeId);
+        }
+        const pc = this.predictContact();
+        const ms = (t: number) => (t * 1000).toFixed(0);
+        if (s.vy <= 0 && pc.kind === 'ground' && pc.t <= this.M.jumpBufferTime) {
           s.jumpBuffer = this.M.jumpBufferTime;
-          return this.resolve(name, `jump buffered (${(ttl * 1000).toFixed(0)} ms before contact)`);
+          return this.resolve(name, `jump buffered (${ms(pc.t)} ms before contact)`);
+        }
+        // a flip that cannot finish before touchdown is never started: the press is a buffered jump
+        const needs = K.flipDuration * K.flipLandTolerance;
+        if (pc.kind === 'ground' && pc.t < needs + (s.air === 'flip' ? 0 : 0)) {
+          s.jumpBuffer = pc.t + 0.05;
+          return this.resolve(name, `jump buffered: a flip would not finish (${ms(pc.t)} ms to touchdown, needs ${ms(needs)})`);
         }
         if (s.air === 'flip') return this.reject(name, 'already flipping');
         if (s.air === 'grabLeft' || s.air === 'grabRight') return this.reject(name, 'release the grab before flipping');
         if (s.flipsThisJump >= K.maxFlipsPerJump) return this.reject(name, 'one flip per jump');
         s.air = 'flip'; s.flip = 0; s.flipsThisJump++;
         this.emit({ type: 'flip-start', x: s.x, y: s.y });
-        return this.resolve(name, `backflip (${(ttl === Infinity ? '∞' : (ttl * 1000).toFixed(0))} ms to contact, needs ${(K.flipDuration * 1000).toFixed(0)})`);
+        return this.resolve(name, `backflip (${pc.kind === 'ground' ? ms(pc.t) : '∞'} ms to contact, needs ${ms(K.flipDuration)})`);
       }
     }
+  }
+
+  /** A right-hand wall beside the rider (catchable now) or starting within wallUpLookahead m ahead. */
+  private wallAhead(): boolean {
+    const s = this.state, K = this.K;
+    if (this.wallCatchable().wall) return true;
+    return this.course.walls.some((w) => w.side === 'right' && s.x >= w.x0 - K.wallUpLookahead && s.x <= w.x1 - K.wallCatchEndMargin && s.y < w.yTop + 2);
+  }
+
+  /**
+   * Look-ahead (pure: a non-streaming clone): how long until this flight meets something if the
+   * rider does nothing more, and what. 'ground' = a landing, 'fail' = falls in a gap / hits a face.
+   */
+  predictContact(maxSeconds = 1.6): { kind: 'ground' | 'fail' | 'none'; t: number } {
+    const c = new Simulation(this.course, this.T, undefined, { stream: false });
+    c.cloneFrom(this);
+    const cs = c.state;
+    cs.air = 'none'; cs.flip = 0; cs.prepStrokeId = -1; cs.prepHeld = false; cs.prepTimer = 0; cs.jumpBuffer = 0;
+    c.sideHeld = null; c.upAsSide = -1;
+    const n = Math.round(maxSeconds / this.dt);
+    for (let i = 1; i <= n; i++) {
+      c.step();
+      if (cs.mode === 'airborne') continue;
+      return { kind: cs.mode === 'failed' ? 'fail' : 'ground', t: i * this.dt };
+    }
+    return { kind: 'none', t: Infinity };
   }
 
   private onDown(name: string, strokeId: number, strength: number, fresh: boolean): void {
@@ -247,14 +291,15 @@ export class Simulation {
         if (fresh) this.resolve(name, 'push');
         return;
       case 'heelSkim':
-        if (!fresh) return; // the held skim stroke lengthening: nothing
+        if (!fresh) { if (strokeId === s.prepStrokeId) s.prepStrength = Math.max(s.prepStrength, strength); return; } // the held skim stroke lengthening
         this.endSkim('push');
         this.push(strokeId, strength, true);
         return this.resolve(name, 'push (ends heel skim)');
       case 'airborne':
-        if (!fresh) return;
+        if (!fresh) { if (strokeId === s.prepStrokeId) s.prepStrength = Math.max(s.prepStrength, strength); return; }
         if (s.air === 'grabLeft' || s.air === 'grabRight') return this.reject(name, 'release the grab before preparing to land');
         s.prepStrokeId = strokeId; s.prepHeld = true; s.prepTimer = this.K.prepArmWindow; s.prepTriedThisAir = true;
+        s.prepAge = 0; s.prepStrength = strength;
         this.emit({ type: 'prep', armed: true });
         this.resolve(name, 'landing prep armed (rail catch / heel skim)');
         this.tryRailCatch(); // already in a catch band? catch now
@@ -298,9 +343,18 @@ export class Simulation {
 
   private onRelease(dir: 'down' | 'up', strokeId: number): void {
     const s = this.state;
+    if (dir === 'up' && strokeId === this.upAsSide) { // an up stroke that became a right hold
+      this.upAsSide = -1;
+      if (this.sideHeld?.strokeId === strokeId) this.sideHeld = null;
+      return this.onSideRelease('right', strokeId);
+    }
     if (dir !== 'down' || strokeId !== s.prepStrokeId) return;
     s.prepHeld = false;
-    if (s.mode === 'heelSkim') this.endSkim('release');
+    if (s.mode === 'heelSkim') {
+      const late = s.skimPendingPush && s.contactTime <= this.K.latePushConfirm;
+      this.endSkim('release');
+      if (late) { this.push(strokeId, s.prepStrength, true); this.resolve(`release down#${strokeId}`, 'push (stroke began just before landing)'); }
+    }
   }
 
   pushImpulse(strength: number): number {
@@ -317,7 +371,7 @@ export class Simulation {
     s.pushApplied = target;
     const v = s.speed;
     const r = v / M.softCap;
-    const falloff = Math.max(0, 1 - r * r);
+    const falloff = Math.max(0, 1 - Math.pow(Math.max(r, 0), M.pushFalloffExponent));
     const taperRad = (M.pushUphillTaperDeg * Math.PI) / 180;
     const taper = s.angle > 0 ? Math.max(0.5, 1 - 0.5 * (s.angle / taperRad)) : 1;
     const gain = delta * falloff * taper;
@@ -329,7 +383,7 @@ export class Simulation {
   private resetAir(): void {
     const s = this.state;
     s.air = 'none'; s.flip = 0; s.flipsThisJump = 0; s.airTime = 0;
-    s.prepTriedThisAir = s.prepHeld; s.sideTriedThisAir = false; s.grabbedThisAir = false;
+    s.prepTriedThisAir = s.prepHeld; s.sideTriedThisAir = false; s.grabbedThisAir = false; s.railBlockedByFlip = false;
     s.trickCredit = 'none'; s.creditGround = 0; // a pillar needs a trick from the jump before it
   }
 
@@ -347,7 +401,7 @@ export class Simulation {
       this.emit({ type: 'wall-end', wallId: s.wallId, x: s.x, y: s.y, reason: 'jump' });
       s.vx = s.speed;
       s.vy = Math.max(s.vy, 0) + M.jumpVelocity * 0.8;
-      s.lastContact = 'wall'; s.lastContactId = s.wallId; s.wallId = -1;
+      s.lastContact = 'wall'; s.lastContactId = s.wallId; s.wallId = -1; s.wallExit = 'jump';
     } else {
       s.vx = s.speed * Math.cos(s.angle);
       s.vy = s.speed * Math.sin(s.angle) + M.jumpVelocity;
@@ -443,29 +497,13 @@ export class Simulation {
 
   // ================================================================== airborne
 
-  private timeToFall(h: number): number {
-    if (!isFinite(h)) return Infinity;
-    const g = this.M.airGravity, vd = -this.state.vy;
-    return (-vd + Math.sqrt(Math.max(0, vd * vd + 2 * g * Math.max(0, h)))) / g;
-  }
-
-  private heightAboveGround(): number {
-    const s = this.state;
-    let best = Infinity;
-    for (const lead of [0, 0.1]) {
-      const x = s.x + s.vx * lead;
-      const g = this.course.groundBelow(x, s.y + 0.05);
-      if (g) best = Math.min(best, s.y - g.sample.y);
-    }
-    return best;
-  }
-
   private stepAirborne(): void {
     const s = this.state, M = this.M, K = this.K, dt = this.dt;
     s.airTime += dt;
     s.coyote = Math.max(0, s.coyote - dt);
     s.jumpBuffer = Math.max(0, s.jumpBuffer - dt);
     if (!s.prepHeld) s.prepTimer = Math.max(0, s.prepTimer - dt);
+    if (s.prepStrokeId !== -1) s.prepAge += dt;
     if (s.air === 'flip') {
       s.flip = Math.min(1, s.flip + dt / K.flipDuration);
       if (s.flip >= 1) { s.air = 'none'; s.flip = 0; this.emit({ type: 'flip-complete', x: s.x, y: s.y }); this.earnCredit('flip'); }
@@ -584,13 +622,18 @@ export class Simulation {
     this.syncContactVelocity();
     this.emit({ type: 'land', x, y: sm.y, impact, speedBefore: before, speedAfter: s.speed, material: surf.material, flipped });
     if (s.jumpBuffer > 0) { this.jump('buffered', -1); return; }
-    // landing prep still held on ordinary ground => heel skim
+    // a Down stroke begun just before touchdown is (probably) a push, not a landing prep
+    const late = s.prepStrokeId !== -1 && s.prepAge <= K.latePushWindow;
+    // landing prep still held on ordinary ground => heel skim (a late stroke released quickly still pushes)
     if (s.prepHeld && s.prepStrokeId !== -1) {
       s.mode = 'heelSkim';
       s.contactTime = 0;
+      s.skimPendingPush = late;
       this.emit({ type: 'skim-start', x, y: sm.y });
     } else {
+      const id = s.prepStrokeId;
       s.prepStrokeId = -1; s.prepTimer = 0;
+      if (late) { this.push(id, s.prepStrength, true); this.resolve(`down#${id}`, 'push (stroke began just before landing)'); }
     }
   }
 
@@ -600,7 +643,6 @@ export class Simulation {
   private tryRailCatch(): void {
     const s = this.state, K = this.K;
     if (s.mode !== 'airborne') return;
-    if (s.air === 'flip') return; // can't lock on mid-rotation
     for (const r of this.course.rails) {
       const x0 = Course.railX0(r), x1 = Course.railX1(r);
       if (s.x < x0 - K.railCatchBefore || s.x > x1 - 0.5) continue;
@@ -609,6 +651,7 @@ export class Simulation {
       const d = s.y - ry;
       if (d > K.railCatchAbove || d < -K.railCatchBelow) continue;
       if (d < 0 && s.vy > K.railCatchMaxRise) continue;
+      if (s.air === 'flip') { s.railBlockedByFlip = true; return; } // can't lock on mid-rotation
       this.startGrind(r, cx);
       return;
     }
@@ -635,7 +678,7 @@ export class Simulation {
     const th = Math.atan(sm.slope);
     const speedIn = Math.hypot(s.vx, s.vy);
     s.speed = Math.min(Math.max(s.vx * Math.cos(th) + s.vy * Math.sin(th), this.M.landingRetention * s.vx, 0), this.M.hardCap);
-    s.mode = 'grinding'; s.railId = r.id; s.x = x; s.y = sm.y; s.angle = th; s.contactTime = 0;
+    s.mode = 'grinding'; s.railId = r.id; s.x = x; s.y = sm.y; s.angle = th; s.contactTime = 0; s.jumpBuffer = 0;
     s.air = 'none'; s.flip = 0;
     s.prepStrokeId = -1; s.prepHeld = false; s.prepTimer = 0;
     this.syncContactVelocity();
@@ -692,7 +735,7 @@ export class Simulation {
 
   private startWall(w: Wall, strokeId: number): void {
     const s = this.state, K = this.K;
-    s.mode = 'wallRiding'; s.wallId = w.id; s.sideStrokeId = strokeId; s.contactTime = 0;
+    s.mode = 'wallRiding'; s.wallId = w.id; s.sideStrokeId = strokeId; s.contactTime = 0; s.jumpBuffer = 0; s.wallExit = 'none';
     s.speed = Math.min(s.vx, this.M.hardCap);
     s.vy = Math.min(K.wallEntryVyMax, s.vy * K.wallEntryVyScale);
     s.wallEntrySpeed = s.speed;
@@ -736,6 +779,7 @@ export class Simulation {
   private leaveWall(reason: 'end' | 'release' | 'slid-off' | 'too-slow'): void {
     const s = this.state, K = this.K;
     this.emit({ type: 'wall-end', wallId: s.wallId, x: s.x, y: s.y, reason });
+    s.wallExit = reason;
     s.vx = s.speed;
     if (reason === 'end') s.vy = Math.max(s.vy, 0) + K.wallExitPop;
     else if (reason === 'release') s.vy = Math.max(s.vy, 0) + K.wallKickOff;
@@ -760,11 +804,21 @@ export class Simulation {
     const s = this.state;
     if (req === 'rail') {
       if (s.lastContact === 'rail') return { kind: 'missed-rail', message: 'Came off the rail early — stay on until its end' };
+      if (s.railBlockedByFlip) return { kind: 'missed-rail', message: 'Reached the rail mid-flip — a flipping board can’t lock on. Jump, then swipe down only' };
       if (!s.prepTriedThisAir) return { kind: 'missed-rail', message: 'Missed the required rail — jump, then swipe down as you reach it' };
       return { kind: 'missed-rail', message: `Swiped down but never reached the rail's catch area (${s.takeoffSpeed.toFixed(1)} m/s takeoff) — jump closer to it` };
     }
     if (req === 'wall') {
-      if (s.lastContact === 'wall') return { kind: 'fell-off-wall', message: `Dropped off the wall short of the landing (entered at ${s.wallEntrySpeed.toFixed(1)} m/s) — hit it faster or higher` };
+      if (s.lastContact === 'wall') {
+        const v = s.wallEntrySpeed.toFixed(1);
+        switch (s.wallExit) {
+          case 'release': return { kind: 'fell-off-wall', message: 'Let go of the wall early (finger lifted or slid back) — keep holding right until the wall ends' };
+          case 'jump': return { kind: 'fell-off-wall', message: 'Jumped off the wall before the landing — hold right to the end of the wall' };
+          case 'too-slow': return { kind: 'fell-off-wall', message: `Ran out of speed on the wall (entered at ${v} m/s) — hit it faster` };
+          case 'slid-off': return { kind: 'fell-off-wall', message: `Slid down off the wall (entered at ${v} m/s) — jump into it higher or faster` };
+          default: return { kind: 'fell-off-wall', message: `Dropped off the wall short of the landing (entered at ${v} m/s) — hit it faster or higher` };
+        }
+      }
       if (!s.sideTriedThisAir) return { kind: 'missed-wall', message: 'Missed the required wall ride — jump, then hold right beside the wall' };
       return { kind: 'missed-wall', message: 'Held right but never met the wall (too early, too low or too slow)' };
     }

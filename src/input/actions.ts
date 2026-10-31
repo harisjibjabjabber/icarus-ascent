@@ -10,8 +10,10 @@ export type Action =
   /** Downward stroke. `fresh` = a new stroke began; later events for the same
    *  strokeId report a longer stroke (higher strength, 0..1). */
   | { type: 'down'; strokeId: number; strength: number; fresh: boolean; source: InputSource }
-  /** Upward stroke (fires once per stroke). */
-  | { type: 'up'; strokeId: number; source: InputSource }
+  /** Upward stroke (fires once per stroke). `lean` = sideways component of a touch stroke
+   *  (unit-vector x, + = right); the sim uses it beside a wall (an up-right stroke there means
+   *  wall ride, never a flip). Absent for keys. */
+  | { type: 'up'; strokeId: number; source: InputSource; lean?: number }
   /** Sideways stroke-and-hold; held=false is the release. */
   | { type: 'side'; side: 'left' | 'right'; held: boolean; strokeId: number; source: InputSource }
   /** A down stroke (or Down key) was released. Needed for held actions (heel skim, M2). */
