@@ -16,10 +16,13 @@ import { TUNING } from '../tuning';
 export interface Snapshot {
   x: number; y: number; angle: number; speed: number; vy: number; mode: RiderState['mode'];
   air: RiderState['air']; flip: number; railId: number; wallId: number;
+  /** Landing prep armed (presentation: the heroine's catch pose). */
+  prep?: boolean;
 }
 export const snap = (s: RiderState): Snapshot => ({
   x: s.x, y: s.y, angle: s.angle, vy: s.vy, mode: s.mode, air: s.air, flip: s.air === 'flip' ? s.flip : 0,
   railId: s.railId, wallId: s.wallId,
+  prep: s.mode === 'airborne' && s.prepStrokeId !== -1 && (s.prepHeld || s.prepTimer > 0),
   speed: s.mode === 'airborne' ? Math.hypot(s.vx, s.vy) : s.speed,
 });
 
@@ -33,7 +36,7 @@ export class GameView {
   readonly rig = new CameraRig();
   readonly env: Environment;
   private courseView: CourseView | null = null;
-  private rider = new RiderView();
+  readonly rider = new RiderView();
   private effects = new Effects();
   private debris = new Debris();
   private speedLines = new SpeedLines();
@@ -68,6 +71,7 @@ export class GameView {
     this.scene.add(this.rider.root, this.effects.group, this.speedLines.group, this.petals.mesh);
     this.quality.onChange = (q) => this.applyQuality(q);
     this.applyQuality(this.quality.level);
+    void this.rider.setLook(this.rider.look);
 
     this.trailLine = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineDashedMaterial({ color: '#c8553d', dashSize: 0.5, gapSize: 0.35, fog: false }));
     this.trailLine.visible = false;
@@ -87,6 +91,7 @@ export class GameView {
     this.renderer.shadowMap.enabled = q.shadowMap > 0;
     this.env.applyQuality(q);
     this.petals.count = q.petals;
+    this.rider.setQuality(q.name);
     this.resize();
   }
 
@@ -130,6 +135,7 @@ export class GameView {
   }
 
   resetRun(s: Snapshot): void {
+    this.rider.reset();
     this.trail = [];
     this.courseView?.resetObstacles();
     this.debris.clear();
@@ -141,6 +147,7 @@ export class GameView {
   }
 
   onEvent(e: SimEvent, speed: number): void {
+    this.rider.event(e);
     switch (e.type) {
       case 'push':
         if (e.fresh) { this.rider.kick(TUNING.feedback.pushSquash); this.effects.pushTuft(e.x, e.y, Math.max(e.impulse, 1.5), speed); }

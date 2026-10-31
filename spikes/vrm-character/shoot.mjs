@@ -1,0 +1,20 @@
+// Headless Chrome 390x844 proof shots + frame-time probe. Usage: node shoot.mjs [cam]
+import { chromium } from 'playwright-core';
+const cam = process.argv[2] ?? 'chase';
+const browser = await chromium.launch({ executablePath: process.env.CHROME ?? '/usr/bin/google-chrome', args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
+const page = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+const logs = []; page.on('console', (m) => logs.push(`${m.type()}: ${m.text()}`)); page.on('pageerror', (e) => logs.push('pageerror ' + e.message));
+await page.goto(`http://localhost:5190/?cam=${cam}&auto=0&model=${process.env.MODEL ?? 'heroine'}${process.env.EXTRA ?? ''}&pr=${process.env.PR ?? 2}`, { waitUntil: 'networkidle' });
+await page.waitForFunction(() => window.spike?.loaded, null, { timeout: 60000 });
+const shot = async (name, clip, wait) => { await page.evaluate((c) => window.play(c), clip); await page.waitForTimeout(wait); const s = await page.evaluate(() => ({ clip: window.spike.clip, ik: window.spike.ik, hair: window.spike.hairTip })); await page.screenshot({ path: `shots/${process.env.MODEL ?? 'heroine'}-${cam}-${name}.png` }); console.log(name, JSON.stringify(s)); };
+await page.waitForTimeout(2500);
+await shot('1-idle', 'idle', 10);
+await shot('2-push-mid', 'push', 420);
+await shot('3-push-later', 'push', 700);
+await shot('4-crouch', 'crouch', 900);
+await shot('5-crossfade-to-idle', 'idle', 120);
+await shot('6-idle-settled', 'idle', 1500);
+const probe = await page.evaluate(() => { const f = [...window.spike.frameMs].sort((a, b) => a - b), c = [...window.spike.cpuCharMs].sort((a, b) => a - b); const pct = (a, p) => a[Math.floor(a.length * p)]; return { frames: f.length, frameMedianMs: pct(f, 0.5), frameP95Ms: pct(f, 0.95), charCpuMedianMs: pct(c, 0.5), charCpuP95Ms: pct(c, 0.95) }; });
+console.log('probe', JSON.stringify(probe));
+console.log(logs.filter((l) => !l.includes('GPU stall')).slice(0, 10).join('\n'));
+await browser.close();

@@ -1,0 +1,4 @@
+# raw frame dumps are regenerable with scripts/heroine-review.mjs; only encoded clips and sheets are committed
+/*/
+!/clips/
+!/sheets/

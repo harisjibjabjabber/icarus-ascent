@@ -5,6 +5,9 @@ import { toon } from './materials';
 import { GeoBuilder, jitter } from './geo';
 import { mulberry32 } from '../rng';
 import type { Snapshot } from './view';
+import type { SimEvent } from '../sim/types';
+import type { Heroine, HeroineTier } from './heroine/heroine';
+import { initialLook, lookUrl, saveLook, type Look } from './heroine/looks';
 
 /** Rider palette: a terracotta-red chiton keeps Icarus readable against white marble and cloud. */
 export const RIDER_STYLE = {
@@ -13,12 +16,12 @@ export const RIDER_STYLE = {
 };
 
 /**
- * Procedural low-poly Icarus: chiton and tunic, curly hair and laurel, wax-and-feather
- * wings that fold along the back on the ground and spread (and beat) in the air.
+ * The rider: board + Ao (VRM heroine, src/render/heroine) riding it. Until her model has
+ * loaded (or if it fails to load) a procedural low-poly stand-in rides instead.
  * Hierarchy: root (route yaw, position) -> roll (wall lean about the travel axis)
  *   -> pivot (pitch: slope + heel lift + flip) -> stance (yaw: grind boardslide) -> parts.
- * Local axes after root yaw: +X forward, +Y up, +Z rider's right. The rider faces the
- * camera side (-Z), so the wings on his back open against the sky.
+ * Local axes after root yaw: +X forward, +Y up, +Z rider's right. Ao faces +Z (side-on,
+ * left foot to the nose), so the chase camera reads her back, hair and profile.
  */
 export class RiderView {
   readonly root = new THREE.Group();
@@ -29,8 +32,6 @@ export class RiderView {
   private body: THREE.Group;
   private head: THREE.Mesh;
   private arms: THREE.Group[] = [];
-  private wings: THREE.Group[] = [];
-  private spread = 0;
   private t = 0;
   private squash = 0;
   private squashVel = 0;
@@ -44,7 +45,6 @@ export class RiderView {
   constructor() {
     const R = RIDER_STYLE;
     const vmat = toon('#ffffff', { vertexColors: true, rim: 1.3 });
-    const wmat = toon('#ffffff', { vertexColors: true, rim: 1.6, side: THREE.DoubleSide });
     this.root.rotation.y = ROUTE_YAW;
     this.root.add(this.roll);
     this.roll.add(this.pivot);
@@ -86,23 +86,6 @@ export class RiderView {
       this.body.add(arm);
       this.arms.push(arm);
     }
-    // wings on the back: a wax spar along +Z with a fan of feathers hanging from it; mirrored for the left
-    for (const sz of [-1, 1]) {
-      const wing = new THREE.Group();
-      wing.position.set(-0.17, 0.98, sz * 0.08);
-      const wg = new GeoBuilder();
-      wg.add(new THREE.CylinderGeometry(0.03, 0.02, 0.9, 5), [0, 0, 0.45], R.featherTip, { rot: [Math.PI / 2, 0, 0] });
-      for (let i = 0; i < 7; i++) {
-        const len = 0.95 - i * 0.09, z = 0.12 + i * 0.13;
-        wg.add(new THREE.BoxGeometry(0.02, len, 0.14), [0, -len / 2 + 0.02, z], R.featherTip, { top: R.feather, rot: [-(0.35 - i * 0.09), 0, 0] });
-      }
-      wg.add(new THREE.BoxGeometry(0.025, 0.24, 0.8), [0.005, -0.09, 0.45], R.featherShade, { top: R.feather });
-      const wm = new THREE.Mesh(wg.build()!, wmat);
-      wm.scale.z = sz;
-      wing.add(wm);
-      this.body.add(wing);
-      this.wings.push(wing);
-    }
     // head: face, curly hair (back), laurel band, nose forward
     const hg = new GeoBuilder()
       .add(new THREE.SphereGeometry(0.2, 12, 9), [0, 0, 0], R.skinShade, { top: R.skin })
@@ -140,6 +123,13 @@ export class RiderView {
     const g = s.air === 'grabLeft' ? -1 : s.air === 'grabRight' ? 1 : 0;
     this.grab += (g - this.grab) * ease(20);
     this.board.rotation.x = this.grab * 0.35;
+    if (this.figure) {
+      this.root.updateMatrixWorld(true);
+      const latVel = dt > 0 ? (this.lateral - this.latPrev) / dt : 0;
+      this.latPrev = this.lateral;
+      this.figure.update(dt, { mode: s.mode, air: s.air, flip, speed: s.speed, vy: s.vy, angle, prep: !!s.prep, lateralVel: latVel });
+      return;
+    }
 
     // squash spring
     const F = TUNING.feedback;
@@ -165,18 +155,49 @@ export class RiderView {
       this.arms[i].rotation.x = -sz * (base * (1 - reach) + 0.15 * reach) + Math.sin(this.t * 3 + i) * 0.05;
       this.arms[i].rotation.z = reach * 0.9; // reach down toward the board
     }
-    // wings fold along the back on the ground, spread and beat slowly in the air
-    const open = airborne ? (flip > 0 ? 1 : 0.85) : s.mode === 'grinding' || s.mode === 'wallRiding' ? 0.45 : 0.05;
-    this.spread += (open - this.spread) * ease(airborne ? 7 : 5);
-    const beat = airborne && flip === 0 ? Math.sin(this.t * 7) * 0.22 : Math.sin(this.t * 2.2) * 0.03;
-    for (let i = 0; i < 2; i++) {
-      const sz = i === 0 ? -1 : 1;
-      const fold = 1.35 - this.spread * 1.75 - beat * this.spread; // + = folded down
-      this.wings[i].rotation.set(sz * fold, sz * (0.5 - this.spread * 0.35), -0.15);
-    }
   }
 
-  kick(amount: number): void { this.squash = Math.max(this.squash, amount); this.squashVel = 0; }
+  kick(amount: number): void { this.squash = Math.max(this.squash, amount); this.squashVel = 0; this.figure?.kick(amount); }
+
+  // ---------------- heroine ----------------
+  private figure: Heroine | null = null;
+  private loading: Look | null = null;
+  private tier: HeroineTier = 'high';
+  private latPrev = 0;
+  look: Look = initialLook();
+  /** Fired when a look has loaded and is riding (or failed: null). */
+  onLook: ((l: Look | null) => void) | null = null;
+
+  /** Load (lazily) and switch to a look; the stand-in or the previous look rides until it is ready. */
+  async setLook(l: Look): Promise<void> {
+    this.look = l; saveLook(l);
+    if (this.loading === l) return;
+    this.loading = l;
+    try {
+      const { Heroine, loadVrm } = await import('./heroine/heroine');
+      const vrm = await loadVrm(lookUrl(l));
+      if (this.look !== l) { (await import('@pixiv/three-vrm')).VRMUtils.deepDispose(vrm.scene); return; }
+      const h = new Heroine(vrm);
+      h.setTier(this.tier);
+      this.figure?.dispose();
+      h.attach(this.stance, this.board, this.root);
+      this.figure = h;
+      this.body.visible = false; this.head.visible = false;
+      this.onLook?.(l);
+    } catch (err) {
+      console.warn('heroine failed to load; keeping the stand-in', err);
+      this.onLook?.(null);
+    } finally { if (this.loading === l) this.loading = null; }
+  }
+
+  /** Sim events drive her performance (tricks, landings, crashes). */
+  event(e: SimEvent): void { this.figure?.event(e); }
+  /** Run restarted (checkpoint): she hops back on. */
+  reset(): void { this.figure?.reset(); }
+  setQuality(tier: HeroineTier): void { this.tier = tier; this.figure?.setTier(tier); }
+  /** Diagnostics: character CPU time and state. */
+  get figureStats(): { cpuMs: number; state: string; ik: number[] } | null { return this.figure?.stats ?? null; }
+  get figureObject(): THREE.Object3D | null { return this.figure?.object ?? null; }
 
   get currentLateral(): number { return this.lateral; }
 }
