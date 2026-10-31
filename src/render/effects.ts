@@ -173,3 +173,65 @@ export class SpeedLines {
     }
   }
 }
+
+/**
+ * Drifting petals and stray feathers (one instanced draw call). They live in route
+ * space beside the corridor (|lateral| >= 3.5 m) and drift gently, so they add life
+ * without ever crossing the route ahead of the rider.
+ */
+export class Petals {
+  readonly mesh: THREE.InstancedMesh;
+  private items: { x: number; y: number; lat: number; ph: number; spin: number; s: number }[] = [];
+  private m = new THREE.Matrix4();
+  private q = new THREE.Quaternion();
+  private e = new THREE.Euler();
+  private v = new THREE.Vector3();
+  private sc = new THREE.Vector3();
+  private t = 0;
+  private placed = false;
+
+  constructor(max = 48) {
+    const g = new THREE.PlaneGeometry(1, 0.55);
+    const mat = new THREE.MeshBasicMaterial({ color: '#ffffff', side: THREE.DoubleSide, transparent: true, opacity: 0.9 });
+    this.mesh = new THREE.InstancedMesh(g, mat, max);
+    this.mesh.frustumCulled = false;
+    const palette = ['#ffd3dc', '#ffe8ee', '#fff6e8', '#f7c6d4', '#fffaf2'];
+    const c = new THREE.Color();
+    for (let i = 0; i < max; i++) {
+      this.mesh.setColorAt(i, c.set(palette[i % palette.length]));
+      this.items.push({ x: 0, y: 0, lat: 0, ph: Math.random() * 6.28, spin: 0.8 + Math.random() * 2, s: i % 7 === 0 ? 0.34 : 0.16 + Math.random() * 0.08 });
+    }
+  }
+
+  set count(n: number) { this.mesh.count = Math.min(n, this.items.length); this.mesh.visible = n > 0; }
+
+  private place(p: Petals['items'][number], x: number, y: number, fresh: boolean): void {
+    const side = Math.random() < 0.7 ? 1 : -1; // mostly behind the route (away from the camera)
+    p.lat = side * (3.5 + Math.random() * (side > 0 ? 22 : 6));
+    p.x = x + (fresh ? -15 + Math.random() * 75 : 45 + Math.random() * 20);
+    p.y = y + 1 + Math.random() * 9;
+  }
+
+  update(dt: number, x: number, y: number): void {
+    if (!this.mesh.visible) return;
+    this.t += dt;
+    const n = this.mesh.count;
+    for (let i = 0; i < n; i++) {
+      const p = this.items[i];
+      if (!this.placed || p.x < x - 20 || p.x > x + 90 || Math.abs(p.y - y) > 25) this.place(p, x, y, !this.placed);
+      p.x -= dt * (1.2 + Math.sin(this.t * 0.7 + p.ph)); // breeze down the route
+      p.y -= dt * 0.35;
+      p.lat += Math.sin(this.t * 0.9 + p.ph) * dt * 0.3;
+      if (Math.abs(p.lat) < 3.5) p.lat = Math.sign(p.lat || 1) * 3.5;
+      toScene(p.x, p.y + Math.sin(this.t * 1.3 + p.ph) * 0.4, p.lat, this.v);
+      this.q.setFromEuler(this.e.set(this.t * p.spin + p.ph, this.t * p.spin * 0.6, p.ph));
+      this.m.compose(this.v, this.q, this.sc.setScalar(p.s));
+      this.mesh.setMatrixAt(i, this.m);
+    }
+    this.placed = true;
+    this.mesh.instanceMatrix.needsUpdate = true;
+  }
+
+  /** Re-place everything (new course / origin rebase handled by route-space storage). */
+  reset(): void { this.placed = false; }
+}

@@ -83,3 +83,47 @@ Open it with `?endless` (add `&seed=N` to choose the seed), the **Endless** butt
   - Scenery streams in 200 m segments.
 - **Floating origin:** the sim uses absolute float64 coordinates, which are exact at any run length. The renderer lays the scene out relative to an origin that is rebased every 1 km (and every 300 m of height), shifting only the objects that persist.
 - **Checkpoints:** every phrase is a checkpoint. A retry starts from the last phrase you rode on the ground, at its declared speed. Traces record the seed and start point and replay bit-for-bit on a freshly streamed course.
+
+## Art direction and render quality
+
+Look: a soft, warm, stylised late afternoon above the clouds in a mythic Greek world
+(inspired by the mood of Vicente Lucendo's "Summer Afternoon"; no code or assets copied).
+Everything is procedural: there are no external models, textures or fonts in the scene.
+
+- **Shading** (`src/render/materials.ts`): toon material with a soft, linearly filtered
+  colour ramp (lavender shadows to warm light) and a warm rim light added at
+  `<opaque_fragment>`. Foliage sways in the wind through a per-vertex `sway` weight and
+  shared time uniform.
+- **Sky and clouds** (`src/render/environment.ts`): a gradient sky shader with a low sun
+  disc, sun glow and faint cirrus. The cloud sea is an fbm shader disc that drifts slowly
+  and fades into the haze, and one instanced mesh of cloud puffs gives it volume.
+- **Scenery**: floating islands with rocky undersides, colonnades, small temples with
+  terracotta roofs, cypress and olive trees, cumulus towers and far lavender crags. Each
+  200 m segment is merged into one vertex-coloured mesh, so it costs one draw call.
+- **Course** (`src/render/courseView.ts`): marble and travertine flagstone paths with a
+  darker curb at each lip, and cloud platforms trimmed with puffs that stay below the
+  riding line. Rails are bronze; required rails are a brighter gold. Walls are marble
+  slabs with a frieze and cornice; required walls are tinted mint. Pots are terracotta
+  amphorae with a black band, and pillars are fluted, painted columns. Gameplay markers
+  are kept: lip lines, orange takeoff posts and teal receiving posts.
+- **Rider** (`src/render/riderView.ts`): a low-poly Icarus in a red chiton with laurel and
+  feathered wings. The wings fold on the ground, half-open on rails and walls, and spread
+  and beat in the air. He uses the same pose hierarchy as before (flip, wall roll,
+  boardslide, grab, heel).
+- **Effects**: drifting petals (one instanced mesh) stay outside the route corridor, and a
+  CSS warm vignette grades only the frame edges. There is no bloom pass: on a phone it
+  would cost a full-screen render target for very little.
+
+**Quality levels** (`src/render/quality.ts`). Pick one with `?q=low|medium|high`, which
+pins it; the dev overlay shows the current level.
+
+| level  | pixel ratio | shadow map | cloud octaves | cloud puffs | petals |
+|--------|-------------|------------|---------------|-------------|--------|
+| low    | 1           | off        | 2             | 16          | 0      |
+| medium | 1.5         | 1024       | 3             | 32          | 24     |
+| high   | 2           | 2048       | 4             | 48          | 48     |
+
+Phones start at medium and desktops at high. Unless the level is pinned, it steps down
+when the average frame rate stays under 48 fps for two consecutive 2 s windows, ignoring
+the first 3 s after a change and any paused time. `node scripts/perf-probe.mjs [url]`
+prints draw calls, triangles and frame time.

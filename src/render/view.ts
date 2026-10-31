@@ -3,7 +3,9 @@ import type { Course, Vec2 } from '../course/course';
 import type { RiderState, SimEvent } from '../sim/types';
 import { CameraRig } from './cameraRig';
 import { CourseView } from './courseView';
-import { Effects, SpeedLines } from './effects';
+import { Effects, SpeedLines, Petals } from './effects';
+import { QualityManager, type Quality } from './quality';
+import { ART_UNIFORMS } from './materials';
 import { RiderView } from './riderView';
 import { Environment } from './environment';
 import { Debris } from './debris';
@@ -35,6 +37,8 @@ export class GameView {
   private effects = new Effects();
   private debris = new Debris();
   private speedLines = new SpeedLines();
+  private petals = new Petals();
+  readonly quality: QualityManager;
   private trail: Vec2[] = [];
   private trailLine: THREE.Line;
   private arcLine: THREE.Line;
@@ -47,16 +51,23 @@ export class GameView {
 
   constructor(container: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance', preserveDrawingBuffer: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    const mobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || Math.min(window.innerWidth, window.innerHeight) < 600;
+    this.quality = new QualityManager(location.search, mobile);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     container.appendChild(this.renderer.domElement);
+    // colour grade: a soft warm vignette in CSS (free on the GPU, never covers the route centre)
+    const grade = document.createElement('div');
+    grade.className = 'grade';
+    container.appendChild(grade);
     this.scene.add(this.rig.camera);
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.05;
+    this.renderer.toneMappingExposure = 0.95;
     this.env = new Environment(this.scene);
-    this.scene.add(this.rider.root, this.effects.group, this.speedLines.group);
+    this.scene.add(this.rider.root, this.effects.group, this.speedLines.group, this.petals.mesh);
+    this.quality.onChange = (q) => this.applyQuality(q);
+    this.applyQuality(this.quality.level);
 
     this.trailLine = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineDashedMaterial({ color: '#c8553d', dashSize: 0.5, gapSize: 0.35, fog: false }));
     this.trailLine.visible = false;
@@ -70,7 +81,17 @@ export class GameView {
     this.resize();
   }
 
+  /** Apply a render quality level (pixel ratio, shadows, cloud detail, particle counts). */
+  applyQuality(q: Quality): void {
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, q.pixelRatio));
+    this.renderer.shadowMap.enabled = q.shadowMap > 0;
+    this.env.applyQuality(q);
+    this.petals.count = q.petals;
+    this.resize();
+  }
+
   setCourse(course: Course): void {
+    this.petals.reset();
     if (this.courseView) { this.scene.remove(this.courseView.group); this.courseView.dispose(); }
     ORIGIN.x = 0; ORIGIN.y = 0;
     this.courseView = new CourseView(course);
@@ -254,7 +275,9 @@ export class GameView {
       const ahead = course ? course.maxHeightAhead(x, TUNING.camera.lookOverRange) : -Infinity;
       this.rig.update(dt, x, y, curr.speed, false, ahead);
     }
-    this.env.follow(toScene(x + 10, y), this.rig.camera.position);
+    ART_UNIFORMS.uTime.value += dt;
+    this.env.follow(toScene(x + 10, y), this.rig.camera.position, x, y);
+    this.petals.update(dt, x, y);
     // restrained air-cutting streaks scale with actual speed
     this.speedLines.update(dt, x, y, failed ? 0 : curr.speed);
     if (SpeedLines.intensity(curr.speed) > 0.3 && !failed) {

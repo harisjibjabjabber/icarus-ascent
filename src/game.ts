@@ -120,6 +120,8 @@ export class Game {
       tuning: TUNING,
       version: BUILD_VERSION,
       setMode: (m: Mode) => this.setMode(m),
+      /** render stats for perf checks */
+      renderInfo: () => ({ ...this.view.renderer.info.render, geometries: this.view.renderer.info.memory.geometries, programs: this.view.renderer.info.programs?.length, quality: this.view.quality.level.name }),
       continueEndless: () => this.continueEndless(),
       /** dev: jump to an opening lesson's checkpoint */
       lesson: (i: number) => { this.cpIndex = Math.max(0, Math.min(i, this.course.lessons.length - 1)); this.startRun(); },
@@ -355,12 +357,13 @@ export class Game {
     while (this.acc >= dt && steps < TUNING.sim.maxStepsPerFrame) { this.tick(); this.acc -= dt; steps++; }
     if (steps >= TUNING.sim.maxStepsPerFrame) this.acc = 0;
     this.view.render(dtReal, this.prev, this.curr, this.acc / dt);
+    this.view.quality.sample(dtReal, this.paused);
     this.sfx.update(this.sim.state);
     this.updateLessons();
     if (this.overlay.visible) this.view.setArc(predictJumpArc(this.sim));
     else this.view.setArc([]);
     this.overlay.update(this.sim.state, this.gestures, {
-      seed: this.seed, replay: !!this.replayer, fps: this.fps, version: BUILD_VERSION,
+      seed: this.seed, replay: !!this.replayer, fps: this.fps, version: BUILD_VERSION, quality: `${this.view.quality.level.name}${this.view.quality.pinned ? ' (pinned)' : ''}`,
       lesson: this.mode === 'opening' ? `${this.cpIndex + 1}/${this.course.lessons.length} ${this.course.lessons[this.cpIndex]?.title ?? ''}` : this.mode === 'endless' ? this.phraseInfo() : 'lab',
       context: this.sim.state.mode === 'airborne'
         ? `rail: ${this.sim.railCatchReport() ?? 'none near'} | wall: ${this.sim.wallCatchable().reason ?? 'catchable'}`

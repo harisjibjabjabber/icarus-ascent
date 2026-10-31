@@ -8,6 +8,8 @@ const browser = await chromium.launch({
   args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'],
 });
 const page = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+// swiftshader drains queued frames before a screenshot; the art pass shaders make that slower
+page.setDefaultTimeout(240000);
 const logs = [];
 page.on('pageerror', (e) => logs.push(`pageerror: ${e.message}`));
 await page.goto(url, { waitUntil: 'networkidle' });
@@ -24,8 +26,10 @@ const L = (i) => `g.course.lessons[${i}]`;
 await shot('opening-1-push', await until((g) => g.sim.state.x > 14));
 await shot('opening-2-crest-pop', await until((g) => g.sim.state.leftBy === 'crest' && g.sim.state.mode === 'airborne' && g.sim.state.air === 'flip', 10));
 await shot('opening-3-jump', await until((g) => g.sim.state.x > g.course.lessons[2].featureX - 22));
+await shot('opening-4-pot-approach', await until((g) => g.sim.state.x > g.course.obstacles.find((o) => o.kind === 'pot').x - 13));
 await shot('opening-5-heel', await until((g) => g.sim.state.mode === 'heelSkim' && g.sim.state.x > g.course.lessons[4].featureX), 30);
 await shot('opening-7-rail', await until((g) => g.sim.state.mode === 'grinding' && g.course.rails[g.sim.state.railId].required, 60));
+await shot('opening-8-pillar-approach', await until((g) => g.sim.state.x > g.course.obstacles.find((o) => o.kind === 'pillar').x - 16));
 await shot('opening-8-pillar', await until((g) => g.sim.state.broken.some((id) => g.course.obstacles[id].kind === 'pillar'), 8));
 await shot('opening-9-wall-approach', await until((g) => g.sim.state.x > g.course.lessons[8].featureX - 30));
 await shot('opening-9-wall', await until((g) => g.sim.state.mode === 'wallRiding', 80));

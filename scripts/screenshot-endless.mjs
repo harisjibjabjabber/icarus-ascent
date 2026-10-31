@@ -9,6 +9,8 @@ const browser = await chromium.launch({
   args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'],
 });
 const page = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+// swiftshader drains queued frames before a screenshot; the art pass shaders make that slower
+page.setDefaultTimeout(240000);
 const logs = [];
 page.on('pageerror', (e) => logs.push(`pageerror: ${e.message}`));
 page.on('console', (m) => { if (m.type() === 'error') logs.push(`console: ${m.text()}`); });
