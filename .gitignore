@@ -3,3 +3,5 @@ dist
 *.log
 scratch/
 tests/scratch/
+spikes/*/public/
+spikes/*/node_modules/
