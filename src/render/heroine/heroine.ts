@@ -19,6 +19,8 @@ export interface HeroineFrame {
 }
 export type HeroineTier = 'low' | 'medium' | 'high';
 
+/** Minimum visual hold of a grab pose (s), so a quick tap-grab still reads. Presentation only. */
+const GRAB_MIN_HOLD = 0.35;
 type StateName = 'loco' | 'push' | 'pop' | 'air' | 'float' | 'grabL' | 'grabR' | 'flip' | 'prep' | 'grind' | 'wall' | 'skim'
   | 'landClean' | 'landBig' | 'landFlip' | 'landSketchy' | 'crash' | 'crashSit' | 'respawn' | 'finish' | 'finishIdle' | 'fidget';
 interface StateDef { acts: [string, (h: Heroine) => number][]; once?: { clip: string; next: StateName; fade: number } }
@@ -279,8 +281,13 @@ export class Heroine {
         break;
       case 'jump': this.go('pop', 0.05, true); this.mood('whee', 0.5); break;
       case 'leave-edge': if (e.crest) { this.go('float', 0.08, true); this.mood('whee', 0.6); } else this.go('air', 0.15); break;
-      case 'grab-start': this.go(e.side === 'left' ? 'grabL' : 'grabR', 0.12); this.mood(e.side === 'left' ? 'wink' : 'smug', 99); break;
-      case 'grab-end': this.go('air', 0.15); this.moodOver = null; break;
+      case 'grab-start': this.go(e.side === 'left' ? 'grabL' : 'grabR', 0.08); this.mood(e.side === 'left' ? 'wink' : 'smug', 99); break;
+      case 'grab-end': {
+        // a tap-grab still reads: the pose holds at least GRAB_MIN_HOLD (the per-frame check below releases it)
+        const left = GRAB_MIN_HOLD - this.stateTime;
+        if (left <= 0) { this.go('air', 0.15); this.moodOver = null; } else if (this.moodOver) this.moodOver.until = this.t + left;
+        break;
+      }
       case 'flip-start': this.go('flip', 0.05); this.mood('focus', 99); break;
       case 'flip-complete': this.go('air', 0.12); this.mood('big', 0.5); break;
       case 'prep': if (e.armed) { this.go('prep', 0.1); this.mood('focus', 0.6); } break;
@@ -344,9 +351,9 @@ export class Heroine {
     } else this.wrongModeT = 0;
     if (f.mode === 'airborne') {
       if (f.air === 'flip' && this.state !== 'flip') this.go('flip', 0.05);
-      else if (f.air === 'grabLeft' && this.state !== 'grabL') this.go('grabL', 0.12);
-      else if (f.air === 'grabRight' && this.state !== 'grabR') this.go('grabR', 0.12);
-      else if (f.air === 'none' && (this.state === 'grabL' || this.state === 'grabR' || this.state === 'flip')) this.go('air', 0.15);
+      else if (f.air === 'grabLeft' && this.state !== 'grabL') this.go('grabL', 0.08);
+      else if (f.air === 'grabRight' && this.state !== 'grabR') this.go('grabR', 0.08);
+      else if (f.air === 'none' && (this.state === 'flip' || ((this.state === 'grabL' || this.state === 'grabR') && this.stateTime >= GRAB_MIN_HOLD))) this.go('air', 0.15);
       else if (f.air === 'none' && f.prep && this.state === 'air') this.go('prep', 0.1);
       else if (!f.prep && this.state === 'prep') this.go('air', 0.15);
     }

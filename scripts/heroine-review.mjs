@@ -12,7 +12,7 @@ const page = await browser.newPage({ viewport: { width: 390, height: 844 }, devi
 const logs = [];
 page.on('console', (m) => logs.push(`${m.type()}: ${m.text()}`));
 page.on('pageerror', (e) => logs.push(`pageerror: ${e.message}`));
-const mode = scenario === 'idle' || scenario === 'crash' || scenario === 'lessons' ? '' : 'lab&';
+const mode = scenario === 'idle' || scenario === 'push' || scenario === 'crash' || scenario === 'lessons' ? '' : 'lab&';
 await page.goto(`${BASE}?${mode}seed=12345&look=${look}${process.env.Q ? '&q=' + process.env.Q : ''}`, { waitUntil: 'networkidle' });
 await page.waitForFunction(() => window.icarus?.game?.view?.rider?.figureStats, null, { timeout: 60000 });
 await page.evaluate(() => { const ic = window.icarus; ic.pause(true); document.querySelector('.hint')?.classList.add('gone'); let s = 7; Math.random = () => ((s = (s * 16807) % 2147483647) / 2147483647); });
@@ -28,8 +28,14 @@ await page.evaluate(() => {
         const c = v.rig.camera.clone(); const root = v.rider.root; const V = root.position.constructor;
         const p = root.position.clone(), right = root.localToWorld(new V(0, 0, 1)).sub(root.position).normalize(), fwd = root.localToWorld(new V(1, 0, 0)).sub(root.position).normalize();
         const f = v.rider.figure; const hipsW = new V(); f.vrm.humanoid.getNormalizedBoneNode('hips').getWorldPosition(hipsW);
-        const wallSide = ic.game.sim.state.mode === 'wallRiding' ? -1 : 1; // walls are on her facing side: look from the other side
-        if (cam === 'side') { c.fov = 34; c.position.copy(p).addScaledVector(right, 4.6 * wallSide).addScaledVector(fwd, 1.3).add(new V(0, 1.3, 0)); c.lookAt(hipsW.clone().add(new V(0, 0.05, 0))); }
+        // side cam rides in the roll frame (so a wall ride is seen square-on), looking at the hips
+        const rq = v.rider.roll.getWorldQuaternion(v.rider.roll.quaternion.clone()); const sideZ = new V(0, 0, 1).applyQuaternion(rq), sideY = new V(0, 1, 0).applyQuaternion(rq);
+        const far = ic.game.sim.state.mode === 'airborne' && Math.abs(ic.game.sim.state.flip) > 0.01 ? 1.25 : 1;
+        const crashed = ic.game.sim.state.mode === 'failed';
+        if (cam === 'side' && crashed) { c.fov = 34; c.up.set(0, 1, 0); c.position.copy(hipsW).addScaledVector(fwd, -3.4).addScaledVector(right, 1.2).add(new V(0, 1.2, 0)); c.lookAt(hipsW); }
+        else if (cam === 'side' && ic.game.sim.state.mode === 'wallRiding') { c.fov = 34; c.up.set(0, 1, 0); c.position.copy(hipsW).addScaledVector(fwd, -3.6).addScaledVector(right, -1.6).add(new V(0, 0.9, 0)); c.lookAt(hipsW); }
+        else if (cam === 'side' && ic.game.sim.state.mode === 'grinding') { c.fov = 34; c.up.set(0, 1, 0); c.position.copy(hipsW).addScaledVector(fwd, 3.4).addScaledVector(right, 2.6).add(new V(0, 0.7, 0)); c.lookAt(hipsW); }
+        else if (cam === 'side') { c.fov = 34; c.up.copy(sideY); c.position.copy(hipsW).addScaledVector(sideZ, 4.6 * far).addScaledVector(fwd, 1.3).addScaledVector(sideY, 0.45); c.lookAt(hipsW.clone().addScaledVector(sideY, 0.05)); }
         if (cam === 'profile') { c.fov = 32; c.position.copy(p).addScaledVector(fwd, 4.6).addScaledVector(right, 0.9).add(new V(0, 1.1, 0)); c.lookAt(p.clone().add(new V(0, 0.8, 0))); }
         if (cam === 'back') { c.fov = 32; c.position.copy(p).addScaledVector(fwd, -4.2).addScaledVector(right, -1.2).add(new V(0, 1.9, 0)); c.lookAt(p.clone().add(new V(0, 0.8, 0))); }
         if (cam === 'face') {
@@ -46,7 +52,7 @@ await page.evaluate(() => {
     }
     if (cams.length > 1) v.renderer.render(v.scene, v.rig.camera);
     const s = ic.game.sim.state, st = v.rider.figureStats;
-    out.meta = { tick: s.tick, x: +s.x.toFixed(2), mode: s.mode, air: s.air, flip: +s.flip.toFixed(2), speed: +s.speed.toFixed(1), state: st?.state, cpu: +(st?.cpuMs ?? 0).toFixed(3), ik: st?.ik.map((x) => +(x * 100).toFixed(2)), calls: v.renderer.info.render.calls };
+    out.meta = { tick: s.tick, x: +s.x.toFixed(2), mode: s.mode, air: s.air, flip: +s.flip.toFixed(2), speed: +s.speed.toFixed(1), state: st?.state, cpu: +(st?.cpuMs ?? 0).toFixed(3), ik: st?.ik.map((x) => +(x * 100).toFixed(2)), calls: v.renderer.info.render.calls, st: +(v.rider.figure?.stateTime ?? 0).toFixed(2), rt: +(v.rider.figure?.actions?.get('respawn')?.time ?? 0).toFixed(2), sm: s.mode };
     return out;
   };
 });
@@ -54,11 +60,14 @@ fs.mkdirSync(outDir, { recursive: true });
 const save = (name, data) => fs.writeFileSync(`${outDir}/${name}.jpg`, Buffer.from(data.split(',')[1], 'base64'));
 const meta = [];
 let frame = 0;
-async function record(n, cams = ['chase', 'side']) {
+const FROM = Number(process.env.FROM ?? 0); // skip (simulate without capture) to this frame
+async function record(n, cams = (process.env.CAMS ?? 'chase,side').split(',').filter(Boolean)) {
+  if (FROM && frame === 0) { await page.evaluate((k) => { for (let i = 0; i < k; i++) window.icarus.advance(4, undefined, 4); }, FROM); frame = FROM; }
   for (let i = 0; i < n; i++) {
     const r = await page.evaluate((cams) => { window.icarus.advance(4, undefined, 4); return window.__cap(cams); }, cams);
     for (const c of cams) save(`${c}-${String(frame).padStart(5, '0')}`, r[c]);
     meta.push({ f: frame, ...r.meta }); frame++;
+    if (frame % 30 === 0) fs.writeFileSync(`${outDir}/meta.json`, JSON.stringify(meta)); // survive interruptions
   }
 }
 const until = (fn, max = 120 * 120) => page.evaluate(([src, max]) => { const pred = new Function('g', `return (${src})(g)`); window.icarus.advance(max, pred, 4); return window.icarus.game.sim.state.mode; }, [fn.toString(), max]);
@@ -104,15 +113,19 @@ if (scenario === 'probe') {
   // lab course with the dev autopilot: pushes, gaps, grabs, flips, rails, walls, landings, pots, pillars
   await page.evaluate(() => { const ic = window.icarus; ic.game.retry(); ic.autopilot({ minSpeed: 13, strength: 1, optionalRail: true, styleFlips: true, styleGrabs: true, flipAtFirstGap: true }); });
   await record(Number(process.env.N ?? 1500));
+} else if (scenario === 'push') {
+  // opening start: a full push stroke every second (no jumps) so the whole push cycle reads
+  await page.evaluate(() => { const ic = window.icarus; ic.game.retry(); ic.autopilot({ minSpeed: 99, strength: 0.8, pushEvery: 120, jumpEarly: 999 }); });
+  await record(Number(process.env.N ?? 150));
 } else if (scenario === 'crash') {
   // opening course: push to speed then ride into the first gap without jumping -> crash, retry -> respawn
   await page.evaluate(() => { const ic = window.icarus; ic.game.retry(); ic.autopilot({ minSpeed: 11, strength: 1, jumpEarly: 999 }); });
   // ride until the crash, hold ~2.5 s on the crash + sheepish recover, then retry -> checkpoint respawn
-  let failed = 0; const n = Number(process.env.N ?? 600);
+  let failed = 0, retried = false; const n = Number(process.env.N ?? 600);
   for (let i = 0; i < n; i++) {
     await record(1);
     if (meta[meta.length - 1].mode === 'failed') failed++;
-    if (failed === 75) { await page.evaluate(() => { window.icarus.game.retry(); }); }
+    if (failed === 75 && !retried) { retried = true; await page.evaluate(() => { window.icarus.game.retry(); }); }
     if (failed >= 75 && i > n - 1) break;
     if (failed >= 75 && meta.length - meta.findIndex((m) => m.mode === 'failed') > 75 + 90) break;
   }

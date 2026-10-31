@@ -155,12 +155,14 @@ const prep: ClipDef = { name: 'prep', base: STANCE, loop: true, dur: 1, keys: [
 
 // ---------- surfaces ----------
 /** Grind (boardslide; the stance yaw stays sim-driven): arms out playfully, wobble at ~1.3 Hz, smirk. */
-const GR = m({ hips: E(0.12, 0.2, -0.1), spine: E(0.12, 0.08, 0.1), chest: E(0.05, 0.06, 0.04), neck: E(-0.05, 0.25, -0.04), head: E(0.02, 0.5, -0.14) });
+// the game yaws the stance ~77 deg for the boardslide, so her rest facing already looks down the rail:
+// open the chest a little toward the camera (y-) instead of twisting further away
+const GR = m({ hips: E(0.12, -0.22, -0.1), spine: E(0.12, -0.1, 0.1), chest: E(0.05, -0.05, 0.04), neck: E(-0.05, 0.02, -0.04), head: E(0.04, 0.08, -0.14) });
 const grind: ClipDef = { name: 'grind', base: STANCE, loop: true, dur: 1.5, keys: [
   { t: 0, hips: [0.0, -0.17, -0.05], ikL: [0.21, 0, 0.04], ikR: [-0.21, 0, -0.01], pose: m(GR, arm('L', [0.72, 0.42, 0.25], 0.35, 0.4, [0, 0, -0.2]), arm('R', [-0.82, 0.05, -0.3], 0.4, 0.3, [0, 0, -0.1]), hand('L', OPEN), hand('R', RELAX)) },
-  { t: 0.38, hips: [-0.02, -0.18, -0.05], pose: m({ hips: E(0.12, 0.22, -0.02), spine: E(0.12, 0.1, 0.02) }, arm('L', [0.78, 0.3, 0.2], 0.4, 0.4, [0, 0, -0.15]), arm('R', [-0.78, 0.18, -0.28], 0.38, 0.3, [0, 0, -0.18])) },
-  { t: 0.75, hips: [0.0, -0.165, -0.05], pose: m({ hips: E(0.12, 0.2, -0.12), spine: E(0.12, 0.08, 0.12) }, arm('L', [0.7, 0.46, 0.25], 0.33, 0.4, [0, 0, -0.22]), arm('R', [-0.83, 0.0, -0.3], 0.42, 0.3, [0, 0, -0.08])) },
-  { t: 1.13, hips: [0.02, -0.18, -0.05], pose: m({ hips: E(0.12, 0.2, -0.04), spine: E(0.12, 0.09, 0.04) }, arm('L', [0.76, 0.34, 0.22], 0.38, 0.4, [0, 0, -0.16]), arm('R', [-0.8, 0.14, -0.3], 0.38, 0.3, [0, 0, -0.16])) },
+  { t: 0.38, hips: [-0.02, -0.18, -0.05], pose: m({ hips: E(0.12, -0.2, -0.02), spine: E(0.12, -0.08, 0.02) }, arm('L', [0.78, 0.3, 0.2], 0.4, 0.4, [0, 0, -0.15]), arm('R', [-0.78, 0.18, -0.28], 0.38, 0.3, [0, 0, -0.18])) },
+  { t: 0.75, hips: [0.0, -0.165, -0.05], pose: m({ hips: E(0.12, -0.24, -0.12), spine: E(0.12, -0.12, 0.12) }, arm('L', [0.7, 0.46, 0.25], 0.33, 0.4, [0, 0, -0.22]), arm('R', [-0.83, 0.0, -0.3], 0.42, 0.3, [0, 0, -0.08])) },
+  { t: 1.13, hips: [0.02, -0.18, -0.05], pose: m({ hips: E(0.12, -0.22, -0.04), spine: E(0.12, -0.1, 0.04) }, arm('L', [0.76, 0.34, 0.22], 0.38, 0.4, [0, 0, -0.16]), arm('R', [-0.8, 0.14, -0.3], 0.38, 0.3, [0, 0, -0.16])) },
 ] };
 /** Wall ride (roll stays sim-driven): inside hand reaching for the wall, outside arm out, head to travel. */
 const wall: ClipDef = { name: 'wall', base: STANCE, loop: true, dur: 1.2, keys: [
