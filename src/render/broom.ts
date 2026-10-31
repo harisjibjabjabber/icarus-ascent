@@ -14,11 +14,13 @@ export const BROOM = {
   /** Hover gap above the ground/rail (m) and the idle bob amplitude (m) / rate (rad/s). */
   hover: 0.05, bob: 0.012, bobRate: 2.6,
   /** Bristle tip in broom space (sparkle / dust / spark emitter). */
-  tail: new THREE.Vector3(-1.32, 0, 0),
+  tail: new THREE.Vector3(-1.32, 0.03, 0),
+  /** Open-stance yaw (rad) so the chase camera sees the broom's length, not just its end. */
+  yaw: 0.12,
   /** Grab targets on the handle (broom space): front hand ahead of the front foot, back hand behind the back foot. */
-  grabL: new THREE.Vector3(0.36, 0.05, 0.03), grabR: new THREE.Vector3(-0.36, 0.05, -0.01),
+  grabL: new THREE.Vector3(0.27, 0.11, 0.1), grabR: new THREE.Vector3(-0.17, 0.11, 0.1), // wrist targets (palm wraps the handle)
   /** How far (m) the broom comes up to her hand in a grab (feet stay planted, so the knees tuck). */
-  grabLift: 0.3,
+  grabLift: 0.2,
 };
 
 const C = {
@@ -29,63 +31,130 @@ const C = {
 export class Broom {
   /** Pass this to Heroine.attach as the deck (feet plant on it, hands grab it). */
   readonly group = new THREE.Group();
-  private bristles = new THREE.Group();
+  readonly bristles = new THREE.Group();
   private charm = new THREE.Group();
   private t = 0;
+  /** Ground contact shadow: add to the stance group (ground-aligned), see riderView. */
+  readonly shadow: THREE.Mesh;
+  private strawSamples: THREE.Vector3[] = [];
 
   constructor() {
-    const mat = toon('#ffffff', { vertexColors: true, rim: 1.3 });
+    const mat = toon('#ffffff', { vertexColors: true, rim: 2.2 });
     const H = Math.PI / 2;
+    // v2 (Haris: "reads as a thin line from behind"): thicker handle, bigger flared straw, warm outline, contact shadow
     const g = new GeoBuilder()
       // round handle, binding to nose, with an upturned kick at the nose
-      .add(new THREE.CylinderGeometry(0.028, 0.03, 1.72, 8), [0.14, 0.004, 0], C.handle, { rot: [0, 0, H], top: C.handleTop })
-      .add(new THREE.CylinderGeometry(0.022, 0.028, 0.34, 8), [1.13, 0.06, 0], C.handle, { rot: [0, 0, -(H - 0.42)], top: C.handleTop })
-      .add(new THREE.SphereGeometry(0.03, 8, 6), [1.28, 0.125, 0], C.handleTop)
+      .add(new THREE.CylinderGeometry(0.038, 0.04, 1.72, 10), [0.14, -0.009, 0], C.handle, { rot: [0, 0, H], top: C.handleTop })
+      .add(new THREE.CylinderGeometry(0.03, 0.038, 0.34, 10), [1.13, 0.05, 0], C.handle, { rot: [0, 0, -(H - 0.42)], top: C.handleTop })
+      .add(new THREE.SphereGeometry(0.04, 10, 7), [1.28, 0.118, 0], C.handleTop)
       // flattened oak deck section under the feet (the concept sheet's "plank"), tapered ends
-      .add(new THREE.BoxGeometry(0.66, 0.026, 0.1), [0, 0.022, 0], C.oak, { top: C.oakTop })
-      .add(new THREE.CylinderGeometry(0.05, 0.05, 0.026, 10, 1, false, 0, Math.PI), [0.33, 0.022, 0], C.oak, { top: C.oakTop })
-      .add(new THREE.CylinderGeometry(0.05, 0.05, 0.026, 10, 1, false, Math.PI, Math.PI), [-0.33, 0.022, 0], C.oak, { top: C.oakTop })
+      .add(new THREE.BoxGeometry(0.66, 0.026, 0.11), [0, 0.022, 0], C.oak, { top: C.oakTop })
+      .add(new THREE.CylinderGeometry(0.055, 0.055, 0.026, 10, 1, false, 0, Math.PI), [0.33, 0.022, 0], C.oak, { top: C.oakTop })
+      .add(new THREE.CylinderGeometry(0.055, 0.055, 0.026, 10, 1, false, Math.PI, Math.PI), [-0.33, 0.022, 0], C.oak, { top: C.oakTop })
       // two leather foot wraps (read as bindings; her boots sit on them)
-      .add(new THREE.BoxGeometry(0.075, 0.012, 0.112), [0.23, 0.037, 0], C.wrap, { top: C.wrapTop })
-      .add(new THREE.BoxGeometry(0.075, 0.012, 0.112), [-0.23, 0.037, 0], C.wrap, { top: C.wrapTop })
+      .add(new THREE.BoxGeometry(0.075, 0.012, 0.122), [0.23, 0.037, 0], C.wrap, { top: C.wrapTop })
+      .add(new THREE.BoxGeometry(0.075, 0.012, 0.122), [-0.23, 0.037, 0], C.wrap, { top: C.wrapTop })
       // binding: red cord and gold band where the straw starts
-      .add(new THREE.CylinderGeometry(0.052, 0.052, 0.05, 10), [-0.71, 0.004, 0], C.ribbon, { rot: [0, 0, H], top: C.ribbonTop })
-      .add(new THREE.CylinderGeometry(0.06, 0.06, 0.025, 10), [-0.77, 0.004, 0], C.gold, { rot: [0, 0, H] });
-    const handle = new THREE.Mesh(g.build()!, mat);
-    this.group.add(handle);
-    // straw bundle: narrow at the binding, flaring to the tail; its own group so it can bend up when dragging
-    this.bristles.position.set(-0.74, 0.004, 0);
+      .add(new THREE.CylinderGeometry(0.064, 0.064, 0.06, 12), [-0.71, 0.004, 0], C.ribbon, { rot: [0, 0, H], top: C.ribbonTop })
+      .add(new THREE.CylinderGeometry(0.072, 0.072, 0.03, 12), [-0.78, 0.004, 0], C.gold, { rot: [0, 0, H] });
+    const handleGeo = g.build()!;
+    this.group.add(new THREE.Mesh(handleGeo, mat), outline(handleGeo, 0.012));
+    // straw: a core plus splayed tufts that fan outward and a little up to a ragged brush end (~0.4 m across),
+    // so from behind it reads as a broom head, not a stick end
+    this.bristles.position.set(-0.8, 0.004, 0);
     const rng = mulberry32(11);
-    // a core plus tufts of straw (narrow cones) fanning out to a ragged brush end, so it reads as straw, not a solid cone
     const b = new GeoBuilder()
-      .add(jitter(new THREE.CylinderGeometry(0.055, 0.11, 0.5, 10, 3), 0.01, rng), [-0.25, 0, 0], C.straw, { rot: [0, 0, -H], top: C.strawTop, scale: [0.8, 1, 1] });
-    for (let i = 0; i < 11; i++) {
-      const a = (i / 11) * Math.PI * 2 + rng() * 0.3, r = 0.05 + rng() * 0.03, len = 0.5 + rng() * 0.16;
-      const fy = Math.sin(a) * 0.8, fz = Math.cos(a);
-      // each tuft: a thin cone, point at the binding, wide toward the tail, splayed outward
-      b.add(new THREE.ConeGeometry(0.045 + rng() * 0.015, len, 5, 1), [-0.05 - len / 2, fy * r * 1.6, fz * r * 1.6], i % 3 ? C.straw : C.strawTop,
-        { rot: [-fz * 0.12, 0, -H + fy * 0.14], top: C.strawTop, scale: [1, 1, 1] });
+      .add(jitter(new THREE.CylinderGeometry(0.07, 0.15, 0.52, 12, 3), 0.012, rng), [-0.26, 0.01, 0], C.straw, { rot: [0, 0, -H], top: C.strawTop, scale: [0.85, 1, 1] });
+    const N = 14;
+    for (let i = 0; i < N; i++) {
+      const a = (i / N) * Math.PI * 2 + rng() * 0.25, len = 0.5 + rng() * 0.16;
+      const fy = Math.sin(a), fz = Math.cos(a), r = 0.07 + rng() * 0.03;
+      // each tuft: a thin cone, point at the binding, wide toward the tail, splayed outward (+ a slight upward bias)
+      b.add(new THREE.ConeGeometry(0.055 + rng() * 0.02, len, 5, 1), [-0.04 - len / 2, fy * r * 1.4 + 0.02, fz * r * 1.6], i % 3 ? C.straw : C.strawTop,
+        { rot: [-fz * 0.26, 0, -H + fy * 0.22 + 0.06], top: C.strawTop });
     }
-    this.bristles.add(new THREE.Mesh(b.build()!, mat));
+    for (let i = 0; i < 9; i++) { // loose straws poking out of the brush end
+      const a = (i / 9) * Math.PI * 2 + 0.3;
+      b.add(new THREE.BoxGeometry(0.24, 0.01, 0.01), [-0.6, Math.sin(a) * 0.12 + 0.02, Math.cos(a) * 0.17], C.strawTop, { rot: [Math.cos(a) * 0.3, 0, -Math.sin(a) * 0.25] });
+    }
+    const strawGeo = b.build()!;
+    // ground-clamp samples: the lowest straw vertices along the length (bristle space)
+    const sp = strawGeo.getAttribute('position'); const buckets = new Map<number, THREE.Vector3>();
+    for (let i = 0; i < sp.count; i++) {
+      const v = new THREE.Vector3().fromBufferAttribute(sp, i), k = Math.round(v.x * 10);
+      const cur = buckets.get(k); if (!cur || v.y < cur.y) buckets.set(k, v);
+    }
+    this.strawSamples = [...buckets.values()];
+    this.bristles.add(new THREE.Mesh(strawGeo, mat), outline(strawGeo, 0.014));
     this.group.add(this.bristles);
     // ribbon + gold star charm, hanging from the binding (swings a little)
-    this.charm.position.set(-0.7, -0.02, 0.05);
+    this.charm.position.set(-0.72, -0.03, 0.065);
     const r = new GeoBuilder()
-      .add(new THREE.BoxGeometry(0.03, 0.16, 0.006), [0.01, -0.08, 0], C.ribbon, { rot: [0, 0, 0.18], top: C.ribbonTop })
-      .add(new THREE.BoxGeometry(0.03, 0.12, 0.006), [-0.03, -0.06, 0.01], C.ribbon, { rot: [0, 0, -0.35], top: C.ribbonTop })
-      .add(new THREE.OctahedronGeometry(0.03, 0), [0.025, -0.17, 0], C.gold, { scale: [1, 1, 0.5] });
+      .add(new THREE.BoxGeometry(0.035, 0.17, 0.006), [0.01, -0.085, 0], C.ribbon, { rot: [0, 0, 0.18], top: C.ribbonTop })
+      .add(new THREE.BoxGeometry(0.035, 0.13, 0.006), [-0.03, -0.065, 0.01], C.ribbon, { rot: [0, 0, -0.35], top: C.ribbonTop })
+      .add(new THREE.OctahedronGeometry(0.038, 0), [0.025, -0.18, 0], C.gold, { scale: [1, 1, 0.5] });
     this.charm.add(new THREE.Mesh(r.build()!, mat));
     this.group.add(this.charm);
-    this.group.traverse((o) => { if ((o as THREE.Mesh).isMesh) o.castShadow = true; });
+    // soft contact shadow (lives on the ground under the rider, not on the hovering broom; riderView places it)
+    this.shadow = new THREE.Mesh(new THREE.PlaneGeometry(2.7, 0.62), new THREE.MeshBasicMaterial({
+      map: blobTexture(), color: '#4a2e1c', transparent: true, opacity: 0.38, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2,
+    }));
+    this.shadow.rotation.x = -Math.PI / 2;
+    this.shadow.position.set(-0.05, 0.004, 0);
+    this.shadow.renderOrder = 1;
+    this.group.traverse((o) => { if ((o as THREE.Mesh).isMesh && !o.userData.outline) o.castShadow = true; });
   }
 
   /** drag 0..1: bristles bend up toward the ground line (heel skim); swing: charm sway from speed/turns. */
   update(dt: number, drag: number, speed: number): void {
     this.t += dt;
-    this.bristles.rotation.z = drag * 0.16 + Math.sin(this.t * 7) * 0.006 * Math.min(1, speed / 10);
+    this.bristles.rotation.z = -drag * 0.16 + Math.sin(this.t * 7) * 0.006 * Math.min(1, speed / 10);
     this.charm.rotation.x = Math.sin(this.t * 3.1) * 0.12 + Math.min(0.5, speed * 0.02);
     this.charm.rotation.z = -Math.min(0.6, speed * 0.03) + Math.sin(this.t * 4.3) * 0.08;
   }
+
+  /** Keep the straw out of the ground: bend the bristles up until their lowest point is >= `clear` above
+   *  ground (y = 0 in `ground`'s space, the rider root). Returns how far it was below before the clamp (m). */
+  clampToGround(ground: THREE.Object3D, clear = 0.012): number {
+    let depth = 0;
+    for (let i = 0; i < 4; i++) {
+      this.bristles.updateMatrixWorld(true);
+      let low = Infinity;
+      for (const q of this.strawSamples) low = Math.min(low, ground.worldToLocal(this.bristles.localToWorld(_p.copy(q))).y);
+      const under = clear - low;
+      if (i === 0) depth = Math.max(0, under);
+      if (under <= 0.001) break;
+      this.bristles.rotation.z = Math.max(-0.45, this.bristles.rotation.z - Math.min(0.3, under / 0.6)); // -z lifts the tail end (bend capped)
+    }
+    return depth;
+  }
+}
+
+const _p = new THREE.Vector3();
+/** Inverted-hull outline (warm dark brown), pushed out along the normals: keeps the broom crisp on a bright track. */
+function outline(geo: THREE.BufferGeometry, w: number): THREE.Mesh {
+  const m = new THREE.ShaderMaterial({
+    uniforms: { uW: { value: w }, uC: { value: new THREE.Color('#3a2414') } },
+    vertexShader: `uniform float uW; void main() { gl_Position = projectionMatrix * modelViewMatrix * vec4(position + normalize(normal) * uW, 1.0); }`,
+    fragmentShader: `uniform vec3 uC; void main() { gl_FragColor = vec4(uC, 1.0); }`,
+    side: THREE.BackSide,
+  });
+  const o = new THREE.Mesh(geo, m);
+  o.castShadow = false;
+  o.userData.outline = true;
+  return o;
+}
+let _blob: THREE.Texture | null = null;
+function blobTexture(): THREE.Texture {
+  if (_blob) return _blob;
+  if (typeof document === 'undefined') return (_blob = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1));
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const x = c.getContext('2d')!;
+  const g = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+  g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.5, 'rgba(255,255,255,0.5)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+  x.fillStyle = g; x.fillRect(0, 0, 64, 64);
+  _blob = new THREE.CanvasTexture(c); _blob.colorSpace = THREE.SRGBColorSpace;
+  return _blob;
 }
 
 /**
@@ -99,27 +168,36 @@ export class BristleTrail {
   readonly points: THREE.Points;
   private n: number;
   private p: Float32Array; private v: Float32Array; private life: Float32Array; private max: Float32Array; private kind: Uint8Array;
-  private pos: Float32Array; private col: Float32Array; private size: Float32Array; private alpha: Float32Array;
+  private pos: Float32Array; private col: Float32Array; private size: Float32Array; private alpha: Float32Array; private kindF: Float32Array;
   private next = 0; private acc = [0, 0, 0];
   private rng = mulberry32(5);
-  private static COLORS: [number, number, number][] = [[1, 0.88, 0.55], [0.86, 0.74, 0.55], [1, 0.62, 0.25]];
+  private static COLORS: [number, number, number][] = [[1, 0.84, 0.42], [0.86, 0.64, 0.42], [1, 0.6, 0.22]];
 
-  constructor(n = 160) {
+  constructor(n = 220) {
     this.n = n;
     this.p = new Float32Array(n * 3); this.v = new Float32Array(n * 3); this.life = new Float32Array(n); this.max = new Float32Array(n).fill(1); this.kind = new Uint8Array(n);
-    this.pos = new Float32Array(n * 3); this.col = new Float32Array(n * 3); this.size = new Float32Array(n); this.alpha = new Float32Array(n);
+    this.pos = new Float32Array(n * 3); this.col = new Float32Array(n * 3); this.size = new Float32Array(n); this.alpha = new Float32Array(n); this.kindF = new Float32Array(n);
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(this.pos, 3).setUsage(THREE.DynamicDrawUsage));
     geo.setAttribute('color', new THREE.BufferAttribute(this.col, 3).setUsage(THREE.DynamicDrawUsage));
     geo.setAttribute('aSize', new THREE.BufferAttribute(this.size, 1).setUsage(THREE.DynamicDrawUsage));
     geo.setAttribute('aAlpha', new THREE.BufferAttribute(this.alpha, 1).setUsage(THREE.DynamicDrawUsage));
+    geo.setAttribute('aKind', new THREE.BufferAttribute(this.kindF, 1).setUsage(THREE.DynamicDrawUsage));
     const mat = new THREE.ShaderMaterial({
       uniforms: { uScale: { value: 400 } },
-      vertexShader: `attribute float aSize; attribute float aAlpha; attribute vec3 color; varying vec3 vC; varying float vA; uniform float uScale;
-        void main() { vC = color; vA = aAlpha; vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_Position = projectionMatrix * mv;
+      vertexShader: `attribute float aSize; attribute float aAlpha; attribute float aKind; attribute vec3 color; varying vec3 vC; varying float vA; varying float vK; uniform float uScale;
+        void main() { vC = color; vA = aAlpha; vK = aKind; vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_Position = projectionMatrix * mv;
           gl_PointSize = aAlpha > 0.0 ? aSize * uScale / max(0.5, -mv.z) : 0.0; }`,
-      fragmentShader: `varying vec3 vC; varying float vA;
-        void main() { float d = length(gl_PointCoord - 0.5) * 2.0; float a = vA * smoothstep(1.0, 0.0, d); if (a < 0.01) discard; gl_FragColor = vec4(vC, a); }`,
+      // sparkles / sparks: a hot white-gold core inside a soft amber halo (normal blending, so they still read on a
+      // bright track where additive glow washes out); dust: a soft warm puff
+      fragmentShader: `varying vec3 vC; varying float vA; varying float vK;
+        void main() {
+          float d = length(gl_PointCoord - 0.5) * 2.0;
+          if (vK > 0.5 && vK < 1.5) { float a = vA * smoothstep(1.0, 0.1, d) * 0.8; if (a < 0.01) discard; gl_FragColor = vec4(vC, a); return; }
+          float core = smoothstep(0.42, 0.12, d), halo = smoothstep(1.0, 0.35, d);
+          vec3 col = mix(vC * vec3(0.78, 0.45, 0.16), vec3(1.0, 0.97, 0.82), core);
+          float a = vA * max(halo * 0.6, core); if (a < 0.01) discard; gl_FragColor = vec4(col, a);
+        }`,
       transparent: true, depthWrite: false, blending: THREE.NormalBlending,
     });
     this.points = new THREE.Points(geo, mat);
@@ -162,11 +240,12 @@ export class BristleTrail {
       const c = BristleTrail.COLORS[k];
       const tw = k === 0 ? 0.6 + 0.4 * Math.sin(this.life[i] * 40 + i) : 1; // sparkles twinkle
       this.col[j] = c[0]; this.col[j + 1] = c[1]; this.col[j + 2] = c[2];
-      this.alpha[i] = k === 1 ? 0.45 * u * Math.min(1, (1 - u) * 6) : (k === 2 ? 1 : 0.85) * u * tw;
-      this.size[i] = k === 1 ? 0.09 + (1 - u) * 0.16 : k === 2 ? 0.035 : 0.05 * (0.6 + u * 0.6);
+      this.alpha[i] = k === 1 ? 0.32 * u * Math.min(1, (1 - u) * 6) : (k === 2 ? 1 : 0.95) * Math.min(1, u * 1.6) * tw;
+      this.size[i] = k === 1 ? 0.06 + (1 - u) * 0.1 : k === 2 ? 0.06 : 0.085 * (0.55 + u * 0.6);
+      this.kindF[i] = k;
     }
     const g = this.points.geometry;
-    for (const a of ['position', 'color', 'aSize', 'aAlpha']) g.getAttribute(a).needsUpdate = true;
+    for (const a of ['position', 'color', 'aSize', 'aAlpha', 'aKind']) g.getAttribute(a).needsUpdate = true;
   }
 
   dispose(): void { this.points.geometry.dispose(); (this.points.material as THREE.Material).dispose(); }

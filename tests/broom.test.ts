@@ -16,9 +16,25 @@ describe('broom prototype (presentation only)', () => {
     expect(hit.point.y).toBeGreaterThan(0.03);
     expect(hit.point.y).toBeLessThan(0.05);
   });
-  it('grab targets sit on the handle just outside the feet', () => {
-    expect(BROOM.grabL.x).toBeGreaterThan(0.3); expect(BROOM.grabR.x).toBeLessThan(-0.3);
-    expect(Math.abs(BROOM.grabL.z)).toBeLessThan(0.06); expect(Math.abs(BROOM.grabR.z)).toBeLessThan(0.06);
+  it('grab targets (wrist) sit just over the handle, front hand ahead of the back hand, on her facing side', () => {
+    expect(BROOM.grabL.x).toBeGreaterThan(BROOM.grabR.x + 0.3);
+    for (const g of [BROOM.grabL, BROOM.grabR]) {
+      expect(g.y).toBeGreaterThan(0.05); expect(g.y).toBeLessThan(0.16); // palm wraps the handle below the wrist
+      expect(g.z).toBeGreaterThanOrEqual(0); expect(g.z).toBeLessThan(0.14); // not hidden behind her legs
+    }
+  });
+  it('the skim clamp keeps the straw above the ground even with the tail pushed down', () => {
+    const root = new THREE.Group(); const b = new Broom(); root.add(b.group);
+    b.group.position.y = 0.27; b.group.rotation.z = 0.2; // the skim attitude (pivot lift + tail-down): straw below ground unclamped
+    root.updateMatrixWorld(true);
+    const depth = b.clampToGround(root);
+    expect(depth).toBeGreaterThan(0);
+    b.group.updateMatrixWorld(true);
+    // after the clamp no straw vertex is below the ground
+    let minY = Infinity; const v = new THREE.Vector3();
+    b.bristles.traverse((o) => { const m = o as THREE.Mesh; if (!m.isMesh || m.userData.outline) return;
+      const pos = m.geometry.getAttribute('position'); for (let i = 0; i < pos.count; i++) { v.fromBufferAttribute(pos, i); m.localToWorld(v); minY = Math.min(minY, v.y); } });
+    expect(minY).toBeGreaterThan(-0.03);
   });
   it('the trail emits per mode and stays finite, and goes quiet when emission stops', () => {
     const t = new BristleTrail(64);

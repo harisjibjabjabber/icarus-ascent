@@ -34,6 +34,8 @@ export class RiderView {
   private broom: Broom;
   private trail: BristleTrail;
   private latSign: number;
+  private carve = 0;
+  private grabExtra = 0;
   private body: THREE.Group;
   private head: THREE.Mesh;
   private arms: THREE.Group[] = [];
@@ -58,7 +60,9 @@ export class RiderView {
     this.broom = new Broom();
     this.board = this.broom.group;
     this.board.position.y = 0.06 + BROOM.hover;
+    this.board.rotation.y = BROOM.yaw;
     this.stance.add(this.board);
+    this.stance.add(this.broom.shadow);
     this.trail = new BristleTrail();
     this.root.add(this.trail.points);
     const localZ = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), ROUTE_YAW);
@@ -119,9 +123,9 @@ export class RiderView {
     // backflip: full rotation about the rider's lateral axis (nose up and over backwards)
     // broom: a gentler tail-down than the board (it is longer) and lifted a touch so the handle stays clear
     // of the ground while the straw drags
-    this.pivot.rotation.z = this.boardAngle + this.heel * 0.24 + flip * Math.PI * 2;
+    this.pivot.rotation.z = this.boardAngle + this.heel * 0.18 + flip * Math.PI * 2;
     this.pivot.position.x = -this.heel * 0.5; // rotate about the tail
-    this.pivot.position.y = this.heel * 0.13;
+    this.pivot.position.y = this.heel * 0.16;
     // wall ride: lean the whole rider away from the wall (board flat against it)
     this.rollAngle += ((s.mode === 'wallRiding' ? -1.15 : 0) - this.rollAngle) * ease(14);
     this.roll.rotation.x = this.rollAngle;
@@ -132,24 +136,39 @@ export class RiderView {
     // grabs: crouch and reach to the side
     const g = s.air === 'grabLeft' ? -1 : s.air === 'grabRight' ? 1 : 0;
     this.grab += (g - this.grab) * ease(20);
-    this.board.rotation.x = this.grab * 0.25;
+    // carve: a little extra yaw/roll with lateral motion so the silhouette shows from behind (open stance yaw at rest)
+    const latV = dt > 0 ? (targetLateral - this.lateral) : 0;
+    this.carve += (THREE.MathUtils.clamp(latV * 0.15, -0.12, 0.12) - this.carve) * ease(6);
+    this.board.rotation.y = BROOM.yaw + this.carve;
+    this.board.rotation.x = this.grab * 0.25 + this.carve * 0.8;
     // hover + bob (grounded), resting low on a rail, hover kept in the air; the trail at the bristles
     this.t += dt;
     const grinding = s.mode === 'grinding', skim = s.mode === 'heelSkim', wall = s.mode === 'wallRiding';
     const failed = s.mode === 'failed';
     const hov = grinding ? 0.015 : BROOM.hover + (airborne ? 0 : BROOM.bob * Math.sin(this.t * BROOM.bobRate));
     // grab: she pulls the broom up to her hand (knees tuck, like a real skate grab) instead of reaching to her feet
-    const lift = Math.max(Math.abs(this.grab), this.figure?.grabWeight ?? 0) * BROOM.grabLift;
+    const gw = this.figure?.grabWeight ?? 0;
+    // ...and closes the last gap: if the wrist still falls short of the handle, the broom comes up a little more (<= 0.1 m; more folds the legs)
+    const short = gw > 0.5 && this.figure ? Math.max(...this.figure.stats.hand) - 0.015 : -1;
+    this.grabExtra = THREE.MathUtils.clamp(this.grabExtra + (gw > 0.5 ? short * ease(10) : -this.grabExtra * ease(6)), 0, 0.1);
+    const lift = Math.max(Math.abs(this.grab), gw) * BROOM.grabLift + this.grabExtra;
     this.board.position.y += (0.06 + hov + lift - this.board.position.y) * ease(12);
     this.broom.update(dt, this.heel, s.speed);
     this.root.updateMatrixWorld(true);
+    if (!airborne && !grinding && !wall) this.broom.clampToGround(this.root); // the straw never digs into the ground
+    // contact shadow: on the ground under her, fading out in the air, light on a rail, softer as the tail lifts
+    const shTarget = airborne || failed ? 0 : grinding ? 0.12 : 0.38 * (1 - this.heel * 0.4);
+    const shm = this.broom.shadow.material as THREE.MeshBasicMaterial;
+    shm.opacity += (shTarget - shm.opacity) * ease(10);
+    this.broom.shadow.visible = shm.opacity > 0.01;
+    this.broom.shadow.rotation.z = BROOM.yaw + this.carve;
     const tip = this.board.localToWorld(_tip.copy(BROOM.tail));
     this.root.worldToLocal(tip);
     const lat = this.lateral * this.latSign;
     const sp = s.speed;
     const rates: [number, number, number] = failed ? [0, 0, 0] : [
-      (grinding || skim ? 4 : 8 + Math.min(16, sp * 0.8)) * (airborne ? 0.8 : 1),
-      skim ? 55 : wall ? 30 : 0,
+      (grinding || skim ? 6 : 10 + Math.min(26, sp * 1.2)) * (airborne ? 0.8 : 1),
+      skim ? 38 : wall ? 24 : 0,
       grinding ? 60 : 0,
     ];
     this.trail.update(dt, rates, x + tip.x, y + tip.y, lat + tip.z, x, y, lat, sp);
