@@ -1,6 +1,6 @@
 # Icarus's Ascent: movement lab (milestone 1)
 
-TypeScript + Vite + three.js. Fully 3D, built for portrait phones. Placeholder art only.
+TypeScript + Vite + three.js. Fully 3D, built for portrait phones, with a fixed-angle chase camera. Placeholder art only.
 
 ```
 npm install
@@ -30,3 +30,13 @@ node scripts/screenshot.mjs http://localhost:8080/?seed=12345   # headless 390x8
 - `src/course/`: course data (ground chains, gaps, rails, walls, markers) and the seeded lab layout.
 - `src/render/`: presentation only. Camera rig, toon materials, environment (sky dome, fog, sun with shadows, distant scenery), course, rider and effects.
 - `src/diag/`: input recorder, deterministic replay and the dev overlay.
+
+## Camera
+The camera is a fixed-angle chase view: 12 m behind and 6 m above the rider, pitched 12° down, FOV 52°. It pulls back slightly with speed and lifts up to 2.5 m to see over upcoming ramp lips and crests. It only ever translates.
+- Search: `node scripts/camera-search-chase.mjs`
+- Visibility check: `node scripts/camera-visibility.mjs '[[12,6,12,52]]'`
+
+On a 390x844 screen the rider is about 108 px tall with feet at about 77% of screen height. A 7 m gap stays at least 10 px tall out to about 44 m ahead, which is 2.0 s at the hard cap.
+
+## GitHub Pages
+`.github/workflows/deploy.yml` tests, builds with `BASE_PATH=/<repo>/` and deploys to Pages on every push to `main`. In the repo settings, set Pages to "GitHub Actions". For a local build with a base path, run `BASE_PATH=/my-repo/ npm run build` (the default `./` is relative).

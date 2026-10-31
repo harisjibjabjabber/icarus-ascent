@@ -15,7 +15,7 @@ export const ENV_STYLE = {
   skyBelow: '#e4def0',
   fog: '#f0dcd2',
   fogNear: 70,
-  fogFar: 900,
+  fogFar: 1200,
   hemiSky: '#fff1dc',
   hemiGround: '#a8a6d6',
   hemiIntensity: 1.5,
@@ -23,7 +23,7 @@ export const ENV_STYLE = {
   sunIntensity: 2.4,
   /** Direction the sunlight comes FROM (scene space, normalised in code). Low, warm, from upper-left-behind. */
   sunFrom: new THREE.Vector3(-0.6, 0.75, 0.35),
-  cloudSea: '#dcd8f0',
+  cloudSea: '#cfcaee',
   cloudSeaY: -45,
   island: '#e9c9a7',
   islandGrass: '#a9c98a',
@@ -91,8 +91,7 @@ export class Environment {
     const islandMat = toon(ENV_STYLE.island), grassMat = toon(ENV_STYLE.islandGrass), peakMat = toon(ENV_STYLE.peak), colMat = toon(ENV_STYLE.column);
     for (let x = -150; x < length + 500; x += 18 + rng() * 22) {
       // either side of the route, never in front of it near the camera
-      const lateral = (rng() < 0.75 ? 1 : -1) * (110 + rng() * 380);
-      if (lateral < 0 && lateral > -200) continue; // keep the camera side clear
+      const lateral = (rng() < 0.5 ? 1 : -1) * (55 + rng() * 380); // both sides of the route, never on it
       const y = -15 - rng() * 35;
       const p = toScene(x, y, lateral);
       const kind = rng();

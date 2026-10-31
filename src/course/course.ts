@@ -128,6 +128,15 @@ export class Course {
     return lo === Infinity ? 0 : lo;
   }
 
+  /** Highest ground point in (x, x + range]. Used by the chase camera to look over crests and ramp lips. */
+  maxHeightAhead(x: number, range: number): number {
+    let hi = -Infinity;
+    for (const s of this.surfacesInRange(x, x + range)) {
+      for (const p of s.points) if (p.x > x && p.x <= x + range) hi = Math.max(hi, p.y);
+    }
+    return hi;
+  }
+
   /** The gap whose span contains x (or the nearest ahead within lookahead). */
   gapAt(x: number): Gap | null {
     for (const g of this.gaps) if (x >= g.x0 - 0.01 && x <= g.x1 + 0.01) return g;

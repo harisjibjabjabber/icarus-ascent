@@ -102,30 +102,40 @@ export const TUNING = {
   },
 
   camera: {
+    /** Chase camera: fixed angle behind the rider, looking ahead down the route
+     *  (route runs away from the camera, up the screen). Never orbits or rotates;
+     *  it only translates to follow progress.
+     *  Chosen with scripts/camera-search-chase.mjs + scripts/camera-visibility.mjs
+     *  for a 390x844 portrait screen: rider ~108 px tall (12.7%) with feet at
+     *  ~77% of screen height; a 7 m gap stays >= 10 px tall out to ~44 m ahead
+     *  (2.0 s at the 22 m/s hard cap, 2.8 s at the 16 m/s soft cap); 1 m
+     *  obstacles stay >= 10 px out to ~76 m. */
     /** Vertical field of view (deg). */
-    fov: 48,
-    /** Angle (deg) between the route and the screen plane. The route recedes from
-     *  lower-right foreground to upper-left distance. Found with
-     *  scripts/camera-search.mjs / camera-probe.mjs: on a 390x844 portrait screen,
-     *  70 deg keeps ~45 m of route visible ahead (2 s at the soft cap) while the
-     *  rider is still ~5.5% of screen height and slopes stay readable. */
-    routeYawDeg: 70,
-    /** Camera distance from the focus point (m), portrait vs landscape. */
-    distancePortrait: 34,
-    distanceLandscape: 26,
-    /** Camera pitch (deg, downwards). Low enough to keep a band of sky/horizon. */
-    pitchDeg: 22,
-    /** Focus point is lookAheadMin + lookAheadPerSpeed*speed metres ahead of the
-     *  rider, so faster = more visible approach (visibility budget):
-     *  ~32 m (1.5-2 s at cap) of route stays on screen ahead of the rider. */
-    lookAheadMin: 7,
-    lookAheadPerSpeed: 0.25,
-    /** Focus height above the rider (m): pushes the rider into the lower frame. */
-    focusHeight: 6,
-    /** Smoothing time constants (s). */
-    followLag: 0.1,
-    leadLag: 0.6,
+    fov: 52,
+    /** Route yaw in the scene (deg). 90 = route runs straight away from the camera. */
+    routeYawDeg: 90,
+    /** Camera distance behind the rider, and height above the rider (m). */
+    behind: 12,
+    height: 6,
+    /** Fixed downward pitch (deg). */
+    pitchDeg: 12,
+    /** Gentle pull-back with speed so faster = slightly more visible approach (m per m/s). */
+    behindPerSpeed: 0.06,
+    heightPerSpeed: 0.02,
+    /** Look over crests: the camera's height target is raised so it stays at least
+     *  lookOverClearance above the highest ground in the next lookOverRange metres,
+     *  so a landing beyond a ramp lip or crest is visible before takeoff.
+     *  (Translation only; the angle never changes.) */
+    lookOverRange: 30,
+    lookOverClearance: 6.5,
+    /** ...but never lift more than this (m) above the normal follow height, so the rider stays in frame. */
+    lookOverMaxLift: 2.5,
+    /** Landscape screens: same angle, a touch closer since width is plentiful. */
+    landscapeScale: 0.9,
+    /** Smoothing time constants (s). Height lags more so jumps don't bob the view. */
+    followLag: 0.06,
     heightLag: 0.3,
+    pullLag: 0.8,
   },
 
   feedback: {

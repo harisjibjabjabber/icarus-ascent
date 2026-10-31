@@ -10,6 +10,9 @@ export const COURSE_STYLE = {
   stoneTop: '#f5cf98', stoneSide: '#dea486',
   underside: '#c29ab0',
   lipLine: '#6e5f7c',
+  edgeLine: '#2f7d6d',
+  takeoffPost: '#e07a3f',
+  receivePost: '#2f9d87',
   rail: '#b8864b', railPost: '#8f6a43',
   wall: '#d8cfe6', wallTrim: '#9a8fb6',
   marker: '#5d4f6e',
@@ -22,6 +25,7 @@ export class CourseView {
   constructor(readonly course: Course) {
     for (const s of course.surfaces) this.group.add(this.surfaceMesh(s));
     for (const s of course.surfaces) this.group.add(this.lipLine(s));
+    for (const g of course.gaps) this.group.add(this.gapPosts(g.x0, g.yTakeoff, g.x1, g.yReceive));
     for (const r of course.rails) this.group.add(this.railMesh(r.points, r.lateral));
     for (const w of course.walls) this.group.add(this.wallMesh(w));
     for (const m of course.markers) this.group.add(this.marker(m.x, m.label));
@@ -59,8 +63,9 @@ export class CourseView {
       const a = p[i], b = p[i + 1];
       // top: far edge then near edge
       quad([a.x, a.y, W / 2], [b.x, b.y, W / 2], [a.x, a.y, -W / 2], [b.x, b.y, -W / 2], top);
-      // near (camera-side) face
+      // left and right side faces (the chase camera sees whichever the route curves toward)
       quad([a.x, a.y, -W / 2], [b.x, b.y, -W / 2], [a.x, bottom(a.x, a.y), -W / 2], [b.x, bottom(b.x, b.y), -W / 2], side, under);
+      quad([b.x, b.y, W / 2], [a.x, a.y, W / 2], [b.x, bottom(b.x, b.y), W / 2], [a.x, bottom(a.x, a.y), W / 2], side, under);
     }
     // end caps: these are the readable gap edges
     for (const [e, sign] of [[p[0], -1], [p[p.length - 1], 1]] as const) {
@@ -79,10 +84,40 @@ export class CourseView {
     return mesh;
   }
 
-  /** Thin line on the near lip so the riding surface reads crisply at speed. */
-  private lipLine(s: Surface): THREE.Line {
-    const pts = s.points.map((q) => toScene(q.x, q.y + 0.02, -COURSE_STYLE.routeWidth / 2));
-    return new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: COURSE_STYLE.lipLine }));
+  /** Thin lines on both lips so the riding surface and its edges read crisply at speed. */
+  private lipLine(s: Surface): THREE.Group {
+    const g = new THREE.Group();
+    const mat = new THREE.LineBasicMaterial({ color: COURSE_STYLE.lipLine });
+    for (const lat of [-COURSE_STYLE.routeWidth / 2, COURSE_STYLE.routeWidth / 2]) {
+      const pts = s.points.map((q) => toScene(q.x, q.y + 0.02, lat));
+      g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat));
+    }
+    // a line across each chain end marks takeoff and receiving edges of gaps
+    for (const e of [s.points[0], s.points[s.points.length - 1]]) {
+      g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([toScene(e.x, e.y + 0.03, -COURSE_STYLE.routeWidth / 2), toScene(e.x, e.y + 0.03, COURSE_STYLE.routeWidth / 2)]), new THREE.LineBasicMaterial({ color: COURSE_STYLE.edgeLine })));
+    }
+    return g;
+  }
+
+  /** Edge posts: the void of a gap can hide behind a ramp lip from a chase view,
+   *  so both edges get posts (warm = takeoff, teal = receiving). */
+  private gapPosts(x0: number, y0: number, x1: number, y1: number): THREE.Group {
+    const g = new THREE.Group();
+    const W = COURSE_STYLE.routeWidth;
+    const mk = (x: number, y: number, color: string, h: number) => {
+      for (const lat of [-W / 2 - 0.15, W / 2 + 0.15]) {
+        const m = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, h, 6), toon(color));
+        m.position.copy(toScene(x, y + h / 2, lat));
+        m.castShadow = true;
+        g.add(m);
+        const cap = new THREE.Mesh(new THREE.SphereGeometry(0.16, 8, 6), toon(color));
+        cap.position.copy(toScene(x, y + h, lat));
+        g.add(cap);
+      }
+    };
+    mk(x0, y0, COURSE_STYLE.takeoffPost, 1.1);
+    mk(x1, y1, COURSE_STYLE.receivePost, 1.8);
+    return g;
   }
 
   private railMesh(points: { x: number; y: number }[], lateral: number): THREE.Group {
@@ -133,8 +168,8 @@ export class CourseView {
     tex.colorSpace = THREE.SRGBColorSpace;
     const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, fog: true }));
     const gnd = this.course.groundBelow(x, 1e6);
-    sp.position.copy(toScene(x, (gnd?.sample.y ?? 0) + 3.4, 1.2));
-    sp.scale.set(4, 1, 1);
+    sp.position.copy(toScene(x, (gnd?.sample.y ?? 0) + 2.6, -3.6)); // left of the route; rails/walls live on the right
+    sp.scale.set(3.2, 0.8, 1);
     return sp;
   }
 }

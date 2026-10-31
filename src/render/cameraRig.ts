@@ -3,50 +3,49 @@ import { TUNING } from '../tuning';
 import { toScene } from './space';
 
 /**
- * Fixed-orientation follow camera. Never orbits or rotates: it only translates
- * to follow progress. Look-ahead grows with speed so the visible approach time
- * stays roughly constant (visibility budget, brief §4).
+ * Fixed-orientation chase camera. It sits behind and above the rider and looks
+ * ahead down the route at a fixed pitch. It never orbits or rotates: it only
+ * translates to follow progress (x) and, with more lag, height (y).
  */
 export class CameraRig {
   readonly camera: THREE.PerspectiveCamera;
-  private focus = new THREE.Vector2(); // (route x, height)
-  private lead: number = TUNING.camera.lookAheadMin;
+  private fx = 0; // followed route x
+  private fy = 0; // followed height
+  private pull = 0; // smoothed speed-based pull-back
   private initialised = false;
-  private forward: THREE.Vector3;
-  private distance: number = TUNING.camera.distancePortrait;
+  private scale = 1;
 
   constructor() {
     const C = TUNING.camera;
-    this.camera = new THREE.PerspectiveCamera(C.fov, 1, 0.5, 2000);
+    this.camera = new THREE.PerspectiveCamera(C.fov, 1, 0.3, 2400);
     const pitch = (C.pitchDeg * Math.PI) / 180;
-    this.camera.rotation.set(-pitch, 0, 0, 'YXZ');
-    this.forward = new THREE.Vector3(0, -Math.sin(pitch), -Math.cos(pitch));
+    // camera looks along the route direction (scene -Z for yaw 90) pitched down
+    const yaw = ((C.routeYawDeg - 90) * Math.PI) / 180;
+    this.camera.rotation.set(-pitch, -yaw, 0, 'YXZ');
   }
 
   resize(w: number, h: number): void {
-    const C = TUNING.camera;
     this.camera.aspect = w / h;
-    // portrait (aspect ~0.46) uses distancePortrait; landscape (>=1.4) uses distanceLandscape
-    const t = Math.min(1, Math.max(0, (w / h - 0.46) / (1.4 - 0.46)));
-    this.distance = C.distancePortrait + (C.distanceLandscape - C.distancePortrait) * t;
+    this.scale = w / h > 1 ? TUNING.camera.landscapeScale : 1;
     this.camera.updateProjectionMatrix();
   }
 
-  get progress(): number { return this.focus.x; }
-  get height(): number { return this.focus.y; }
+  get progress(): number { return this.fx; }
+  get height(): number { return this.fy; }
 
-  update(dt: number, riderX: number, riderY: number, speed: number, snap = false): void {
+  update(dt: number, riderX: number, riderY: number, speed: number, snap = false, aheadMaxY = -Infinity): void {
     const C = TUNING.camera;
-    const targetLead = C.lookAheadMin + C.lookAheadPerSpeed * speed;
-    const tx = riderX, ty = riderY + C.focusHeight;
+    // raise the follow height to see over an upcoming crest/lip
+    const targetY = Math.max(riderY, Math.min(aheadMaxY + C.lookOverClearance - C.height, riderY + C.lookOverMaxLift));
     if (!this.initialised || snap) {
-      this.lead = targetLead; this.focus.set(tx, ty); this.initialised = true;
+      this.fx = riderX; this.fy = targetY; this.pull = speed; this.initialised = true;
     } else {
-      this.lead += (targetLead - this.lead) * (1 - Math.exp(-dt / C.leadLag));
-      this.focus.x += (tx - this.focus.x) * (1 - Math.exp(-dt / C.followLag));
-      this.focus.y += (ty - this.focus.y) * (1 - Math.exp(-dt / C.heightLag));
+      this.fx += (riderX - this.fx) * (1 - Math.exp(-dt / C.followLag));
+      this.fy += (targetY - this.fy) * (1 - Math.exp(-dt / C.heightLag));
+      this.pull += (speed - this.pull) * (1 - Math.exp(-dt / C.pullLag));
     }
-    const f = toScene(this.focus.x + this.lead, this.focus.y);
-    this.camera.position.copy(f).addScaledVector(this.forward, -this.distance);
+    const behind = (C.behind + C.behindPerSpeed * this.pull) * this.scale;
+    const height = (C.height + C.heightPerSpeed * this.pull) * this.scale;
+    toScene(this.fx - behind, this.fy + height, 0, this.camera.position);
   }
 }

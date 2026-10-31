@@ -35,6 +35,7 @@ export class GameView {
   private edgeMarker: THREE.Mesh;
   private streakTimer = 0;
   showArc = false;
+  private failCam: { x: number; y: number } | null = null;
 
   constructor(container: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance', preserveDrawingBuffer: true });
@@ -76,10 +77,11 @@ export class GameView {
 
   resetRun(s: Snapshot): void {
     this.trail = [];
+    this.failCam = null;
     this.trailLine.visible = false;
     this.failMarker.visible = false;
     this.edgeMarker.visible = false;
-    this.rig.update(0, s.x, s.y, s.speed, true);
+    this.rig.update(0, s.x, s.y, s.speed, true, this.courseView ? this.courseView.course.maxHeightAhead(s.x, TUNING.camera.lookOverRange) : -Infinity);
   }
 
   onEvent(e: SimEvent, speed: number): void {
@@ -99,6 +101,9 @@ export class GameView {
         this.effects.landPuff(e.x, e.y, e.impact, e.material, e.speedAfter);
         break;
       case 'fail': {
+        const c = this.courseView?.course;
+        const lip = c ? c.maxHeightAhead(e.info.x - 14, 18) : e.info.y;
+        this.failCam = { x: e.info.x - 7, y: Number.isFinite(lip) ? lip : e.info.y };
         // readable failure: show the flight path, where it ended, and the edge it needed
         this.showTrail();
         this.failMarker.position.copy(toScene(e.info.x, e.info.y, -0.2));
@@ -106,7 +111,7 @@ export class GameView {
         this.failMarker.visible = true;
         if (e.info.gapX1 !== undefined) {
           const gnd = this.courseView?.course.groundBelow(e.info.gapX1 + 0.05, 1e6);
-          this.edgeMarker.position.copy(toScene(e.info.gapX1, (gnd?.sample.y ?? 0) + 2, -1.7));
+          this.edgeMarker.position.copy(toScene(e.info.gapX1, (gnd?.sample.y ?? 0) + 2, -1.8));
           this.edgeMarker.visible = true;
         }
         break;
@@ -140,8 +145,15 @@ export class GameView {
     if (airborne && (this.trail.length === 0 || Math.abs(this.trail[this.trail.length - 1].x - x) > 0.4)) this.trail.push({ x, y });
     if (this.trail.length > 400) this.trail.shift();
     this.rider.update(dt, x, y, lerp(prev.angle, curr.angle), curr.speed, airborne, curr.vy);
-    this.rig.update(dt, x, y, failed ? 0 : curr.speed); // on failure keep the miss + receiving edge in frame
-    this.env.follow(toScene(x + 6, y), this.rig.camera.position);
+    const course = this.courseView?.course;
+    if (failed && this.failCam) {
+      // pull back and up to the takeoff level so the miss, both gap edges and the flight path are in frame
+      this.rig.update(dt, this.failCam.x, this.failCam.y, 0, false);
+    } else {
+      const ahead = course ? course.maxHeightAhead(x, TUNING.camera.lookOverRange) : -Infinity;
+      this.rig.update(dt, x, y, curr.speed, false, ahead);
+    }
+    this.env.follow(toScene(x + 10, y), this.rig.camera.position);
     // restrained air-cutting streaks scale with actual speed
     if (curr.speed > 11 && !failed) {
       this.streakTimer -= dt * (curr.speed - 10) * 0.9;
