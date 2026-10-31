@@ -85,12 +85,13 @@ function buildClip(name: string, keys: Key[], vrm: VRM, ik: THREE.Object3D[]): T
   for (const b of bones) {
     const node = vrm.humanoid.getNormalizedBoneNode(b as never); if (!node) continue;
     const vals: number[] = [];
-    for (const k of keys) { const e = k.pose[b] ?? [0, 0, 0]; vals.push(...quat(e).toArray()); }
+    const v0 = vrm.meta?.metaVersion === '0'; // VRM0 normalized bones are mirrored about Y: negate x/z (three-vrm convention)
+    for (const k of keys) { const e = k.pose[b] ?? [0, 0, 0]; const qq = quat(e); if (v0) { qq.x = -qq.x; qq.z = -qq.z; } vals.push(...qq.toArray()); }
     tracks.push(new THREE.QuaternionKeyframeTrack(`${node.name}.quaternion`, times, vals));
   }
   const hips = vrm.humanoid.getNormalizedBoneNode('hips')!;
   const rest = hips.position.clone();
-  tracks.push(new THREE.VectorKeyframeTrack(`${hips.name}.position`, times, keys.flatMap((k) => [rest.x + (k.hipsX ?? 0), k.hipsY, rest.z])));
+  tracks.push(new THREE.VectorKeyframeTrack(`${hips.name}.position`, times, keys.flatMap((k) => [rest.x + (vrm.meta?.metaVersion === '0' ? -1 : 1) * (k.hipsX ?? 0), k.hipsY, rest.z])));
   tracks.push(new THREE.VectorKeyframeTrack(`${ik[0].name}.position`, times, keys.flatMap((k) => k.ikL)));
   tracks.push(new THREE.VectorKeyframeTrack(`${ik[1].name}.position`, times, keys.flatMap((k) => k.ikR)));
   return new THREE.AnimationClip(name, keys[keys.length - 1].t, tracks);
@@ -130,6 +131,7 @@ new GLTFLoader().register((p) => new VRMLoaderPlugin(p)).load('./' + (q.get('mod
   const vrm: VRM = gltf.userData.vrm;
   VRMUtils.removeUnnecessaryVertices(gltf.scene);
   VRMUtils.combineSkeletons(gltf.scene);
+  VRMUtils.rotateVRM0(vrm); // VRM0 files face -Z; no-op for VRM1
   vrm.scene.traverse((o) => { o.frustumCulled = false; if ((o as THREE.Mesh).isMesh) o.castShadow = true; });
   // soft painterly cel: warm-lavender shade, softer terminator, warm rim, thin outline (BotW/Ghibli-leaning)
   const mats = new Set<MToonMaterial>();
@@ -140,6 +142,18 @@ new GLTFLoader().register((p) => new VRMLoaderPlugin(p)).load('./' + (q.get('mod
     m.shadeColorFactor.lerp(new THREE.Color('#b59ab8'), 0.35);
     m.shadingToonyFactor = 0.75; m.shadingShiftFactor = -0.05;
     m.parametricRimColorFactor.set('#ffd9a8'); m.parametricRimFresnelPowerFactor = 3.5; m.parametricRimLiftFactor = 0.05; m.rimLightingMixFactor = 0.6;
+  }
+  // tint=icarus: quick concept recolour (cream top, terracotta skirt/shorts, brown shoes) + gold sash at the hips
+  if (q.get('tint') === 'icarus') {
+    const recol: [string, string, boolean][] = [['Tops', '#f4e6c8', false], ['Bottoms', '#c4673f', true], ['Shoes', '#6e4630', true]];
+    vrm.scene.traverse((o) => { const me = o as THREE.Mesh; if (!me.isMesh) return; (Array.isArray(me.material) ? me.material : [me.material]).forEach((x) => {
+      const mm = x as MToonMaterial; if (!mm.isMToonMaterial) return;
+      for (const [k, c, flat] of recol) if (mm.name.startsWith(k) && !mm.isOutline) { if (flat) { mm.map = null; mm.shadeMultiplyTexture = null; } mm.color.set(c); mm.shadeColorFactor.set(c).multiplyScalar(0.72); mm.needsUpdate = true; }
+    }); });
+    const hipsN = vrm.humanoid.getNormalizedBoneNode('hips')!;
+    const sash = new THREE.Mesh(new THREE.TorusGeometry(0.135, 0.022, 8, 32), new MToonMaterial({ color: new THREE.Color('#d9a441'), shadeColorFactor: new THREE.Color('#9a6a2a'), shadingToonyFactor: 0.8 }));
+    sash.rotation.x = Math.PI / 2; sash.scale.set(1, 0.78, 1); sash.position.y = 0.06; sash.castShadow = true;
+    vrm.humanoid.getRawBoneNode('hips')!.add(sash); void hipsN;
   }
   if (q.get('simple') === '1') vrm.scene.traverse((o) => { const me = o as THREE.Mesh; if (me.isMesh && (me.material as MToonMaterial).isMToonMaterial) { const mm = me.material as MToonMaterial; me.material = new THREE.MeshLambertMaterial({ map: mm.map }); } });
   // fresh MToon (soft painterly cel + outline) for generated models: keeps only the base texture
