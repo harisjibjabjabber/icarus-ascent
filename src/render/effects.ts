@@ -11,7 +11,7 @@ export class Effects {
   private next = 0;
   private geo = new THREE.IcosahedronGeometry(1, 0);
 
-  constructor(size = 160) {
+  constructor(size = 260) {
     for (let i = 0; i < size; i++) {
       const mat = new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0, depthWrite: false });
       const mesh = new THREE.Mesh(this.geo, mat);
@@ -59,6 +59,45 @@ export class Effects {
     const p = toScene(x + 1.2 + Math.random() * 1.5, y + 0.5 + Math.random() * 1.2, (Math.random() - 0.5) * 1.2);
     const v = ROUTE_DIR.clone().multiplyScalar(-speed * 0.25);
     this.spawn(p, v, 0.18, 0.035, '#ffffff', 0.3, 0);
+  }
+
+  /** Sparks exactly at the board-rail contact, thrown back and up. */
+  sparks(x: number, y: number, lateral: number, speed: number, n = 2): void {
+    const base = toScene(x, y + 0.05, lateral);
+    for (let i = 0; i < n; i++) {
+      const v = ROUTE_DIR.clone().multiplyScalar(-(1 + Math.random() * 3) + speed * 0.3);
+      v.y = 1 + Math.random() * 3;
+      v.x += (Math.random() - 0.5) * 2; v.z += (Math.random() - 0.5) * 2;
+      this.spawn(base.clone(), v, 0.2 + Math.random() * 0.2, 0.06 + Math.random() * 0.05, Math.random() < 0.5 ? '#ffd36b' : '#ff9a3c', 0.2, 1);
+    }
+  }
+
+  /** Friction smoke where the board meets the wall; trails behind the contact. */
+  wallSmoke(x: number, y: number, lateral: number, speed: number): void {
+    const p = toScene(x - 0.3, y + 0.3 + Math.random() * 0.4, lateral);
+    const v = ROUTE_DIR.clone().multiplyScalar(speed * 0.35);
+    v.y = 0.2 + Math.random() * 0.5;
+    v.x -= 0.4 + Math.random() * 0.6; // drift off the wall toward the route
+    this.spawn(p, v, 0.5 + Math.random() * 0.3, 0.12 + Math.random() * 0.08, '#efe6ea', 3, 2.5);
+  }
+
+  /** Dust from the tail during a heel skim. */
+  skimDust(x: number, y: number, speed: number): void {
+    const p = toScene(x - 0.6, y + 0.05, (Math.random() - 0.5) * 0.4);
+    const v = ROUTE_DIR.clone().multiplyScalar(speed * 0.4);
+    v.y = 0.3 + Math.random() * 0.6;
+    v.x += (Math.random() - 0.5) * 1.2;
+    this.spawn(p, v, 0.35 + Math.random() * 0.2, 0.08 + Math.random() * 0.05, '#e6d2bd', 2.5, 4);
+  }
+
+  /** Small ring of air when a flip completes / big events. */
+  ring(x: number, y: number, lateral: number, color = '#ffffff'): void {
+    const base = toScene(x, y + 0.8, lateral);
+    for (let i = 0; i < 10; i++) {
+      const a = (i / 10) * Math.PI * 2;
+      const v = new THREE.Vector3(Math.cos(a) * 2.5, Math.sin(a) * 2.5, 0);
+      this.spawn(base.clone(), v, 0.3, 0.06, color, 1, 4);
+    }
   }
 
   update(dt: number): void {

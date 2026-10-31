@@ -9,6 +9,7 @@ npm test           # vitest: movement invariants, gesture sequences, replay dete
 npm run build      # -> dist/
 scripts/serve-public.sh   # static server on :8080 + Cloudflare quick tunnel (see notes)
 node scripts/screenshot.mjs http://localhost:8080/?seed=12345   # headless 390x844 screenshots
+node scripts/screenshot-tricks.mjs   # deterministic grind / wall / flip shots via the dev autopilot (icarus.pause/autopilot/advance)
 ```
 
 ## Controls
@@ -16,6 +17,11 @@ node scripts/screenshot.mjs http://localhost:8080/?seed=12345   # headless 390x8
 |---|---|---|
 | Push | downward stroke (a longer stroke gives a stronger push, up to 0.22 of the screen's short side) | ↓ / S (fresh presses only) |
 | Jump | upward stroke, or reverse a push upward without lifting your finger | ↑ / W / Space |
+| Backflip | a second, fresh upward stroke while airborne (one long stroke is only a jump). It must finish before landing | ↑ again in the air |
+| Grind | in the air, swipe down near a rail's catch area. The catch window is generous. Jump to leave the rail, or ride it to the end | ↓ in the air |
+| Wall ride | in the air, swipe right and hold beside a right-hand wall (needs about 7 m/s or more). Release or jump to leave | hold → |
+| Grab | in the air away from a wall, swipe left/right and hold. Release before landing or you fail | hold ← / → |
+| Heel skim | in the air on ordinary ground, swipe down and keep holding into the landing. The board goes onto its heel and you slow more the longer you hold. Release or push to end it | hold ↓ into landing |
 | Retry (same seed) | tap or swipe after a fail | R, Enter, ↑ |
 | New run (new seed) | "New run" button | N |
 | Dev overlay | "Dev" button | ` or O (`?dev` in URL) |
@@ -26,7 +32,7 @@ node scripts/screenshot.mjs http://localhost:8080/?seed=12345   # headless 390x8
 ## Architecture
 - `src/tuning.ts`: the only tuning resource (gesture thresholds, movement, camera, feedback).
 - `src/input/`: `gesture.ts` is a pure recogniser with 5 stages (dead zone, direction with hysteresis, fire, hold, release or reversal). `mapper.ts` maps gestures and keys to shared `Action`s, and `dom.ts` binds them to the DOM.
-- `src/sim/`: deterministic fixed-step (120 Hz) simulation with an explicit `MoveMode` state machine, swept contact, coyote time and jump buffer. M2 hooks are marked (`grinding`, `wallRiding`, airborne down/side/up).
+- `src/sim/`: deterministic fixed-step (120 Hz) simulation with an explicit `MoveMode` state machine, swept contact, coyote time and jump buffer.: modes `grounded`, `heelSkim`, `airborne` (sub-state none/flip/grab), `grinding`, `wallRiding`, `failed`, `finished`. The sim resolves context from actual proximity (rail catch band, wall span/height/speed).
 - `src/course/`: course data (ground chains, gaps, rails, walls, markers) and the seeded lab layout.
 - `src/render/`: presentation only. Camera rig, toon materials, environment (sky dome, fog, sun with shadows, distant scenery), course, rider and effects.
 - `src/diag/`: input recorder, deterministic replay and the dev overlay.

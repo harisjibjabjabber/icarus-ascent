@@ -9,6 +9,7 @@ import { Recorder, Replayer, type Trace } from './diag/recorder';
 import { DevOverlay } from './diag/overlay';
 import { GameView, snap, type Snapshot } from './render/view';
 import { newSeed } from './rng';
+import { Autopilot } from './diag/autopilot';
 
 /** Composition root: owns the loop and wires input -> sim -> presentation/diagnostics. */
 export class Game {
@@ -24,6 +25,8 @@ export class Game {
   private curr!: Snapshot;
   private failTime = 0;
   private lastFrame = 0;
+  private paused = false;
+  private autopilot: Autopilot | null = null;
   private fps = 60;
   private hintDismissed = false;
   readonly gestures = new GestureRecognizer();
@@ -36,7 +39,7 @@ export class Game {
     const hud = document.createElement('div');
     hud.className = 'hud';
     hud.innerHTML = `
-      <div class="hint">Swipe <b>down</b> to push · swipe <b>up</b> to jump<br><span>Keys: ↓ push · ↑ / Space jump</span></div>
+      <div class="hint">Swipe <b>down</b> push · <b>up</b> jump<br>In the air: <b>up</b> backflip · <b>down</b> grind a rail · hold <b>right</b> by a wall to wall-ride (else grab)<br>Hold <b>down</b> into a landing to heel-skim (slows you)<br><span>Keys: ↓ push/grind/skim · ↑ / Space jump/flip · → / ← hold wall-ride/grab</span></div>
       <div class="fail"><div class="fail-text"></div><div class="fail-sub">Tap / ↑ to retry · same course</div></div>
       <div class="buttons"><button data-act="new">New run</button><button data-act="dev">Dev</button></div>
       <div class="speed"></div>`;
@@ -69,6 +72,18 @@ export class Game {
       lastTrace: () => this.lastTrace,
       replay: (t?: Trace) => this.startReplay(t ?? this.lastTrace),
       tuning: TUNING,
+      // dev: freeze the real-time loop and drive the sim deterministically (screenshots, debugging)
+      pause: (on = true) => { this.paused = on; this.lastFrame = 0; },
+      autopilot: (opts: ConstructorParameters<typeof Autopilot>[0]) => { this.autopilot = new Autopilot(opts); },
+      advance: (ticks: number, until?: (g: Game) => boolean) => {
+        for (let i = 0; i < ticks; i++) {
+          this.tick();
+          if (i % 2 === 1) this.view.render(TUNING.sim.dt * 2, this.prev, this.curr, 1);
+          if (until && until(this)) break;
+        }
+        this.view.render(TUNING.sim.dt, this.prev, this.curr, 1);
+        return this.sim.state.tick;
+      },
     };
   }
 
@@ -131,6 +146,7 @@ export class Game {
 
   private tick(): void {
     const tick = this.sim.state.tick;
+    if (this.autopilot && !this.replayer) this.pending.push(...this.autopilot.next(this.sim));
     const actions = this.replayer ? this.replayer.actionsFor(tick) : this.pending.splice(0);
     for (const a of actions) { if (!this.replayer) this.recorder.record(tick, a); this.sim.enqueue(a); }
     this.prev = this.curr;
@@ -151,6 +167,7 @@ export class Game {
   }
 
   frame(now: number): void {
+    if (this.paused) return;
     const dtReal = this.lastFrame ? Math.min(0.1, (now - this.lastFrame) / 1000) : 1 / 60;
     this.lastFrame = now;
     this.fps += (1 / Math.max(dtReal, 1e-3) - this.fps) * 0.05;
@@ -162,7 +179,12 @@ export class Game {
     this.view.render(dtReal, this.prev, this.curr, this.acc / dt);
     if (this.overlay.visible) this.view.setArc(predictJumpArc(this.sim));
     else this.view.setArc([]);
-    this.overlay.update(this.sim.state, this.gestures, { seed: this.seed, replay: !!this.replayer, fps: this.fps });
+    this.overlay.update(this.sim.state, this.gestures, {
+      seed: this.seed, replay: !!this.replayer, fps: this.fps,
+      context: this.sim.state.mode === 'airborne'
+        ? `rail: ${this.sim.railCatchReport() ?? 'none near'} | wall: ${this.sim.wallCatchable().reason ?? 'catchable'}`
+        : this.sim.state.mode,
+    });
     this.ui.speed.style.setProperty('--v', String(Math.min(1, this.curr.speed / TUNING.movement.hardCap)));
   }
 }

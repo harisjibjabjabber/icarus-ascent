@@ -10,9 +10,13 @@ import { toScene } from './space';
 import { TUNING } from '../tuning';
 
 /** Interpolatable slice of sim state. */
-export interface Snapshot { x: number; y: number; angle: number; speed: number; vy: number; mode: RiderState['mode'] }
+export interface Snapshot {
+  x: number; y: number; angle: number; speed: number; vy: number; mode: RiderState['mode'];
+  air: RiderState['air']; flip: number; railId: number; wallId: number;
+}
 export const snap = (s: RiderState): Snapshot => ({
-  x: s.x, y: s.y, angle: s.angle, vy: s.vy, mode: s.mode,
+  x: s.x, y: s.y, angle: s.angle, vy: s.vy, mode: s.mode, air: s.air, flip: s.air === 'flip' ? s.flip : 0,
+  railId: s.railId, wallId: s.wallId,
   speed: s.mode === 'airborne' ? Math.hypot(s.vx, s.vy) : s.speed,
 });
 
@@ -35,6 +39,7 @@ export class GameView {
   private failMarker: THREE.Mesh;
   private edgeMarker: THREE.Mesh;
   private streakTimer = 0;
+  private contactFx = 0;
   showArc = false;
   private failCam: { x: number; y: number } | null = null;
 
@@ -100,6 +105,43 @@ export class GameView {
       case 'land':
         this.rider.kick(Math.min(0.45, TUNING.feedback.landSquash * (0.4 + e.impact / 10)));
         this.effects.landPuff(e.x, e.y, e.impact, e.material, e.speedAfter);
+        if (e.flipped) this.effects.ring(e.x, e.y, 0, '#fff3c4');
+        break;
+      case 'grind-start': {
+        this.rider.kick(0.25);
+        const r = this.courseView?.course.rails[e.railId];
+        this.effects.sparks(e.x, e.y, r?.lateral ?? 0, e.speed, 14);
+        this.trail = [];
+        break;
+      }
+      case 'grind-end': {
+        const r = this.courseView?.course.rails[e.railId];
+        this.effects.sparks(e.x, e.y, r?.lateral ?? 0, speed, 8);
+        this.trail = [{ x: e.x, y: e.y }];
+        break;
+      }
+      case 'wall-start': {
+        this.rider.kick(0.2);
+        const w = this.courseView?.course.walls[e.wallId];
+        for (let i = 0; i < 8; i++) this.effects.wallSmoke(e.x, e.y, (w?.lateral ?? 2.4) - 0.05, e.speed);
+        this.trail = [];
+        break;
+      }
+      case 'wall-end': {
+        const w = this.courseView?.course.walls[e.wallId];
+        for (let i = 0; i < 5; i++) this.effects.wallSmoke(e.x, e.y, (w?.lateral ?? 2.4) - 0.05, speed);
+        this.trail = [{ x: e.x, y: e.y }];
+        break;
+      }
+      case 'skim-start':
+        this.rider.kick(0.15);
+        for (let i = 0; i < 6; i++) this.effects.skimDust(e.x, e.y, speed);
+        break;
+      case 'flip-complete':
+        this.effects.ring(e.x, e.y, this.rider.currentLateral);
+        break;
+      case 'grab-start':
+        this.rider.kick(0.1);
         break;
       case 'fail': {
         const c = this.courseView?.course;
@@ -145,8 +187,20 @@ export class GameView {
     const airborne = curr.mode === 'airborne';
     if (airborne && (this.trail.length === 0 || Math.abs(this.trail[this.trail.length - 1].x - x) > 0.4)) this.trail.push({ x, y });
     if (this.trail.length > 400) this.trail.shift();
-    this.rider.update(dt, x, y, lerp(prev.angle, curr.angle), curr.speed, airborne, curr.vy);
     const course = this.courseView?.course;
+    let lateral = 0;
+    if (curr.mode === 'grinding' && course) lateral = course.rails[curr.railId].lateral;
+    if (curr.mode === 'wallRiding' && course) lateral = course.walls[curr.wallId].lateral - 0.3;
+    const flip = curr.flip > 0 ? (curr.flip >= prev.flip ? lerp(prev.flip, curr.flip) : curr.flip) : 0;
+    this.rider.update(dt, curr, x, y, lerp(prev.angle, curr.angle), flip, lateral);
+    // sustained contact feedback, emitted at the actual contact point
+    this.contactFx -= dt;
+    if (this.contactFx <= 0 && !failed) {
+      this.contactFx = 1 / 40;
+      if (curr.mode === 'grinding') this.effects.sparks(x, y, this.rider.currentLateral, curr.speed, 3);
+      if (curr.mode === 'wallRiding' && course) this.effects.wallSmoke(x, y, course.walls[curr.wallId].lateral - 0.05, curr.speed);
+      if (curr.mode === 'heelSkim' && curr.speed > 0.5 && Math.random() < 0.6) this.effects.skimDust(x, y, curr.speed);
+    }
     if (failed && this.failCam) {
       // pull back and up to the takeoff level so the miss, both gap edges and the flight path are in frame
       this.rig.update(dt, this.failCam.x, this.failCam.y, 0, false);

@@ -13,8 +13,8 @@ export const COURSE_STYLE = {
   edgeLine: '#2f7d6d',
   takeoffPost: '#e07a3f',
   receivePost: '#2f9d87',
-  rail: '#b8864b', railPost: '#8f6a43',
-  wall: '#d8cfe6', wallTrim: '#9a8fb6',
+  rail: '#b8864b', railPost: '#8f6a43', railRequired: '#ffb347',
+  wall: '#d8cfe6', wallTrim: '#9a8fb6', wallRequired: '#bfe3d6',
   marker: '#5d4f6e',
 };
 
@@ -26,7 +26,7 @@ export class CourseView {
     for (const s of course.surfaces) this.group.add(this.surfaceMesh(s));
     for (const s of course.surfaces) this.group.add(this.lipLine(s));
     for (const g of course.gaps) this.group.add(this.gapPosts(g.x0, g.yTakeoff, g.x1, g.yReceive));
-    for (const r of course.rails) this.group.add(this.railMesh(r.points, r.lateral));
+    for (const r of course.rails) this.group.add(this.railMesh(r.points, r.lateral, r.required));
     for (const w of course.walls) this.group.add(this.wallMesh(w));
     for (const m of course.markers) this.group.add(this.marker(m.x, m.label));
   }
@@ -120,20 +120,23 @@ export class CourseView {
     return g;
   }
 
-  private railMesh(points: { x: number; y: number }[], lateral: number): THREE.Group {
+  private railMesh(points: { x: number; y: number }[], lateral: number, required: boolean): THREE.Group {
     const g = new THREE.Group();
-    const curve = new THREE.CatmullRomCurve3(points.map((q) => toScene(q.x, q.y, lateral)));
-    const mat = toon(COURSE_STYLE.rail);
-    const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, 32, 0.07, 6, false), mat);
+    const curve = new THREE.CurvePath<THREE.Vector3>();
+    for (let i = 0; i + 1 < points.length; i++) curve.add(new THREE.LineCurve3(toScene(points[i].x, points[i].y, lateral), toScene(points[i + 1].x, points[i + 1].y, lateral)));
+    // required rails read differently before commitment: brighter, thicker
+    const mat = toon(required ? COURSE_STYLE.railRequired : COURSE_STYLE.rail);
+    const tube = new THREE.Mesh(new THREE.TubeGeometry(curve as unknown as THREE.Curve<THREE.Vector3>, 48, required ? 0.1 : 0.07, 6, false), mat);
     tube.castShadow = true;
     g.add(tube);
     const postMat = toon(COURSE_STYLE.railPost);
     const a = points[0], b = points[points.length - 1];
     for (let x = a.x; x <= b.x + 0.01; x += 4) {
-      const t = (x - a.x) / (b.x - a.x);
-      const y = a.y + (b.y - a.y) * t;
+      let y = a.y;
+      for (let i = 0; i + 1 < points.length; i++) if (x >= points[i].x && x <= points[i + 1].x) y = points[i].y + ((points[i + 1].y - points[i].y) * (x - points[i].x)) / (points[i + 1].x - points[i].x);
       const gnd = this.course.groundBelow(x, y);
-      const h = gnd ? y - gnd.sample.y : 3;
+      if (!gnd || y - gnd.sample.y > 6) continue; // over a gap: no post
+      const h = y - gnd.sample.y;
       const post = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, h, 5), postMat);
       post.position.copy(toScene(x, y - h / 2, lateral));
       g.add(post);
@@ -144,7 +147,7 @@ export class CourseView {
   private wallMesh(w: { x0: number; x1: number; yBottom: number; yTop: number; lateral: number }): THREE.Group {
     const g = new THREE.Group();
     const len = w.x1 - w.x0, h = w.yTop - w.yBottom;
-    const box = new THREE.Mesh(new THREE.BoxGeometry(len, h, 0.5), toon(COURSE_STYLE.wall));
+    const box = new THREE.Mesh(new THREE.BoxGeometry(len, h, 0.5), toon((w as { required?: boolean }).required ? COURSE_STYLE.wallRequired : COURSE_STYLE.wall));
     box.position.copy(toScene(w.x0 + len / 2, w.yBottom + h / 2, w.lateral + 0.25));
     box.rotation.y = ROUTE_YAW;
     box.castShadow = box.receiveShadow = true;

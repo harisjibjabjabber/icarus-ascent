@@ -58,7 +58,7 @@ export function buildLabCourse(seed: number): Course {
   const floorB = by - 2.2;
   extend(b, bx + 26, floorB, linear, 4);
   const r1x = bx + 30, r1len = 26;
-  rails.push({ id: 0, points: [{ x: r1x, y: floorB + 1.0 }, { x: r1x + r1len, y: floorB + 0.6 }], lateral: 2.3, required: false });
+  rails.push({ id: 0, points: [{ x: r1x, y: floorB + 1.0 }, { x: r1x + r1len, y: floorB + 0.6 }], lateral: 1.2, required: false });
   markers.push({ x: r1x - 3, label: 'RAIL · OPTIONAL' });
   extend(b, r1x + r1len + 10, floorB, linear, 4);
   const floor2 = floorB - randRange(rng, 3, 4.5);

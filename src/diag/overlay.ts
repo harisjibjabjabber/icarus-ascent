@@ -41,6 +41,8 @@ export class DevOverlay {
     if (e.type === 'reject') { this.lastReject = `${e.action}: ${e.reason}`; this.push(`rej ${e.reason}`); }
     if (e.type === 'land') this.push(`land ${e.speedBefore.toFixed(1)}→${e.speedAfter.toFixed(1)} m/s impact ${e.impact.toFixed(1)}`);
     if (e.type === 'jump' && e.kind !== 'ground') this.push(`${e.kind} jump`);
+    if (e.type === 'grind-start' || e.type === 'wall-start' || e.type === 'flip-start' || e.type === 'flip-complete' || e.type === 'skim-start' || e.type === 'grab-start') this.push(e.type);
+    if (e.type === 'grind-end' || e.type === 'wall-end' || e.type === 'skim-end') this.push(`${e.type} (${e.reason})`);
     if (e.type === 'fail') this.push(`FAIL ${e.info.kind}`);
   }
 
@@ -48,7 +50,7 @@ export class DevOverlay {
 
   resetRun(): void { this.peakSpeed = 0; }
 
-  update(st: RiderState, g: GestureRecognizer, extra: { seed: number; replay: boolean; fps: number }): void {
+  update(st: RiderState, g: GestureRecognizer, extra: { seed: number; replay: boolean; fps: number; context?: string }): void {
     if (!this.visible) return;
     const speed = st.mode === 'airborne' ? Math.hypot(st.vx, st.vy) : st.speed;
     this.peakSpeed = Math.max(this.peakSpeed, speed);
@@ -60,6 +62,8 @@ export class DevOverlay {
       `speed   ${speed.toFixed(2)} m/s  (peak ${this.peakSpeed.toFixed(1)})`,
       `x ${st.x.toFixed(1)}  y ${st.y.toFixed(2)}  vx ${st.vx.toFixed(1)} vy ${st.vy.toFixed(1)}`,
       `coyote ${(st.coyote * 1000).toFixed(0)}ms  buffer ${(st.jumpBuffer * 1000).toFixed(0)}ms  air ${st.airTime.toFixed(2)}s`,
+      `trick   air=${st.air}${st.air === 'flip' ? ` ${(st.flip * 100).toFixed(0)}%` : ''} flips=${st.flipsThisJump} prep=${st.prepHeld ? 'held' : st.prepTimer > 0 ? 'armed' : '-'} contact ${st.contactTime.toFixed(2)}s`,
+      `context ${extra.context ?? '-'}`,
       `gesture ${gd.stage} dir=${gd.dir} travel=${gd.travel.toFixed(3)}vu`,
       `detected ${gd.lastDetected}`,
       `action  ${this.lastAction}`,

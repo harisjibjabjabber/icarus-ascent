@@ -18,12 +18,6 @@ function wallCourse(): Course {
   return new Course(1, [{ id: 0, kind: 'ground', points: [{ x: -10, y: 0 }, { x: 2000, y: 0 }], material: 'stone', thickness: 4 }],
     [], [{ id: 0, x0: 40, x1: 80, yBottom: -1, yTop: 5, side: 'right', lateral: 2.4, required: false }], [], 0, 1e9);
 }
-const collect = (sim: Simulation, seconds: number, each?: (s: Simulation) => void): SimEvent[] => {
-  const ev: SimEvent[] = [];
-  run(sim, seconds, (s) => { each?.(s); });
-  ev.push(...sim.drainEvents());
-  return ev;
-};
 /** Step until x passes `x` while grounded, then jump. */
 function jumpAt(sim: Simulation, x: number): number {
   stepUntil(sim, (s) => s.state.x >= x);
@@ -376,7 +370,7 @@ describe('lab features are genuine', () => {
   it('optional rail is beside the ordinary route; required rail is on it', async () => {
     const { buildLabCourse } = await import('../src/course/lab');
     const c = buildLabCourse(5);
-    expect(c.rails.find((r) => !r.required)!.lateral).toBeGreaterThan(1.5);
+    expect(c.rails.find((r) => !r.required)!.lateral).toBeGreaterThan(0.9);
     expect(c.rails.find((r) => r.required)!.lateral).toBe(0);
     expect(c.walls[0].required).toBe(true);
     expect(c.walls[0].x1 - c.walls[0].x0).toBeGreaterThan(30);
