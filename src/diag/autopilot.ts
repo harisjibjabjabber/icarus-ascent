@@ -11,6 +11,8 @@ export interface AutopilotOptions {
   flipAtFirstGap?: boolean;
   /** Backflip off crest launches (no gap) for style. */
   styleFlips?: boolean;
+  /** Grab off crest launches (no gap) for style. */
+  styleGrabs?: boolean;
   /** Ride the optional rail. */
   optionalRail?: boolean;
   /** How to deal with pots: jump over them (default) or heel-break them. */
@@ -51,7 +53,7 @@ export class Autopilot {
 
   /** Predicted airtime of the current flight (pure: clones the sim). */
   private predictAirtime(sim: Simulation): number {
-    const c = new Simulation(sim.course, sim.T);
+    const c = new Simulation(sim.course, sim.T, undefined, { stream: false });
     c.cloneFrom(sim);
     let t = 0;
     for (let i = 0; i < 600 && c.state.mode === 'airborne'; i++) { c.step(); t += c.dt; }
@@ -63,6 +65,10 @@ export class Autopilot {
     const st = sim.state, course = sim.course;
     if (st.mode === 'finished' || st.mode === 'failed') return out;
     this.t++;
+    if (this.t % 600 === 0) { // streamed courses recycle obstacles: forget ones that are gone
+      for (const id of this.potsTried) if (!course.hasObstacle(id)) this.potsTried.delete(id);
+      for (const id of this.pillarsTried) if (!course.hasObstacle(id)) this.pillarsTried.delete(id);
+    }
     const justTookOff = st.mode === 'airborne' && this.lastMode !== 'airborne';
     this.lastMode = st.mode;
     const pots = this.opts.pots ?? 'jump';
@@ -76,7 +82,7 @@ export class Autopilot {
         const early = g.requires === 'rail' ? 2.2 : (this.opts.jumpEarly ?? 0.8);
         if (st.x > g.x0 - early && st.x < g.x0 - early + 0.6) jump = true;
       }
-      const r = this.opts.optionalRail ? course.rails.find((q) => !q.required) : undefined;
+      const r = this.opts.optionalRail ? course.rails.find((q) => !q.required && q.points[0].x > st.x - 4) : undefined;
       if (r && st.x > r.points[0].x - 3.2 && st.x < r.points[0].x - 2.6) jump = true;
       for (const o of course.obstacles) {
         if (o.kind !== 'pot' || st.broken.includes(o.id) || this.potsTried.has(o.id)) continue;
@@ -104,7 +110,7 @@ export class Autopilot {
       else if (this.heelStroke === -1) out.push({ type: 'down', strokeId: this.id(), strength: 0.65, fresh: true, source: 'test' });
     } else if (st.mode === 'airborne') {
       const g = course.gaps.find((q) => st.x > q.x0 - 4 && st.x < q.x1);
-      const r = this.opts.optionalRail ? course.rails.find((q) => !q.required) : undefined;
+      const r = this.opts.optionalRail ? course.rails.find((q) => !q.required && q.points[q.points.length - 1].x > st.x) : undefined;
       const nearOptional = r && st.x > r.points[0].x - 3.5 && st.x < r.points[0].x + 2;
       if ((g?.requires === 'rail' || nearOptional) && !this.prepDone) { out.push({ type: 'down', strokeId: this.id(), strength: 0.65, fresh: true, source: 'test' }); this.prepDone = true; }
       if (g?.requires === 'wall' && this.wallStroke === -1 && st.lastContact !== 'wall') {
@@ -120,14 +126,19 @@ export class Autopilot {
       if (justTookOff && this.airPlan === 'none' && this.opts.flipAtFirstGap && !this.flipDone && g === course.gaps[0]) {
         if (this.predictAirtime(sim) > sim.K.flipDuration + 0.2) this.airPlan = 'flip';
       }
-      if (this.opts.styleFlips && this.airPlan === 'none' && st.leftBy === 'crest' && st.airTime > sim.M.coyoteTime + 0.01 && st.flipsThisJump === 0) this.airPlan = 'flip';
+      if (this.opts.styleFlips && this.airPlan === 'none' && st.leftBy === 'crest' && st.airTime > sim.M.coyoteTime + 0.01 && st.flipsThisJump === 0) {
+        this.airPlan = this.predictAirtime(sim) > sim.K.flipDuration + 0.06 ? 'flip' : 'done';
+      }
+      if (this.opts.styleGrabs && this.airPlan === 'none' && st.leftBy === 'crest' && st.airTime > sim.M.coyoteTime + 0.01) {
+        this.airPlan = this.predictAirtime(sim) > 0.45 ? 'grab' : 'done';
+      }
       if (this.airPlan === 'flip' && st.airTime > 0.06 && st.air === 'none') { out.push({ type: 'up', strokeId: this.id(), source: 'test' }); this.airPlan = 'done'; this.flipDone = true; }
       if (this.airPlan === 'grab' && st.airTime > 0.06 && st.air === 'none' && this.grabStroke === -1) {
         this.grabStroke = this.id(); this.grabTicks = 0;
         out.push({ type: 'side', side: 'left', held: true, strokeId: this.grabStroke, source: 'test' });
       }
       // hold the grab through the pillar, then let go
-      const holdUntilPast = this.pillarId >= 0 && !st.broken.includes(this.pillarId) && course.obstacles[this.pillarId].x + 0.5 > st.x;
+      const holdUntilPast = this.pillarId >= 0 && !st.broken.includes(this.pillarId) && (course.obstacle(this.pillarId)?.x ?? -Infinity) + 0.5 > st.x;
       if (this.grabStroke !== -1 && ++this.grabTicks > Math.round(0.2 / sim.dt) && !holdUntilPast) {
         out.push({ type: 'side', side: 'left', held: false, strokeId: this.grabStroke, source: 'test' });
         this.grabStroke = -1; this.airPlan = 'done';

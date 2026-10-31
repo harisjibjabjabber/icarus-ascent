@@ -100,6 +100,8 @@ export class Effects {
     }
   }
 
+  clear(): void { for (const p of this.pool) { p.life = 0; p.mesh.visible = false; p.mat.opacity = 0; } }
+
   update(dt: number): void {
     for (const p of this.pool) {
       if (p.life <= 0) continue;

@@ -63,3 +63,23 @@ On a 390x844 screen the rider is about 108 px tall with feet at about 77% of scr
 - **Slope gravity is asymmetric:** descents pull harder (`slopeGravityDown` 15.5) than climbs cost (`slopeGravityUp` 10). Over-soft-cap drag is scaled down (`descentOverCapScale` 0.3) on descents, so big descents can exceed the soft cap. The hard cap (27.5 m/s) still holds.
 - **Shape helpers** for courses and endless phrases (`src/course/shapes.ts`): `crestPop(pts, rise, len, drop, backLen)` builds a kicker on continuous ground followed by a down-slope landing. `rollingHills(pts, count, amp, period)` builds a pop chain at amp ≈1.4 / period 18 (fast riders pop from ~19 m/s) and stays grounded at gentle settings (amp 0.4 / period 30 never pops, even at the hard cap).
 - The opening course's Descent lesson ends in a crest pop.
+
+## Endless mode
+
+Open it with `?endless` (add `&seed=N` to choose the seed), the **Endless** button on the start card, **Continue endless** after finishing the course, or the top-bar mode button (cycles Course → Endless → Lab; key C, or E for endless). **New run** picks a new seed. The HUD shows distance and your local best, which is saved in `localStorage`.
+
+- **Phrase library** (`src/course/endless.ts`): 18 authored phrases plus 5 connectors (start, boost, bleed, recovery, climb). Each declares an entry speed range, a likely exit speed, its airtime, its receiving surface (flat, down-slope, climb or broad) and a tier (1–3).
+  - Style-air phrases are built from `crestPop` and `rollingHills`, with no gaps: crest pop, rolling hills, valley launch, pop chain, big kicker, double crest, crest flip → pillar, and rail → launch.
+  - Compulsory phrases: hop, pot, heel-skim pair, pot → pillar, step-downs, ramp → flip → broad landing, rail gap, compression → wall ride → receiving climb, big jump → pillar, and pot → gap → pillar.
+- **Assembly:** phrase *i* uses its own seeded RNG, so a seed always produces the same route, whatever the streaming pace. Difficulty rises with distance (0 at 300 m, 1 at 4.8 km).
+  - Tier 2 unlocks at ~0.75 km and tier 3 at ~1.9 km.
+  - Runs of compulsory phrases can be 1, then 2, then 3 long.
+  - Gaps get a little longer and combos tighter as difficulty rises.
+- **Neighbour validation:** connectors are inserted for speed (boost or bleed), for flow (a recovery after a compulsory run) and for height (a climb when the route is far below its start).
+  - Every phrase starts and ends flat, so neighbours join seamlessly: the sim transfers the rider from one chain onto the next.
+- **Streaming:** content is generated 700 m ahead of the rider. Phrases are recycled once they end 160 m behind and have no active ground, rail or wall contact.
+  - Sim state that refers to recycled content (broken obstacles) is pruned.
+  - Course meshes are built per chunk in chunk-local coordinates. Obstacle meshes are pooled and materials are shared.
+  - Scenery streams in 200 m segments.
+- **Floating origin:** the sim uses absolute float64 coordinates, which are exact at any run length. The renderer lays the scene out relative to an origin that is rebased every 1 km (and every 300 m of height), shifting only the objects that persist.
+- **Checkpoints:** every phrase is a checkpoint. A retry starts from the last phrase you rode on the ground, at its declared speed. Traces record the seed and start point and replay bit-for-bit on a freshly streamed course.

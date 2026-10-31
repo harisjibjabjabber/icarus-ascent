@@ -35,9 +35,13 @@ export class Simulation {
   readonly dt: number;
   /** Is a side (Left/Right) stroke currently held? Tracked so a hold can become a wall ride. */
   private sideHeld: { side: 'left' | 'right'; strokeId: number } | null = null;
+  private seenRevision = -1;
 
   /** `start` lets a run begin at a checkpoint (x on the ground, rolling at speed). */
-  constructor(readonly course: Course, readonly T: Tuning = TUNING, readonly start?: { x: number; speed: number }) {
+  /** Prediction clones (`stream: false`) never stream or recycle course content. */
+  private readonly streams: boolean;
+  constructor(readonly course: Course, readonly T: Tuning = TUNING, readonly start?: { x: number; speed: number }, opts: { stream?: boolean } = {}) {
+    this.streams = opts.stream ?? true;
     this.M = T.movement;
     this.K = T.tricks;
     this.dt = T.sim.dt;
@@ -46,7 +50,8 @@ export class Simulation {
 
   private initialState(): RiderState {
     const x = this.start?.x ?? this.course.startX;
-    const g = this.course.groundBelow(x, 1e6)!;
+    if (this.streams) this.course.stream(x);
+    const g = this.course.groundBelow(x, 1e6) ?? { surface: this.course.surfaces[0], sample: { y: 0, slope: 0, seg: 0 } };
     return {
       mode: 'grounded', tick: 0, x, y: g.sample.y, vx: 0, vy: 0, speed: this.start ? this.start.speed : this.M.restCreep,
       surfaceId: g.surface.id, seg: g.sample.seg, angle: Math.atan(g.sample.slope),
@@ -75,6 +80,12 @@ export class Simulation {
 
   /** Advance exactly one fixed step. Queued actions resolve at the start of the step. */
   step(): void {
+    const s0 = this.state;
+    if (this.streams) this.course.stream(s0.x, s0);
+    if (this.course.revision !== this.seenRevision) {
+      this.seenRevision = this.course.revision;
+      s0.broken = s0.broken.filter((id) => this.course.hasObstacle(id));
+    }
     const q = this.queue;
     this.queue = [];
     for (const a of q) this.handle(a);
@@ -361,7 +372,7 @@ export class Simulation {
 
   private stepGrounded(): void {
     const s = this.state, M = this.M, K = this.K, dt = this.dt;
-    const surf = this.course.surface(s.surfaceId);
+    let surf = this.course.surface(s.surfaceId);
     let sm = Course.sample(surf, s.x, s.seg);
     const theta = Math.atan(sm.slope);
     const v = s.speed;
@@ -380,7 +391,7 @@ export class Simulation {
 
     let dist = s.speed * dt;
     let x = s.x, seg = sm.seg;
-    const p = surf.points;
+    let p = surf.points;
     while (dist > 0) {
       const a = p[seg], b = p[seg + 1];
       const segLen = Math.hypot(b.x - a.x, b.y - a.y);
@@ -388,15 +399,19 @@ export class Simulation {
       if (dist <= remain) { x += (dist / segLen) * (b.x - a.x); dist = 0; break; }
       dist -= remain;
       x = b.x;
-      if (seg + 1 >= p.length - 1) { this.leaveEdge(b, Math.atan2(b.y - a.y, b.x - a.x)); return; }
+      const last = seg + 1 >= p.length - 1;
+      // seamless join onto the next streamed chain (no gap): keep rolling
+      const nxt = last ? this.course.findSurface(surf.next) : undefined;
+      if (last && !nxt) { this.leaveEdge(b, Math.atan2(b.y - a.y, b.x - a.x)); return; }
       // crest separation: the surface turns down faster than the rider can follow
-      const c = p[seg + 2];
+      const c = nxt ? nxt.points[1] : p[seg + 2];
       const thA = Math.atan2(b.y - a.y, b.x - a.x), thB = Math.atan2(c.y - b.y, c.x - b.x);
       const turn = thA - thB;
       if (turn > M.crestMinTurn && s.speed > M.crestMinSpeed) {
         const L = (segLen + Math.hypot(c.x - b.x, c.y - b.y)) / 2;
         if (s.speed * s.speed * (turn / L) > M.airGravity * Math.cos(thA) * M.crestStick) { this.leaveEdge(b, thA, true); return; }
       }
+      if (nxt) { surf = nxt; p = nxt.points; seg = 0; s.surfaceId = nxt.id; continue; }
       seg++;
     }
     sm = Course.sample(surf, x, seg);
@@ -629,7 +644,7 @@ export class Simulation {
 
   private stepGrinding(): void {
     const s = this.state, M = this.M, K = this.K, dt = this.dt;
-    const r = this.course.rails[s.railId];
+    const r = this.course.rail(s.railId);
     let sm = Course.railSample(r, s.x);
     const th = Math.atan(sm.slope);
     const v = s.speed;
@@ -689,7 +704,7 @@ export class Simulation {
 
   private stepWall(): void {
     const s = this.state, M = this.M, K = this.K, dt = this.dt;
-    const w = this.course.walls[s.wallId];
+    const w = this.course.wall(s.wallId);
     const v = s.speed;
     let acc = -K.wallFriction - M.airDrag * v * v;
     if (v > M.softCap) acc -= M.overCapDrag * (v - M.softCap);
@@ -782,7 +797,7 @@ export class Simulation {
 /** Dev-overlay helper: the arc the rider would fly if they jumped right now. Pure: clones. */
 export function predictJumpArc(sim: Simulation, maxTicks = 240): Vec2[] {
   if (sim.state.mode !== 'grounded' && sim.state.mode !== 'heelSkim') return [];
-  const clone = new Simulation(sim.course, sim.T);
+  const clone = new Simulation(sim.course, sim.T, undefined, { stream: false });
   clone.cloneFrom(sim);
   clone.state.prepHeld = false; clone.state.prepStrokeId = -1;
   clone.enqueue({ type: 'up', strokeId: -2, source: 'test' });

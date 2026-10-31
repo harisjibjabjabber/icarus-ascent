@@ -2,12 +2,14 @@ import type { Action } from '../input/actions';
 import { Simulation } from '../sim/simulation';
 import { buildLabCourse } from '../course/lab';
 import { buildOpeningCourse } from '../course/opening';
+import { buildEndlessCourse } from '../course/endless';
+import type { Course } from '../course/course';
 import type { RiderState } from '../sim/types';
 
 /** Input trace: everything needed to replay a run bit-for-bit. */
 export interface Trace {
   version: 1;
-  course: 'lab' | 'opening';
+  course: 'lab' | 'opening' | 'endless';
   seed: number;
   /** Checkpoint start (opening retries), if not the course start. */
   start?: { x: number; speed: number };
@@ -17,7 +19,7 @@ export interface Trace {
 
 export class Recorder {
   trace: Trace;
-  constructor(seed: number, course: 'lab' | 'opening' = 'lab', start?: { x: number; speed: number }) {
+  constructor(seed: number, course: 'lab' | 'opening' | 'endless' = 'lab', start?: { x: number; speed: number }) {
     this.trace = { version: 1, course, seed, entries: [], endTick: 0, ...(start ? { start } : {}) };
   }
   record(tick: number, action: Action): void { this.trace.entries.push({ tick, action: { ...action } }); }
@@ -39,7 +41,7 @@ export class Replayer {
 
 /** Headless replay (tests, bug repro): returns the final state. */
 export function replayHeadless(trace: Trace, extraTicks = 0): RiderState {
-  const sim = new Simulation(trace.course === 'opening' ? buildOpeningCourse() : buildLabCourse(trace.seed), undefined, trace.start);
+  const sim = new Simulation(buildCourseFor(trace), undefined, trace.start);
   const rp = new Replayer(trace);
   const end = trace.endTick + extraTicks;
   while (sim.state.tick < end) {
@@ -47,4 +49,8 @@ export function replayHeadless(trace: Trace, extraTicks = 0): RiderState {
     sim.step();
   }
   return sim.state;
+}
+
+export function buildCourseFor(t: { course: Trace['course']; seed: number }): Course {
+  return t.course === 'opening' ? buildOpeningCourse() : t.course === 'endless' ? buildEndlessCourse(t.seed) : buildLabCourse(t.seed);
 }

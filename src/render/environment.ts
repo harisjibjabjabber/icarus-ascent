@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { mulberry32 } from '../rng';
 import { toon } from './materials';
-import { toScene } from './space';
+import { toScene, ORIGIN } from './space';
 
 /**
  * 3D environment scaffold: gradient sky dome, warm sun + soft shadows, gentle fog,
@@ -61,7 +61,7 @@ export class Environment {
   private dome: THREE.Mesh;
   private sunOffset: THREE.Vector3;
 
-  constructor(scene: THREE.Scene) {
+  constructor(private scene: THREE.Scene) {
     scene.fog = new THREE.Fog(ENV_STYLE.fog, ENV_STYLE.fogNear, ENV_STYLE.fogFar);
     this.dome = skyDome();
     scene.add(this.dome);
@@ -79,63 +79,109 @@ export class Environment {
     scene.add(this.group);
   }
 
-  /** Distant low-poly scenery around the course (seeded, static). */
+  /** Distant low-poly scenery, streamed in 200 m segments around the rider. */
   private sea: THREE.Mesh | null = null;
+  private seaBase = ENV_STYLE.cloudSeaY;
+  private seaFollow = false;
+  private seaY = ENV_STYLE.cloudSeaY;
+  private seed = 0;
+  private heightAt: (x: number) => number = () => 0;
+  private segs = new Map<number, THREE.Group>();
+  private shared: { cone: THREE.ConeGeometry; cyl: THREE.CylinderGeometry; cap: THREE.CylinderGeometry; mats: Record<string, THREE.Material> } | null = null;
+  static readonly SEG = 200;
 
-  /** `heightAt(x)`: course height near x; `minY`: lowest course point (the cloud sea sits below it). */
-  buildScenery(seed: number, length: number, heightAt: (x: number) => number = () => 0, minY = 0): void {
-    const seaY = Math.min(ENV_STYLE.cloudSeaY, minY - 32);
-    for (const c of [...this.group.children]) { this.group.remove(c); (c as THREE.Mesh).geometry?.dispose(); }
-    const rng = mulberry32(seed ^ 0x5eed);
-    const sea = new THREE.Mesh(new THREE.CircleGeometry(1400, 48), toon(ENV_STYLE.cloudSea));
-    sea.rotation.x = -Math.PI / 2;
-    sea.position.set(0, seaY, 0);
-    sea.receiveShadow = false;
-    this.group.add(sea);
-    this.sea = sea;
-    const islandMat = toon(ENV_STYLE.island), grassMat = toon(ENV_STYLE.islandGrass), peakMat = toon(ENV_STYLE.peak), colMat = toon(ENV_STYLE.column);
-    for (let x = -150; x < length + 500; x += 18 + rng() * 22) {
-      // either side of the route, never in front of it near the camera
+  /**
+   * `heightAt(x)`: course height near x; `minY`: lowest course point for static courses
+   * (the cloud sea sits below it). `follow`: endless courses — the sea tracks the rider.
+   */
+  buildScenery(seed: number, _length: number, heightAt: (x: number) => number = () => 0, minY = 0, follow = false): void {
+    for (const g of this.segs.values()) this.group.remove(g);
+    this.segs.clear();
+    this.seed = seed;
+    this.heightAt = heightAt;
+    this.seaFollow = follow;
+    this.seaBase = follow ? Infinity : Math.min(ENV_STYLE.cloudSeaY, minY - 32);
+    this.seaY = follow ? heightAt(0) - 45 : this.seaBase;
+    if (!this.shared) {
+      this.shared = {
+        cone: new THREE.ConeGeometry(1, 1, 7, 1), cyl: new THREE.CylinderGeometry(0.8, 1, 1, 8), cap: new THREE.CylinderGeometry(1.03, 1, 1, 7),
+        mats: { island: toon(ENV_STYLE.island), grass: toon(ENV_STYLE.islandGrass), peak: toon(ENV_STYLE.peak), col: toon(ENV_STYLE.column) },
+      };
+    }
+    if (!this.sea) {
+      this.sea = new THREE.Mesh(new THREE.CircleGeometry(1400, 48), toon(ENV_STYLE.cloudSea));
+      this.sea.rotation.x = -Math.PI / 2;
+      this.scene.add(this.sea);
+    }
+    this.sea.position.y = this.seaY;
+  }
+
+  /** Stream scenery segments around route x (deterministic per seed and segment). */
+  streamScenery(x: number, maxX = Infinity): void {
+    const S = Environment.SEG;
+    // only where the course exists (streamed courses): scenery heights follow the route
+    const lo = Math.floor((x - 300) / S), hi = Math.floor((Math.min(x + 1300, maxX) - S) / S);
+    for (const [k, g] of this.segs) if (k < lo || k > hi) { this.group.remove(g); this.segs.delete(k); }
+    for (let k = lo; k <= hi; k++) if (!this.segs.has(k)) { const g = this.buildSegment(k); this.segs.set(k, g); this.group.add(g); }
+  }
+
+  get segmentCount(): number { return this.segs.size; }
+
+  private buildSegment(k: number): THREE.Group {
+    const S = Environment.SEG, sh = this.shared!;
+    const g = new THREE.Group();
+    const rng = mulberry32((this.seed ^ 0x5eed ^ Math.imul(k + 1000003, 0x2545f491)) >>> 0);
+    for (let x = k * S + rng() * 20; x < (k + 1) * S; x += 18 + rng() * 22) {
       const lateral = (rng() < 0.5 ? 1 : -1) * (55 + rng() * 380); // both sides of the route, never on it
-      const y = heightAt(x) - 15 - rng() * 35;
+      const ground = this.heightAt(x);
+      const y = ground - 15 - rng() * 35;
+      const base = Math.min(this.seaFollow ? ground - 45 : this.seaBase, ground - 45);
       const p = toScene(x, y, lateral);
       const kind = rng();
       if (kind < 0.55) {
-        // floating island: inverted cone + grassy cap
-        const r = 6 + rng() * 14;
-        const H = r * (1.2 + rng());
-        const body = new THREE.Mesh(new THREE.ConeGeometry(r, H, 7, 1), islandMat);
-        body.rotation.x = Math.PI;
-        body.position.copy(p);
-        const cap = new THREE.Mesh(new THREE.CylinderGeometry(r * 1.03, r, 1.6, 7), grassMat);
-        cap.position.copy(p);
-        cap.position.y += H / 2 + 0.8;
-        this.group.add(body, cap);
+        const r = 6 + rng() * 14, H = r * (1.2 + rng());
+        const body = new THREE.Mesh(sh.cone, sh.mats.island);
+        body.scale.set(r, H, r); body.rotation.x = Math.PI; body.position.copy(p);
+        const cap = new THREE.Mesh(sh.cap, sh.mats.grass);
+        cap.scale.set(r, 1.6, r); cap.position.copy(p); cap.position.y += H / 2 + 0.8;
+        g.add(body, cap);
         if (rng() < 0.5) {
-          const col = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.8, 6 + rng() * 6, 8), colMat);
+          const h = 6 + rng() * 6;
+          const col = new THREE.Mesh(sh.cyl, sh.mats.col);
+          col.scale.set(0.8, h, 0.8);
           col.position.copy(cap.position).add(new THREE.Vector3((rng() - 0.5) * r, 4, (rng() - 0.5) * r));
-          this.group.add(col);
+          g.add(col);
         }
       } else if (kind < 0.85) {
         const h = 60 + rng() * 120;
-        const peak = new THREE.Mesh(new THREE.ConeGeometry(h * 0.55, h, 6, 1), peakMat);
-        peak.position.set(p.x, seaY + h / 2 - 5, p.z);
+        const peak = new THREE.Mesh(sh.cone, sh.mats.peak);
+        peak.scale.set(h * 0.55, h, h * 0.55);
+        const b = toScene(x, base + h / 2 - 5, lateral);
+        peak.position.copy(b);
         peak.rotation.y = rng() * Math.PI;
-        this.group.add(peak);
+        g.add(peak);
       } else {
         const h = 18 + rng() * 25;
-        const col = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 2, h, 8), colMat);
-        col.position.set(p.x, seaY + h / 2, p.z);
-        this.group.add(col);
+        const col = new THREE.Mesh(sh.cyl, sh.mats.col);
+        col.scale.set(2, h, 2);
+        col.position.copy(toScene(x, base + h / 2, lateral));
+        g.add(col);
       }
     }
+    return g;
   }
+
+  /** Floating origin moved by `delta` (scene space): shift persistent scenery. */
+  shift(delta: THREE.Vector3): void { for (const g of this.segs.values()) g.position.add(delta); this.seaY += delta.y; }
 
   /** Keep the shadow frustum and sky centred on the action. */
   follow(focus: THREE.Vector3, cameraPos: THREE.Vector3): void {
     this.sun.target.position.copy(focus);
     this.sun.position.copy(focus).add(this.sunOffset);
     this.dome.position.copy(cameraPos);
-    if (this.sea) { this.sea.position.x = cameraPos.x; this.sea.position.z = cameraPos.z; }
+    if (this.sea) {
+      if (this.seaFollow) { this.seaY += (focus.y - 45 - this.seaY) * 0.02; }
+      this.sea.position.set(cameraPos.x, this.seaFollow ? this.seaY : this.seaBase - ORIGIN.y, cameraPos.z);
+    }
   }
 }

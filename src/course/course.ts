@@ -20,6 +20,11 @@ export interface Surface {
   material: Material;
   /** Visual thickness under the surface (presentation hint). */
   thickness: number;
+  /** Seamless continuation: the id of a chain that starts exactly at this chain's last
+   *  point (streamed phrases join this way). Riding off the end transfers onto it. */
+  next?: number;
+  /** The chain this one seamlessly continues (presentation: no end cap / edge line). */
+  prev?: number;
 }
 
 /** Grind rail (milestone 2 mechanics). Geometry + metadata only for now. */
@@ -85,6 +90,43 @@ export interface Lesson {
   required: boolean;
 }
 
+/** Something to do on the course (tests use these for spacing/approach checks). */
+export interface Feature {
+  x: number;
+  kind: 'gap' | 'rail' | 'rail-optional' | 'wall' | 'pot' | 'pillar' | 'crest' | 'rollers';
+  required: boolean;
+  /** Where the approach to this feature starts (run-in begins), for required features. */
+  approachX?: number;
+}
+
+/**
+ * A streamable piece of course: one authored phrase (endless) or the whole course
+ * (lab / opening). Everything a chunk owns is added and recycled together.
+ */
+export interface Chunk {
+  id: number;
+  x0: number;
+  x1: number;
+  /** Ground height at x0 / x1 (phrases join seamlessly end to start). */
+  y0: number;
+  y1: number;
+  title: string;
+  /** Phrase spec id (endless), tier and difficulty when it was assembled. */
+  spec?: string;
+  tier?: number;
+  difficulty?: number;
+  connector?: boolean;
+  /** Checkpoint: a retry from this chunk starts here, rolling at cpSpeed. */
+  cpX: number;
+  cpSpeed: number;
+  features: Feature[];
+  surfaces: number[];
+  rails: number[];
+  walls: number[];
+  obstacles: number[];
+  markers: Marker[];
+}
+
 export interface SurfaceSample {
   y: number;
   /** dy/dx of the segment under x. */
@@ -94,8 +136,16 @@ export interface SurfaceSample {
 
 export class Course {
   readonly gaps: Gap[] = [];
-  /** 'lab' (seeded test route) or 'opening' (authored teaching course). */
-  kind: 'lab' | 'opening' = 'lab';
+  /** 'lab' (seeded test route), 'opening' (authored teaching course) or 'endless' (streamed phrases). */
+  kind: 'lab' | 'opening' | 'endless' = 'lab';
+  /** Streamable pieces, in x order. Static courses are one chunk. */
+  readonly chunks: Chunk[] = [];
+  /** Bumped whenever content is removed (the sim prunes state that refers to it). */
+  revision = 0;
+  private sById = new Map<number, Surface>();
+  private rById = new Map<number, Rail>();
+  private wById = new Map<number, Wall>();
+  private oById = new Map<number, Obstacle>();
   /** Authored lessons in order (opening only). */
   lessons: Lesson[] = [];
 
@@ -116,18 +166,81 @@ export class Course {
     readonly finishX: number,
     readonly obstacles: Obstacle[] = [],
   ) {
+    for (const q of surfaces) this.sById.set(q.id, q);
+    for (const q of rails) this.rById.set(q.id, q);
+    for (const q of walls) this.wById.set(q.id, q);
+    for (const q of obstacles) this.oById.set(q.id, q);
     const sorted = [...surfaces].sort((a, b) => a.points[0].x - b.points[0].x);
     for (let i = 0; i + 1 < sorted.length; i++) {
       const a = sorted[i].points[sorted[i].points.length - 1];
       const b = sorted[i + 1].points[0];
       if (b.x > a.x) this.gaps.push({ x0: a.x, x1: b.x, yTakeoff: a.y, yReceive: b.y, requires: 'jump' });
     }
+    if (surfaces.length) this.sealAsSingleChunk('course');
   }
 
   surface(id: number): Surface {
-    const s = this.surfaces[id];
-    if (!s || s.id !== id) throw new Error(`surface ${id} missing`);
+    const s = this.sById.get(id);
+    if (!s) throw new Error(`surface ${id} missing`);
     return s;
+  }
+  findSurface(id: number | undefined): Surface | undefined { return id === undefined ? undefined : this.sById.get(id); }
+  rail(id: number): Rail { const r = this.rById.get(id); if (!r) throw new Error(`rail ${id} missing`); return r; }
+  wall(id: number): Wall { const w = this.wById.get(id); if (!w) throw new Error(`wall ${id} missing`); return w; }
+  obstacle(id: number): Obstacle | undefined { return this.oById.get(id); }
+  hasObstacle(id: number): boolean { return this.oById.has(id); }
+
+  /** Static courses: one chunk owning everything (call after construction is complete). */
+  sealAsSingleChunk(title: string): void {
+    const ys = this.surfaces.flatMap((q) => q.points);
+    const x0 = Math.min(...ys.map((p) => p.x)), x1 = Math.max(...ys.map((p) => p.x));
+    this.chunks.length = 0;
+    this.chunks.push({
+      id: 0, x0, x1, y0: ys[0].y, y1: ys[ys.length - 1].y, title, cpX: this.startX, cpSpeed: 0, features: [],
+      surfaces: this.surfaces.map((q) => q.id), rails: this.rails.map((q) => q.id), walls: this.walls.map((q) => q.id),
+      obstacles: this.obstacles.map((q) => q.id), markers: [...this.markers],
+    });
+  }
+
+  /** Streaming hook, called by the simulation at the start of every step with the
+   *  rider's position and active contacts. Static courses do nothing. */
+  stream(_x: number, _active?: { surfaceId: number; railId: number; wallId: number }): void {}
+
+  /** Append a chunk's content (streamed courses). */
+  protected addChunk(c: Chunk, surfaces: Surface[], rails: Rail[], walls: Wall[], obstacles: Obstacle[], gaps: Gap[]): void {
+    for (const q of surfaces) { this.surfaces.push(q); this.sById.set(q.id, q); }
+    for (const q of rails) { this.rails.push(q); this.rById.set(q.id, q); }
+    for (const q of walls) { this.walls.push(q); this.wById.set(q.id, q); }
+    for (const q of obstacles) { this.obstacles.push(q); this.oById.set(q.id, q); }
+    this.gaps.push(...gaps);
+    this.markers.push(...c.markers);
+    this.chunks.push(c);
+  }
+
+  /** Recycle a chunk and everything it owns. */
+  protected removeChunk(c: Chunk): void {
+    const drop = <T extends { id: number }>(arr: T[], ids: number[], map: Map<number, T>) => {
+      const set = new Set(ids);
+      for (let i = arr.length - 1; i >= 0; i--) if (set.has(arr[i].id)) arr.splice(i, 1);
+      for (const id of ids) map.delete(id);
+    };
+    drop(this.surfaces, c.surfaces, this.sById);
+    drop(this.rails, c.rails, this.rById);
+    drop(this.walls, c.walls, this.wById);
+    drop(this.obstacles, c.obstacles, this.oById);
+    for (let i = this.gaps.length - 1; i >= 0; i--) if (this.gaps[i].x0 >= c.x0 - 1e-6 && this.gaps[i].x0 <= c.x1 + 1e-6) this.gaps.splice(i, 1);
+    for (let i = this.markers.length - 1; i >= 0; i--) if (c.markers.includes(this.markers[i])) this.markers.splice(i, 1);
+    for (const s of this.surfaces) if (s.prev !== undefined && c.surfaces.includes(s.prev)) delete s.prev;
+    const k = this.chunks.indexOf(c);
+    if (k >= 0) this.chunks.splice(k, 1);
+    this.revision++;
+  }
+
+  /** The chunk containing x (last one starting at or before x). */
+  chunkAt(x: number): Chunk | undefined {
+    let best: Chunk | undefined;
+    for (const c of this.chunks) if (c.x0 <= x + 1e-6) best = c;
+    return best;
   }
 
   static x0(s: Surface): number { return s.points[0].x; }
@@ -199,6 +312,8 @@ export class Course {
     if (!g) throw new Error(`no ground for ${kind} at ${x}`);
     const o: Obstacle = { id: this.obstacles.length, kind, x, halfWidth, height, baseY: g.sample.y };
     this.obstacles.push(o);
+    this.oById.set(o.id, o);
+    if (this.chunks.length === 1) this.chunks[0].obstacles.push(o.id);
     return o;
   }
 

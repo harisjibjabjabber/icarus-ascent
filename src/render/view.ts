@@ -7,7 +7,7 @@ import { Effects, SpeedLines } from './effects';
 import { RiderView } from './riderView';
 import { Environment } from './environment';
 import { Debris } from './debris';
-import { toScene } from './space';
+import { toScene, ORIGIN, rebaseTarget, rebaseDelta } from './space';
 import { TUNING } from '../tuning';
 
 /** Interpolatable slice of sim state. */
@@ -72,12 +72,35 @@ export class GameView {
 
   setCourse(course: Course): void {
     if (this.courseView) { this.scene.remove(this.courseView.group); this.courseView.dispose(); }
+    ORIGIN.x = 0; ORIGIN.y = 0;
     this.courseView = new CourseView(course);
     this.scene.add(this.courseView.group);
     this.debris.setCourse(course);
-    const minY = Math.min(...course.surfaces.flatMap((q) => q.points.map((pt) => pt.y)));
-    this.env.buildScenery(course.seed, course.finishX + 80, (x) => course.groundBelow(x, 1e6)?.sample.y ?? course.lowestNear(x), minY);
+    this.effects.clear();
+    const streamed = course.kind === 'endless';
+    const minY = streamed ? 0 : Math.min(...course.surfaces.flatMap((q) => q.points.map((pt) => pt.y)));
+    let lastH = 0;
+    const heightAt = (x: number) => { const g = course.groundBelow(x, 1e6); if (g) lastH = g.sample.y; else if (!streamed) lastH = course.lowestNear(x); return lastH; };
+    this.env.buildScenery(course.seed, course.finishX, heightAt, minY, streamed);
+    this.env.streamScenery(course.startX, streamed ? (course as unknown as { generatedTo: number }).generatedTo : Infinity);
   }
+
+  /** Floating origin: when the rider is far from it, move it and shift everything that persists. */
+  private rebaseIfNeeded(x: number, y: number): void {
+    const t = rebaseTarget(x, y);
+    if (!t) return;
+    const d = rebaseDelta(ORIGIN, t);
+    ORIGIN.x = t.x; ORIGIN.y = t.y;
+    for (const c of this.effects.group.children) c.position.add(d);
+    for (const c of this.speedLines.group.children) c.position.add(d);
+    for (const o of [this.trailLine, this.arcLine, this.failMarker, this.edgeMarker]) o.position.add(d);
+    this.env.shift(d);
+    this.courseView?.rebase();
+    this.rig.shift(d);
+    this.rebases++;
+  }
+  /** Diagnostics: how many times the origin has moved. */
+  rebases = 0;
 
   resize(): void {
     const w = window.innerWidth, h = window.innerHeight;
@@ -115,7 +138,7 @@ export class GameView {
         if (e.flipped) this.effects.ring(e.x, e.y, 0, '#fff3c4');
         break;
       case 'break': {
-        const o = this.courseView?.course.obstacles[e.obstacleId];
+        const o = this.courseView?.course.obstacle(e.obstacleId);
         if (!o) break;
         const F = TUNING.feedback;
         this.courseView!.setBroken(o.id, true);
@@ -127,26 +150,26 @@ export class GameView {
       }
       case 'grind-start': {
         this.rider.kick(0.25);
-        const r = this.courseView?.course.rails[e.railId];
+        const r = this.courseView?.course.rail(e.railId);
         this.effects.sparks(e.x, e.y, r?.lateral ?? 0, e.speed, 14);
         this.trail = [];
         break;
       }
       case 'grind-end': {
-        const r = this.courseView?.course.rails[e.railId];
+        const r = this.courseView?.course.rail(e.railId);
         this.effects.sparks(e.x, e.y, r?.lateral ?? 0, speed, 8);
         this.trail = [{ x: e.x, y: e.y }];
         break;
       }
       case 'wall-start': {
         this.rider.kick(0.2);
-        const w = this.courseView?.course.walls[e.wallId];
+        const w = this.courseView?.course.wall(e.wallId);
         for (let i = 0; i < 8; i++) this.effects.wallSmoke(e.x, e.y, (w?.lateral ?? 2.4) - 0.05, e.speed);
         this.trail = [];
         break;
       }
       case 'wall-end': {
-        const w = this.courseView?.course.walls[e.wallId];
+        const w = this.courseView?.course.wall(e.wallId);
         for (let i = 0; i < 5; i++) this.effects.wallSmoke(e.x, e.y, (w?.lateral ?? 2.4) - 0.05, speed);
         this.trail = [{ x: e.x, y: e.y }];
         break;
@@ -186,6 +209,7 @@ export class GameView {
     const g = new THREE.BufferGeometry().setFromPoints(this.trail.map((p) => toScene(p.x, p.y + 0.3, -0.2)));
     this.trailLine.geometry.dispose();
     this.trailLine.geometry = g;
+    this.trailLine.position.set(0, 0, 0);
     this.trailLine.computeLineDistances();
     this.trailLine.visible = true;
   }
@@ -194,6 +218,7 @@ export class GameView {
     this.arcLine.visible = this.showArc && points.length > 1;
     if (!this.arcLine.visible) return;
     this.arcLine.geometry.dispose();
+    this.arcLine.position.set(0, 0, 0);
     this.arcLine.geometry = new THREE.BufferGeometry().setFromPoints(points.map((p) => toScene(p.x, p.y + 0.2, -0.2)));
   }
 
@@ -202,13 +227,16 @@ export class GameView {
     const lerp = (a: number, b: number) => a + (b - a) * alpha;
     const x = failed ? curr.x : lerp(prev.x, curr.x);
     const y = failed ? curr.y : lerp(prev.y, curr.y);
+    this.rebaseIfNeeded(x, y);
+    this.courseView?.sync();
+    this.env.streamScenery(x, this.courseView?.course.kind === 'endless' ? (this.courseView.course as unknown as { generatedTo: number }).generatedTo : Infinity);
     const airborne = curr.mode === 'airborne';
     if (airborne && (this.trail.length === 0 || Math.abs(this.trail[this.trail.length - 1].x - x) > 0.4)) this.trail.push({ x, y });
     if (this.trail.length > 400) this.trail.shift();
     const course = this.courseView?.course;
     let lateral = 0;
-    if (curr.mode === 'grinding' && course) lateral = course.rails[curr.railId].lateral;
-    if (curr.mode === 'wallRiding' && course) lateral = course.walls[curr.wallId].lateral - 0.3;
+    if (curr.mode === 'grinding' && course) lateral = course.rail(curr.railId).lateral;
+    if (curr.mode === 'wallRiding' && course) lateral = course.wall(curr.wallId).lateral - 0.3;
     const flip = curr.flip > 0 ? (curr.flip >= prev.flip ? lerp(prev.flip, curr.flip) : curr.flip) : 0;
     this.rider.update(dt, curr, x, y, lerp(prev.angle, curr.angle), flip, lateral);
     // sustained contact feedback, emitted at the actual contact point
@@ -216,7 +244,7 @@ export class GameView {
     if (this.contactFx <= 0 && !failed) {
       this.contactFx = 1 / 40;
       if (curr.mode === 'grinding') this.effects.sparks(x, y, this.rider.currentLateral, curr.speed, 3);
-      if (curr.mode === 'wallRiding' && course) this.effects.wallSmoke(x, y, course.walls[curr.wallId].lateral - 0.05, curr.speed);
+      if (curr.mode === 'wallRiding' && course) this.effects.wallSmoke(x, y, course.wall(curr.wallId).lateral - 0.05, curr.speed);
       if (curr.mode === 'heelSkim' && curr.speed > 0.5 && Math.random() < 0.6) this.effects.skimDust(x, y, curr.speed);
     }
     if (failed && this.failCam) {

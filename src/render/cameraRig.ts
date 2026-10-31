@@ -40,6 +40,9 @@ export class CameraRig {
     this.camera.updateProjectionMatrix();
   }
 
+  /** Floating origin moved (the camera is re-placed from route coordinates every update). */
+  shift(delta: THREE.Vector3): void { this.camera.position.add(delta); }
+
   get progress(): number { return this.fx; }
   get height(): number { return this.fy; }
 
