@@ -16,3 +16,16 @@ body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none
 .speed::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: calc(var(--v, 0) * 100%); background: #4b3f5c88; }
 .dev-overlay { position: absolute; left: 6px; top: max(6px, env(safe-area-inset-top)); max-width: 62vw; font: 10.5px/1.35 ui-monospace, Menlo, monospace; white-space: pre-wrap; color: #1f1a29; background: #ffffffc4; border-radius: 8px; padding: 6px 8px; pointer-events: none; }
 .dev-trail { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.prompt { position: absolute; left: 6%; right: 6%; top: calc(max(10px, env(safe-area-inset-top)) + 48px); text-align: center; opacity: 0; transform: translateY(-4px); transition: opacity .5s, transform .5s; text-shadow: 0 1px 0 #fff9; }
+.prompt.show { opacity: .95; transform: none; }
+.prompt-lesson { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; opacity: .6; }
+.prompt-text { font-size: 16px; font-weight: 600; line-height: 1.35; margin-top: 3px; }
+.prompt-keys { font-size: 12px; opacity: .55; margin-top: 3px; }
+.finish { position: absolute; left: 8%; right: 8%; top: 36%; text-align: center; opacity: 0; pointer-events: none; transform: translateY(8px); transition: opacity .8s, transform .8s; background: #fff9f3e0; border-radius: 16px; padding: 18px 14px; }
+.finish.show { opacity: 1; transform: none; pointer-events: auto; }
+.finish-title { font-size: 21px; font-weight: 700; }
+.finish-sub { font-size: 14px; opacity: .7; margin-top: 6px; }
+.finish-buttons { display: flex; gap: 10px; justify-content: center; margin-top: 14px; }
+.finish-buttons button { font: 600 15px system-ui, sans-serif; color: #fff8f2; background: #4b3f5c; border: 0; border-radius: 12px; padding: 10px 14px; touch-action: manipulation; }
+.finish-buttons button + button { background: #fff8f2; color: #4b3f5c; border: 1px solid #4b3f5c44; }
+.version { position: absolute; right: 10px; bottom: max(8px, env(safe-area-inset-bottom)); font: 10px ui-monospace, Menlo, monospace; opacity: .35; }

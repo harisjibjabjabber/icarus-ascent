@@ -67,6 +67,24 @@ export interface Obstacle {
   baseY: number;
 }
 
+/** Authored-course lesson: a checkpoint (retry point) plus its calm on-track prompt. */
+export interface Lesson {
+  id: number;
+  title: string;
+  /** Checkpoint: where a retry of this lesson starts, and the speed it starts with. */
+  cpX: number;
+  cpSpeed: number;
+  /** Prompt shown while promptX0 <= x < promptX1. `keys` is the keyboard equivalent. */
+  prompt: string;
+  keys?: string;
+  promptX0: number;
+  promptX1: number;
+  /** Where the lesson's key action is committed (takeoff / contact). */
+  featureX: number;
+  /** The lesson's action is compulsory (must be read before commitment). */
+  required: boolean;
+}
+
 export interface SurfaceSample {
   y: number;
   /** dy/dx of the segment under x. */
@@ -76,6 +94,17 @@ export interface SurfaceSample {
 
 export class Course {
   readonly gaps: Gap[] = [];
+  /** 'lab' (seeded test route) or 'opening' (authored teaching course). */
+  kind: 'lab' | 'opening' = 'lab';
+  /** Authored lessons in order (opening only). */
+  lessons: Lesson[] = [];
+
+  /** Index of the last lesson whose checkpoint is at or behind x (-1 if none). */
+  lessonAt(x: number): number {
+    let i = -1;
+    for (let k = 0; k < this.lessons.length; k++) if (this.lessons[k].cpX <= x + 1e-6) i = k;
+    return i;
+  }
 
   constructor(
     readonly seed: number,

@@ -35,6 +35,7 @@ export class Autopilot {
   private lastMode = '';
   private potsTried = new Set<number>();
   private pillarsTried = new Set<number>();
+  private heelNext = false;
   private pillarId = -1;
   constructor(private opts: AutopilotOptions) {}
 
@@ -66,7 +67,7 @@ export class Autopilot {
     if (st.mode === 'grounded') {
       this.prepDone = false; this.airPlan = 'none'; this.pillarId = -1;
       if (this.wallStroke !== -1) { out.push({ type: 'side', side: 'right', held: false, strokeId: this.wallStroke, source: 'test' }); this.wallStroke = -1; }
-      if (this.heelStroke !== -1) { out.push({ type: 'release', dir: 'down', strokeId: this.heelStroke, source: 'test' }); this.heelStroke = -1; }
+      if (this.heelStroke !== -1) { out.push({ type: 'release', dir: 'down', strokeId: this.heelStroke, source: 'test' }); this.heelStroke = -1; this.heelNext = false; }
       if (this.t % (this.opts.pushEvery ?? 36) === 0 && st.speed < this.opts.minSpeed) out.push({ type: 'down', strokeId: this.id(), strength: this.opts.strength ?? 0.65, fresh: true, source: 'test' });
       let jump = false;
       for (const g of course.gaps) {
@@ -76,10 +77,16 @@ export class Autopilot {
       const r = this.opts.optionalRail ? course.rails.find((q) => !q.required) : undefined;
       if (r && st.x > r.points[0].x - 3.2 && st.x < r.points[0].x - 2.6) jump = true;
       for (const o of course.obstacles) {
-        if (o.kind !== 'pot' || st.broken.includes(o.id)) continue;
-        // jump: be at the apex over the pot. heel: land just before it while holding down.
-        const lead = Math.max(1.2, st.speed * (pots === 'heel' ? 0.56 : 0.3));
-        if (st.x > o.x - lead && st.x < o.x - 0.8 && !this.potsTried.has(o.id)) { jump = true; this.potsTried.add(o.id); }
+        if (o.kind !== 'pot' || st.broken.includes(o.id) || this.potsTried.has(o.id)) continue;
+        // a cluster of pots close together is cleared (or skimmed) as one
+        const cluster = course.obstacles.filter((q) => q.kind === 'pot' && q.x >= o.x && q.x - o.x < 5);
+        const last = cluster[cluster.length - 1];
+        const span = last.x - o.x + 2 * o.halfWidth;
+        // too wide to hop at this speed: skim it instead
+        const heel = pots === 'heel' || span > st.speed * 0.34;
+        // jump: apex over the middle of the pots. heel: land just before the first, holding down.
+        const trigger = heel ? o.x - Math.max(1.2, st.speed * 0.56) : (o.x + last.x) / 2 - Math.max(1.2, st.speed * 0.3);
+        if (st.x > trigger && st.x < o.x - 0.8) { jump = true; if (heel) this.heelNext = true; for (const q of cluster) this.potsTried.add(q.id); }
       }
       const pt = this.opts.pillarTrick ?? 'grab';
       const p = this.pillarAhead(sim, 30);
@@ -99,13 +106,13 @@ export class Autopilot {
       const nearOptional = r && st.x > r.points[0].x - 3.5 && st.x < r.points[0].x + 2;
       if ((g?.requires === 'rail' || nearOptional) && !this.prepDone) { out.push({ type: 'down', strokeId: this.id(), strength: 0.65, fresh: true, source: 'test' }); this.prepDone = true; }
       if (g?.requires === 'wall' && this.wallStroke === -1 && st.lastContact !== 'wall') {
-        const w = course.walls[0];
-        if (st.x >= w.x0) { this.wallStroke = this.id(); out.push({ type: 'side', side: 'right', held: true, strokeId: this.wallStroke, source: 'test' }); }
+        const w = course.walls.find((q) => st.x > q.x0 - 6 && st.x < q.x1) ?? course.walls[0];
+        if (w && st.x >= w.x0) { this.wallStroke = this.id(); out.push({ type: 'side', side: 'right', held: true, strokeId: this.wallStroke, source: 'test' }); }
       }
       // heel-break a pot: hold down through the landing in front of it
       const heelPillar = (this.opts.pillarTrick ?? 'grab') === 'heel';
       if (this.heelStroke === -1 && st.vy < 0) {
-        const pot = course.obstacles.find((o) => (o.kind === 'pot' ? pots === 'heel' : heelPillar) && !st.broken.includes(o.id) && o.x > st.x && o.x - st.x < 8);
+        const pot = course.obstacles.find((o) => (o.kind === 'pot' ? pots === 'heel' || this.heelNext : heelPillar) && !st.broken.includes(o.id) && o.x > st.x && o.x - st.x < 8);
         if (pot) { this.heelStroke = this.id(); out.push({ type: 'down', strokeId: this.heelStroke, strength: 0.65, fresh: true, source: 'test' }); }
       }
       if (justTookOff && this.airPlan === 'none' && this.opts.flipAtFirstGap && !this.flipDone && g === course.gaps[0]) {

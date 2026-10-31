@@ -80,19 +80,24 @@ export class Environment {
   }
 
   /** Distant low-poly scenery around the course (seeded, static). */
-  buildScenery(seed: number, length: number): void {
+  private sea: THREE.Mesh | null = null;
+
+  /** `heightAt(x)`: course height near x; `minY`: lowest course point (the cloud sea sits below it). */
+  buildScenery(seed: number, length: number, heightAt: (x: number) => number = () => 0, minY = 0): void {
+    const seaY = Math.min(ENV_STYLE.cloudSeaY, minY - 32);
     for (const c of [...this.group.children]) { this.group.remove(c); (c as THREE.Mesh).geometry?.dispose(); }
     const rng = mulberry32(seed ^ 0x5eed);
     const sea = new THREE.Mesh(new THREE.CircleGeometry(1400, 48), toon(ENV_STYLE.cloudSea));
     sea.rotation.x = -Math.PI / 2;
-    sea.position.set(0, ENV_STYLE.cloudSeaY, 0);
+    sea.position.set(0, seaY, 0);
     sea.receiveShadow = false;
     this.group.add(sea);
+    this.sea = sea;
     const islandMat = toon(ENV_STYLE.island), grassMat = toon(ENV_STYLE.islandGrass), peakMat = toon(ENV_STYLE.peak), colMat = toon(ENV_STYLE.column);
     for (let x = -150; x < length + 500; x += 18 + rng() * 22) {
       // either side of the route, never in front of it near the camera
       const lateral = (rng() < 0.5 ? 1 : -1) * (55 + rng() * 380); // both sides of the route, never on it
-      const y = -15 - rng() * 35;
+      const y = heightAt(x) - 15 - rng() * 35;
       const p = toScene(x, y, lateral);
       const kind = rng();
       if (kind < 0.55) {
@@ -114,13 +119,13 @@ export class Environment {
       } else if (kind < 0.85) {
         const h = 60 + rng() * 120;
         const peak = new THREE.Mesh(new THREE.ConeGeometry(h * 0.55, h, 6, 1), peakMat);
-        peak.position.set(p.x, ENV_STYLE.cloudSeaY + h / 2 - 5, p.z);
+        peak.position.set(p.x, seaY + h / 2 - 5, p.z);
         peak.rotation.y = rng() * Math.PI;
         this.group.add(peak);
       } else {
         const h = 18 + rng() * 25;
         const col = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 2, h, 8), colMat);
-        col.position.set(p.x, ENV_STYLE.cloudSeaY + h / 2, p.z);
+        col.position.set(p.x, seaY + h / 2, p.z);
         this.group.add(col);
       }
     }
@@ -131,5 +136,6 @@ export class Environment {
     this.sun.target.position.copy(focus);
     this.sun.position.copy(focus).add(this.sunOffset);
     this.dome.position.copy(cameraPos);
+    if (this.sea) { this.sea.position.x = cameraPos.x; this.sea.position.z = cameraPos.z; }
   }
 }

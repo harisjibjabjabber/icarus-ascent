@@ -75,7 +75,8 @@ export class GameView {
     this.courseView = new CourseView(course);
     this.scene.add(this.courseView.group);
     this.debris.setCourse(course);
-    this.env.buildScenery(course.seed, course.finishX + 80);
+    const minY = Math.min(...course.surfaces.flatMap((q) => q.points.map((pt) => pt.y)));
+    this.env.buildScenery(course.seed, course.finishX + 80, (x) => course.groundBelow(x, 1e6)?.sample.y ?? course.lowestNear(x), minY);
   }
 
   resize(): void {

@@ -36,7 +36,8 @@ export class Simulation {
   /** Is a side (Left/Right) stroke currently held? Tracked so a hold can become a wall ride. */
   private sideHeld: { side: 'left' | 'right'; strokeId: number } | null = null;
 
-  constructor(readonly course: Course, readonly T: Tuning = TUNING) {
+  /** `start` lets a run begin at a checkpoint (x on the ground, rolling at speed). */
+  constructor(readonly course: Course, readonly T: Tuning = TUNING, readonly start?: { x: number; speed: number }) {
     this.M = T.movement;
     this.K = T.tricks;
     this.dt = T.sim.dt;
@@ -44,10 +45,10 @@ export class Simulation {
   }
 
   private initialState(): RiderState {
-    const x = this.course.startX;
+    const x = this.start?.x ?? this.course.startX;
     const g = this.course.groundBelow(x, 1e6)!;
     return {
-      mode: 'grounded', tick: 0, x, y: g.sample.y, vx: 0, vy: 0, speed: this.M.restCreep,
+      mode: 'grounded', tick: 0, x, y: g.sample.y, vx: 0, vy: 0, speed: this.start ? this.start.speed : this.M.restCreep,
       surfaceId: g.surface.id, seg: g.sample.seg, angle: Math.atan(g.sample.slope),
       airTime: 0, groundTime: 0, coyote: 0, jumpBuffer: 0, pushStrokeId: -1, pushApplied: 0, jumpStrokeId: -1,
       air: 'none', flip: 0, flipsThisJump: 0, sideStrokeId: -1, prepStrokeId: -1, prepTimer: 0, prepHeld: false,

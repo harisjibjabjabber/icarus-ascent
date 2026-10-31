@@ -12,6 +12,13 @@ node scripts/screenshot.mjs http://localhost:8080/?seed=12345   # headless 390x8
 node scripts/screenshot-tricks.mjs   # deterministic grind / wall / flip shots via the dev autopilot (icarus.pause/autopilot/advance)
 ```
 
+## Modes
+- **Opening course** (default): the authored teaching course (`src/course/opening.ts`). It has ten lessons in the order brief §10 lists them, each with one calm prompt and a checkpoint. A fail retries from the furthest lesson reached; "Restart" goes back to the top. At the finish you get "Ride again" or "Go to the lab".
+- **Lab**: `?lab` (with `&seed=N`), the "Lab" button, or the C key. This is the seeded movement lab.
+
+## Stale-build guard
+Each build writes `version.json` (short commit + build time) and bakes the same value into the bundle. The page fetches `version.json` with cache-busting on load, when the tab becomes visible again, and every 60 s. It reloads only when the player isn't mid-run (start, fail or finish screen). If a newer build turns up mid-run, it waits for the next safe moment. The build version is shown small in the bottom-right corner and in the dev overlay.
+
 ## Controls
 | Action | Touch | Keyboard |
 |---|---|---|

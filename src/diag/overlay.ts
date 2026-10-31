@@ -52,7 +52,7 @@ export class DevOverlay {
 
   resetRun(): void { this.peakSpeed = 0; }
 
-  update(st: RiderState, g: GestureRecognizer, extra: { seed: number; replay: boolean; fps: number; context?: string }): void {
+  update(st: RiderState, g: GestureRecognizer, extra: { seed: number; replay: boolean; fps: number; context?: string; version?: string; lesson?: string }): void {
     if (!this.visible) return;
     const speed = st.mode === 'airborne' ? Math.hypot(st.vx, st.vy) : st.speed;
     this.peakSpeed = Math.max(this.peakSpeed, speed);
@@ -60,6 +60,7 @@ export class DevOverlay {
     const gd = g.debug;
     this.el.textContent = [
       `${extra.replay ? 'REPLAY ' : ''}seed ${extra.seed}  tick ${st.tick}  ${extra.fps.toFixed(0)} fps`,
+      `build ${extra.version ?? '?'}  course ${extra.lesson ?? '-'}`,
       `state   ${st.mode.toUpperCase()}${st.mode === 'grounded' ? ` slope ${deg.toFixed(1)}°` : ''}`,
       `speed   ${speed.toFixed(2)} m/s  (peak ${this.peakSpeed.toFixed(1)})`,
       `x ${st.x.toFixed(1)}  y ${st.y.toFixed(2)}  vx ${st.vx.toFixed(1)} vy ${st.vy.toFixed(1)}`,
