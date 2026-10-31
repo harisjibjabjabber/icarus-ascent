@@ -109,7 +109,8 @@ export class RiderView {
     const target = airborne ? Math.max(-0.6, Math.min(0.6, Math.atan2(s.vy, Math.max(4, s.speed)) * 0.6)) : angle;
     this.boardAngle += (target - this.boardAngle) * ease(airborne ? 6 : 25);
     // heel skim: nose lifts, rider leans back
-    this.heel += ((s.mode === 'heelSkim' ? 1 : 0) - this.heel) * ease(18);
+    // (the return is softer than the lift so the skim exit eases back to the cruise instead of snapping)
+    this.heel += ((s.mode === 'heelSkim' ? 1 : 0) - this.heel) * ease(s.mode === 'heelSkim' ? 18 : 9);
     // backflip: full rotation about the rider's lateral axis (nose up and over backwards)
     this.pivot.rotation.z = this.boardAngle + this.heel * 0.42 + flip * Math.PI * 2;
     this.pivot.position.x = -this.heel * 0.5; // rotate about the tail
