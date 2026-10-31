@@ -14,3 +14,5 @@ get 100av-Olivia https://arweave.net/MgsNlTetzAoVEC6E-lswj65vp7StkOZXXd5OjjqzYZI
 # Quaternius (CC0): download "Universal Base Characters[Standard].zip" and "Modular Character Outfits - Fantasy[Standard].zip"
 # from quaternius.itch.io (free, "No thanks, just take me to the downloads"), unzip into one dir Q, then:
 #   python build_quaternius_peasant.py  (edit Q at the top)  ->  quat-Peasant.vrm  (headless Blender 5.2 + VRM add-on 4.x)
+# Best-quality no-login VRoid samples (GitHub mirror github.com/madjin/vrm-samples, commit HEAD as of 2026-10-31)
+for f in stable/AvatarSample_A stable/AvatarSample_B beta/Vivi beta/Victoria_Rubin beta/Vita; do n=$(basename $f); curl -fsSL "https://raw.githubusercontent.com/madjin/vrm-samples/HEAD/vroid/$f.vrm" -o "public/gh-$n.vrm"; echo "ok gh-$n"; done

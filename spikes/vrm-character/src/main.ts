@@ -251,6 +251,7 @@ new GLTFLoader().register((p) => new VRMLoaderPlugin(p)).load('./' + (q.get('mod
     sun.position.set(-6, 10, z - 4); sun.target.position.set(0, 0, z);
     if (CAM === 'chase') { camera.fov = 52; camera.position.set(0, 7, z + 11.5); camera.rotation.set(-17 * Math.PI / 180, 0, 0); }
     else if (CAM === 'close') { camera.fov = 40; camera.position.set(0.4, 2.2, z + 4.2); camera.rotation.set(-12 * Math.PI / 180, 0, 0); }
+    else if (CAM === 'portrait') { camera.fov = 30; camera.position.set(-2.6, 1.35, z + 0.2); camera.lookAt(0, 1.05, z - 0.1); }
     else { camera.fov = 35; camera.position.set(5.2, 1.3, z - 0.4); camera.lookAt(0, 0.75, z - 0.2); }
     camera.updateProjectionMatrix();
     renderer.render(scene, camera);
