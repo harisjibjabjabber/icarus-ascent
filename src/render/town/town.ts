@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { GeoBuilder, blob } from '../geo';
-import { toSceneRaw, ROUTE_RIGHT } from '../space';
+import { toSceneRaw, ROUTE_RIGHT, ROUTE_YAW } from '../space';
 import { Kit, MergeBuffer, type Tints } from './kit';
 
 /**
@@ -192,7 +192,7 @@ export function buildTownChunk(kit: Kit, k: number, seed: number, ground: Ground
   const canalY = (x: number) => level(ground, x) - 6.5;
   ribbon(-T.front, -T.streetEdge, streetY, T.pavement, T.pavementAlt);
   if (!harbour) ribbon(T.streetEdge, T.front, streetY, T.pavement, T.pavementAlt);
-  ribbon(-T.front - 0.2, T.front + 0.2, canalY, T.water, T.waterDeep);
+  ribbon(-T.front - 0.2, T.front + 0.2, canalY, T.water, T.water);
   ribbon(-26, -T.front, (x) => level(ground, x) - 0.2, T.pavementAlt, T.pavementAlt);
   if (!harbour) ribbon(T.front, 26, (x) => level(ground, x) - 0.2, T.pavementAlt, T.pavementAlt);
   for (const rg of ribs) { near.geometry(rg); far.geometry(rg); rg.dispose(); }
@@ -250,7 +250,7 @@ function harbourChunk(kit: Kit, near: MergeBuffer, far: MergeBuffer, P: Placer, 
   const T = TOWN;
   for (let x = x0; x < x1; x += 4) {
     const g = level(ground, x + 2);
-    for (const mb of [near, far]) box(mb, P.at(x + 2, g, T.front + 1, 0), 4, 9, 2, 0, -4.6, 0, T.stoneShade, T.stone); // quay wall
+    for (const mb of [near, far]) box(mb, P.at(x + 2, g, T.front + 1, ROUTE_YAW), 4.1, 9, 2, 0, -4.6, 0, T.stoneShade, T.stone); // quay wall
   }
   const seaY = level(ground, x0) - 8.6;
   for (let x = x0 + 3; x < x1; x += 9 + rng() * 6) {

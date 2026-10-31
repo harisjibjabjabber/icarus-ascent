@@ -15,8 +15,8 @@ await page.evaluate((ap) => { const ic = window.icarus; ic.pause(true); document
 await page.waitForTimeout(2000);
 let t = 0; const meta = [];
 for (const tick of ticksArg.split(',').map(Number)) {
-  const r = await page.evaluate(([n, SIDE]) => {
-    const ic = window.icarus, v = ic.game.view; ic.advance(n);
+  const r = await page.evaluate(([n, SIDE, RE]) => {
+    const ic = window.icarus, v = ic.game.view; ic.advance(n, undefined, RE);
     const draw = (c) => (v.present ? v.present(c) : v.renderer.render(v.scene, c));
     const canvas = v.renderer.domElement; draw(v.rig.camera); const chase = canvas.toDataURL('image/jpeg', 0.9); const info = ic.renderInfo();
     const c = v.rig.camera.clone(); const V = c.position.constructor; const r = v.rider.root;
@@ -25,7 +25,7 @@ for (const tick of ticksArg.split(',').map(Number)) {
     c.fov = 62; c.position.copy(hips).addScaledVector(right, Number(SIDE)).add(new V(0, 1.1, 0)); c.lookAt(hips.clone().add(new V(0, 0.1, 0))); c.updateProjectionMatrix(); c.updateMatrixWorld();
     draw(c); const side = canvas.toDataURL('image/jpeg', 0.9); draw(v.rig.camera);
     return { chase, side, info, x: Math.round(ic.game.sim.state.x), mode: ic.game.sim.state.mode };
-  }, [tick - t, process.env.SIDE ?? '-4.2']);
+  }, [tick - t, process.env.SIDE ?? '-4.2', Number(process.env.RE ?? 2)]);
   t = tick;
   fs.writeFileSync(`${outDir}/chase-${tick}.jpg`, Buffer.from(r.chase.split(',')[1], 'base64'));
   fs.writeFileSync(`${outDir}/side-${tick}.jpg`, Buffer.from(r.side.split(',')[1], 'base64'));

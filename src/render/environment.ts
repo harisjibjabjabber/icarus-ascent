@@ -278,6 +278,9 @@ export class Environment {
   }
   private dropTown(v: TownView): void { this.group.remove(v.group); v.near?.geometry.dispose(); v.far?.geometry.dispose(); }
 
+  /** Opening course: open sea on the right from the harbour on (no hill/blocks standing in the water). */
+  private seaRight(x: number): boolean { return this.townOpts.harbourFrom !== undefined && x >= this.townOpts.harbourFrom - 30; }
+
   /** Distant hillside: impostor blocks (box + hip roof) on terraces rising to the left, a few dropping toward the sea on the right. */
   private buildSegment(k: number): THREE.Mesh | null {
     const S = Environment.SEG, E = ENV_STYLE;
@@ -288,13 +291,13 @@ export class Environment {
     for (let x = x0; x < x1; x += 20) {
       const y = this.heightAt(x + 10);
       for (let r = 0; r < 4; r++) b.add(new THREE.BoxGeometry(20.5, 4, 24), toScene(x + 10, y + r * 6.5 - 0.6, -(32 + r * 22 + 8)), E.hill, { top: E.hillTop, rot: [0, ROUTE_YAW, 0] });
-      b.add(new THREE.BoxGeometry(20.5, 4, 40), toScene(x + 10, y - 5, 46), E.hill, { top: E.hillTop, rot: [0, ROUTE_YAW, 0] });
+      if (!this.seaRight(x + 10)) b.add(new THREE.BoxGeometry(20.5, 4, 40), toScene(x + 10, y - 5, 46), E.hill, { top: E.hillTop, rot: [0, ROUTE_YAW, 0] });
     }
     for (let x = x0 + rng() * 6; x < x1; x += 5 + rng() * 5) {
       for (let row = 0; row < 5; row++) {
         const side = row < 4 ? -1 : 1;
         const lat = side * (32 + row * 22 + rng() * 14);
-        if (side > 0 && rng() < 0.5) continue;
+        if (side > 0 && (rng() < 0.5 || this.seaRight(x))) continue;
         const ground = this.heightAt(x) + (side < 0 ? 1.5 + row * 6.5 : -3) + rng() * 2;
         const w = 4 + rng() * 4, h = 5 + rng() * 6, d = 4.5 + rng() * 2;
         const p = toScene(x, ground + h / 2 - 1, lat);
