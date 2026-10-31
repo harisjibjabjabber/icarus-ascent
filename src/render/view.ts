@@ -111,7 +111,12 @@ export class GameView {
     const minY = streamed ? 0 : Math.min(...course.surfaces.flatMap((q) => q.points.map((pt) => pt.y)));
     let lastH = 0;
     const heightAt = (x: number) => { const g = course.groundBelow(x, 1e6); if (g) lastH = g.sample.y; else if (!streamed) lastH = course.lowestNear(x); return lastH; };
-    const groundAt = (x: number) => { const g = course.groundBelow(x, 1e6); return g ? { y: g.sample.y, gap: false } : { y: heightAt(x), gap: true }; };
+    // past the finish the town carries on at the quay level (no cliffs/terraces from the course's lowest fallback)
+    const endY = streamed ? 0 : (course.groundBelow(course.finishX - 0.5, 1e6)?.sample.y ?? minY);
+    const groundAt = (x: number) => {
+      if (!streamed && x > course.finishX - 0.5) return { y: endY, gap: false };
+      const g = course.groundBelow(x, 1e6); return g ? { y: g.sample.y, gap: false } : { y: heightAt(x), gap: true };
+    };
     const towers = streamed ? Array.from({ length: 200 }, (_, i) => 520 + i * 900) : [course.finishX * 0.22, course.finishX * 0.64];
     const harbourFrom = streamed ? undefined : Math.floor((course.finishX - 220) / 40) * 40;
     this.env.buildScenery(course.seed, course.finishX, heightAt, minY, streamed, groundAt, { harbourFrom, clockTowers: towers, endless: streamed });
