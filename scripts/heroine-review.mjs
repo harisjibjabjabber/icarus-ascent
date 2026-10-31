@@ -12,7 +12,7 @@ const page = await browser.newPage({ viewport: { width: 390, height: 844 }, devi
 const logs = [];
 page.on('console', (m) => logs.push(`${m.type()}: ${m.text()}`));
 page.on('pageerror', (e) => logs.push(`pageerror: ${e.message}`));
-const mode = scenario === 'idle' || scenario === 'push' || scenario === 'coast' || scenario === 'skimexit' || scenario === 'crash' || scenario === 'lessons' ? '' : 'lab&';
+const mode = scenario === 'idle' || scenario === 'push' || scenario === 'coast' || scenario === 'skimexit' || scenario === 'crash' || scenario === 'lessons' || scenario === 'opening' || scenario === 'sceneperf' ? '' : 'lab&';
 await page.goto(`${BASE}?${mode}seed=12345&look=${look}${process.env.Q ? '&q=' + process.env.Q : ''}`, { waitUntil: 'networkidle' });
 await page.waitForFunction(() => window.icarus?.game?.view?.rider?.figureStats, null, { timeout: 60000 });
 await page.evaluate(() => { const ic = window.icarus; ic.pause(true); document.querySelector('.hint')?.classList.add('gone'); let s = 7; Math.random = () => ((s = (s * 16807) % 2147483647) / 2147483647); });
@@ -134,6 +134,26 @@ if (scenario === 'probe') {
   // lab course with the dev autopilot: pushes, gaps, grabs, flips, rails, walls, landings, pots, pillars
   await page.evaluate(() => { const ic = window.icarus; ic.game.retry(); ic.autopilot({ minSpeed: 13, strength: 1, optionalRail: true, styleFlips: true, styleGrabs: true, flipAtFirstGap: true }); });
   await record(Number(process.env.N ?? 1500));
+} else if (scenario === 'opening') {
+  // the opening course with the dev autopilot (town review: the whole level as a player first sees it)
+  await page.evaluate(() => { const ic = window.icarus; ic.game.retry(); ic.autopilot({ minSpeed: 13, strength: 1, optionalRail: true, styleGrabs: true }); });
+  await record(Number(process.env.N ?? 1200));
+} else if (scenario === 'sceneperf') {
+  // whole-scene cost on the opening course (autopilot): draw calls / triangles per frame and CPU ms of sim+render
+  const r = await page.evaluate(() => {
+    const ic = window.icarus, v = ic.game.view; ic.game.retry(); ic.autopilot({ minSpeed: 13, strength: 1, optionalRail: true, styleGrabs: true });
+    const calls = [], tris = [], ms = [];
+    v.renderer.info.autoReset = false;
+    for (let i = 0; i < 600; i++) {
+      v.renderer.info.reset();
+      const t0 = performance.now(); ic.advance(4, undefined, 4); v.renderer.render(v.scene, v.rig.camera); v.renderer.getContext().finish(); ms.push(performance.now() - t0);
+      calls.push(v.renderer.info.render.calls); tris.push(v.renderer.info.render.triangles);
+    }
+    v.renderer.info.autoReset = true;
+    const st = (a) => { const b = [...a].sort((x, y) => x - y); return { avg: +(a.reduce((x, y) => x + y, 0) / a.length).toFixed(1), p95: +b[Math.floor(b.length * 0.95)].toFixed(1), max: +b[b.length - 1].toFixed(1) }; };
+    return { calls: st(calls), tris: st(tris), ms: st(ms), geometries: v.renderer.info.memory.geometries, textures: v.renderer.info.memory.textures };
+  });
+  console.log('SCENEPERF', look, process.env.Q ?? 'auto', JSON.stringify(r));
 } else if (scenario === 'push') {
   // opening start: a full push stroke every second (no jumps) so the whole push cycle reads
   await page.evaluate(() => { const ic = window.icarus; ic.game.retry(); ic.autopilot({ minSpeed: 99, strength: 0.8, pushEvery: 120, jumpEarly: 999 }); });
