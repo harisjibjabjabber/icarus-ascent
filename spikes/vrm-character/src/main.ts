@@ -30,7 +30,7 @@ const sun = new THREE.DirectionalLight('#fff1d6', 2.4);
 sun.position.set(-6, 10, -4); sun.castShadow = true;
 sun.shadow.mapSize.set(1024, 1024);
 Object.assign(sun.shadow.camera, { left: -4, right: 4, top: 4, bottom: -4, near: 0.5, far: 40 });
-sun.shadow.bias = -0.0005;
+sun.shadow.bias = -0.0005; sun.shadow.normalBias = Number(q.get('nb') ?? 0.02);
 scene.add(sun, sun.target);
 
 // marble causeway + bronze rail + cloud floor (placeholders for the real environment)
@@ -135,11 +135,23 @@ new GLTFLoader().register((p) => new VRMLoaderPlugin(p)).load('./' + (q.get('mod
   const mats = new Set<MToonMaterial>();
   vrm.scene.traverse((o) => { const m = (o as THREE.Mesh).material; (Array.isArray(m) ? m : [m]).forEach((x) => { if (x && (x as MToonMaterial).isMToonMaterial) mats.add(x as MToonMaterial); }); });
   for (const m of mats) {
-    if (m.isOutline) { m.outlineColorFactor.set('#5a3f3a'); continue; }
+    if (m.isOutline) { m.outlineColorFactor.set('#5a3f3a'); if (q.get('outline') === '0') m.visible = false; continue; }
+    if (q.get('double') === '1') { m.side = THREE.DoubleSide; m.shadowSide = THREE.DoubleSide; }
     m.shadeColorFactor.lerp(new THREE.Color('#b59ab8'), 0.35);
     m.shadingToonyFactor = 0.75; m.shadingShiftFactor = -0.05;
     m.parametricRimColorFactor.set('#ffd9a8'); m.parametricRimFresnelPowerFactor = 3.5; m.parametricRimLiftFactor = 0.05; m.rimLightingMixFactor = 0.6;
   }
+  if (q.get('simple') === '1') vrm.scene.traverse((o) => { const me = o as THREE.Mesh; if (me.isMesh && (me.material as MToonMaterial).isMToonMaterial) { const mm = me.material as MToonMaterial; me.material = new THREE.MeshLambertMaterial({ map: mm.map }); } });
+  // fresh MToon (soft painterly cel + outline) for generated models: keeps only the base texture
+  if (q.get('fresh') === '1') vrm.scene.traverse((o) => {
+    const me = o as THREE.Mesh; if (!me.isMesh) return;
+    const conv = (x: THREE.Material) => { const mm = x as MToonMaterial; if (!mm.isMToonMaterial) return x;
+      const n = new MToonMaterial({ map: mm.map, shadeMultiplyTexture: mm.map, shadeColorFactor: new THREE.Color('#d9c2c8'), shadingToonyFactor: 0.75, shadingShiftFactor: -0.05,
+        parametricRimColorFactor: new THREE.Color('#ffd9a8'), parametricRimFresnelPowerFactor: 4, rimLightingMixFactor: 0.4, giEqualizationFactor: 0.9 });
+      if (mm.isOutline) { n.isOutline = true; n.outlineWidthMode = 'worldCoordinates' as never; n.outlineWidthFactor = 0.0035; n.outlineColorFactor.set('#5a3f3a'); n.outlineLightingMixFactor = 1; n.side = THREE.BackSide; }
+      return n; };
+    me.material = Array.isArray(me.material) ? me.material.map(conv) : conv(me.material);
+  });
   vrm.scene.rotation.y = Math.PI / 2; // her +Z (face) -> scene +X; her left (+X) -> scene -Z (down the route)
   rider.add(vrm.scene);
   const ikL = new THREE.Object3D(); ikL.name = 'ikL'; const ikR = new THREE.Object3D(); ikR.name = 'ikR';

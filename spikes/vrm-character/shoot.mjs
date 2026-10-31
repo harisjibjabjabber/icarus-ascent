@@ -4,7 +4,7 @@ const cam = process.argv[2] ?? 'chase';
 const browser = await chromium.launch({ executablePath: process.env.CHROME ?? '/usr/bin/google-chrome', args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
 const page = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
 const logs = []; page.on('console', (m) => logs.push(`${m.type()}: ${m.text()}`)); page.on('pageerror', (e) => logs.push('pageerror ' + e.message));
-await page.goto(`http://localhost:5190/?cam=${cam}&auto=0&model=${process.env.MODEL ?? 'heroine'}&pr=${process.env.PR ?? 2}`, { waitUntil: 'networkidle' });
+await page.goto(`http://localhost:5190/?cam=${cam}&auto=0&model=${process.env.MODEL ?? 'heroine'}${process.env.EXTRA ?? ''}&pr=${process.env.PR ?? 2}`, { waitUntil: 'networkidle' });
 await page.waitForFunction(() => window.spike?.loaded, null, { timeout: 60000 });
 const shot = async (name, clip, wait) => { await page.evaluate((c) => window.play(c), clip); await page.waitForTimeout(wait); const s = await page.evaluate(() => ({ clip: window.spike.clip, ik: window.spike.ik, hair: window.spike.hairTip })); await page.screenshot({ path: `shots/${process.env.MODEL ?? 'heroine'}-${cam}-${name}.png` }); console.log(name, JSON.stringify(s)); };
 await page.waitForTimeout(2500);
