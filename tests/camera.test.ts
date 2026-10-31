@@ -35,4 +35,9 @@ describe('chase camera visibility budget', () => {
       expect(f.feetPx).toBeLessThan(844 * 0.88);
     }
   });
+  it('look-over adds only a small lift on flat ground (keeps the rider in frame after the zoom-in)', () => {
+    const C = TUNING.camera;
+    expect(C.lookOverClearance - C.height).toBeLessThanOrEqual(0.6);
+    expect(C.lookOverMaxLift / C.height).toBeLessThanOrEqual(0.37);
+  });
 });

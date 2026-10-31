@@ -252,9 +252,12 @@ export const TUNING = {
      *  so a landing beyond a ramp lip or crest is visible before takeoff.
      *  (Translation only; the angle never changes.) */
     lookOverRange: 34,
-    lookOverClearance: 7.5,
-    /** ...but never lift more than this (m) above the normal follow height, so the rider stays in frame. */
-    lookOverMaxLift: 2.5,
+    /** Oct 2026 zoom-in: 7.5 -> 5.75 so the flat-ground margin stays 0.5 m above the (lower) rest height;
+     *  left at 7.5 the camera sat ~2.25 m high on every flat and pushed the rider off the bottom of the screen. */
+    lookOverClearance: 5.75,
+    /** ...but never lift more than this (m) above the normal follow height, so the rider stays in frame.
+     *  Scaled with the zoom-in (was 2.5 at the old 7 m height). */
+    lookOverMaxLift: 1.9,
     /** Landscape screens: same angle, a touch closer since width is plentiful. */
     landscapeScale: 0.9,
     /** Smoothing time constants (s). Height lags more so jumps don't bob the view. */
