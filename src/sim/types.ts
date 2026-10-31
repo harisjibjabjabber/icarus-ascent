@@ -86,6 +86,8 @@ export interface RiderState {
   broken: number[];
   /** Airborne trick that can power a pillar break: earned in the air, spent on a break. */
   trickCredit: 'none' | 'flip' | 'grab';
+  /** A grab was started at some point during the current airborne phase. */
+  grabbedThisAir: boolean;
   /** Ground distance travelled since landing with a credit (m). */
   creditGround: number;
 

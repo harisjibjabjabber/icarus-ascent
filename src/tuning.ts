@@ -148,8 +148,6 @@ export const TUNING = {
     /** Speed kept through a break (flow: nearly all). */
     potBreakRetention: 0.985,
     pillarBreakRetention: 0.97,
-    /** A grab only earns a pillar break if held at least this long and released in the air. */
-    grabMinHold: 0.12,
     /** After landing, an airborne trick still powers a pillar break for this much ground travel (m). */
     pillarCreditDistance: 26,
     /** Forgiving pillar hitbox. With a valid trick the break triggers this far early (m) and this much higher (m). */

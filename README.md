@@ -23,7 +23,7 @@ node scripts/screenshot-tricks.mjs   # deterministic grind / wall / flip shots v
 | Grab | in the air away from a wall, swipe left/right and hold. Release before landing or you fail | hold ← / → |
 | Heel skim | in the air on ordinary ground, swipe down and keep holding into the landing. The board goes onto its heel and you slow more the longer you hold. Release or push to end it | hold ↓ into landing |
 | Pots | low obstacles: jump over them, or break them with your heel (hold down into the landing, or skim into them). Rolling into one or clipping it fails | |
-| Pillars | tall obstacles: smash through while doing a trick at the moment of contact, either holding a grab or mid-flip in the air, or heel-skimming on the ground. Normal landing rules still apply afterwards: let go of the grab and finish the flip before touchdown. A trick completed just before also counts for 26 m (lenient extra). Rolling or plain-jumping into one fails. The hitbox is forgiving: with a trick it triggers 0.8 m early, and a plain hit needs a solid overlap | |
+| Pillars | tall obstacles: smash through while doing a trick at the moment of contact, either mid-flip or having grabbed on that jump (held or already released, any duration), or heel-skimming on the ground. Normal landing rules still apply afterwards: let go of the grab and finish the flip before touchdown. A trick completed just before also counts for 26 m (lenient extra). Rolling or plain-jumping into one fails. The hitbox is forgiving: with a trick it triggers 0.8 m early, and a plain hit needs a solid overlap | |
 | Sound | "Sound" button (mute persists) | M |
 | Retry (same seed) | tap or swipe after a fail | R, Enter, ↑ |
 | New run (new seed) | "New run" button | N |

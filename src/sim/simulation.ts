@@ -53,7 +53,7 @@ export class Simulation {
       air: 'none', flip: 0, flipsThisJump: 0, sideStrokeId: -1, prepStrokeId: -1, prepTimer: 0, prepHeld: false,
       railId: -1, wallId: -1, contactTime: 0, wallEntrySpeed: 0, lastContact: 'ground', lastContactId: g.surface.id,
       prepTriedThisAir: false, sideTriedThisAir: false,
-      broken: [], trickCredit: 'none', creditGround: 0,
+      broken: [], trickCredit: 'none', creditGround: 0, grabbedThisAir: false,
       takeoffX: x, takeoffY: g.sample.y, takeoffSpeed: 0, leftBy: 'none', fail: null,
     };
   }
@@ -154,6 +154,7 @@ export class Simulation {
     if (s.mode === 'airborne') {
       if (s.air === 'grabLeft' || s.air === 'grabRight') return 'grab';
       if (s.air === 'flip') return 'flip';
+      if (s.grabbedThisAir) return 'grab'; // grabbed earlier on this jump and already let go
       if (this.isPrepArmed() && s.prepHeld && s.vy <= 0) return 'heel';
     }
     if (s.mode === 'heelSkim') return 'heel';
@@ -264,6 +265,7 @@ export class Simulation {
     }
     if (s.air === 'flip') return this.reject(name, 'mid-flip: no grab');
     s.air = side === 'left' ? 'grabLeft' : 'grabRight';
+    s.grabbedThisAir = true;
     s.sideStrokeId = strokeId;
     s.contactTime = 0;
     this.emit({ type: 'grab-start', side });
@@ -276,7 +278,7 @@ export class Simulation {
       s.air = 'none';
       this.emit({ type: 'grab-end', side, held: s.contactTime });
       this.resolve(`${side} release`, 'grab released');
-      if (s.contactTime >= this.T.obstacles.grabMinHold) this.earnCredit('grab');
+      this.earnCredit('grab'); // any duration: a grab triggered on this jump counts
     } else if (s.mode === 'wallRiding' && s.sideStrokeId === strokeId) {
       this.leaveWall('release');
     }
@@ -315,7 +317,7 @@ export class Simulation {
   private resetAir(): void {
     const s = this.state;
     s.air = 'none'; s.flip = 0; s.flipsThisJump = 0; s.airTime = 0;
-    s.prepTriedThisAir = s.prepHeld; s.sideTriedThisAir = false;
+    s.prepTriedThisAir = s.prepHeld; s.sideTriedThisAir = false; s.grabbedThisAir = false;
     s.trickCredit = 'none'; s.creditGround = 0; // a pillar needs a trick from the jump before it
   }
 

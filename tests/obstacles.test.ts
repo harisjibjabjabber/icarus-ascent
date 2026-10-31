@@ -173,12 +173,35 @@ describe('pillars', () => {
     expect(sim.state.fail?.kind).toBe('hit-pillar');
   });
 
-  it('a token grab released before reaching it does not count', () => {
-    const { sim } = into((v) => v * 0.45, (s) => {
+  it('a brief grab already released before contact (any duration) still breaks it on that jump', () => {
+    const { sim, brk } = into((v) => v * 0.45, (s) => {
       const id = newId();
       s.enqueue(side('left', true, id)); s.step(); s.step();
       s.enqueue(side('left', false, id));
+      s.step();
+      expect(s.state.air).toBe('none');
     });
+    expect(sim.state.fail?.message ?? '').toBe('');
+    expect(brk && brk.type === 'break' && brk.by).toBe('grab');
+  });
+
+  it('a grab-and-release in the same instant (one-tick flick) counts too', () => {
+    const { sim, brk } = into(apex, (s) => {
+      const id = newId();
+      s.enqueue(side('right', true, id)); s.enqueue(side('right', false, id));
+    });
+    expect(sim.state.fail?.message ?? '').toBe('');
+    expect(brk && brk.type === 'break' && brk.by).toBe('grab');
+  });
+
+  it('a grab on an earlier jump does not carry into a plain jump into the pillar', () => {
+    const sim = new Simulation(flatWith(['pillar', 240]));
+    approach(sim, 14, 150); sim.enqueue(up()); sim.step();
+    const id = newId(); sim.enqueue(side('left', true, id)); sim.step(); sim.enqueue(side('left', false, id));
+    stepUntil(sim, (q) => q.state.mode === 'grounded', 3);
+    stepUntil(sim, (q) => q.state.x >= 240 - q.state.speed * 0.3, 20);
+    sim.enqueue(up());
+    stepCollect(sim, 400);
     expect(sim.state.fail?.kind).toBe('hit-pillar');
   });
 
