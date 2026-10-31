@@ -50,6 +50,8 @@ export interface Gap {
   x1: number; // receiving edge (start of next chain)
   yTakeoff: number;
   yReceive: number;
+  /** What it takes to cross: a jump, a compulsory rail, or a compulsory wall ride. */
+  requires: 'jump' | 'rail' | 'wall';
 }
 
 export interface Marker { x: number; label: string }
@@ -77,7 +79,7 @@ export class Course {
     for (let i = 0; i + 1 < sorted.length; i++) {
       const a = sorted[i].points[sorted[i].points.length - 1];
       const b = sorted[i + 1].points[0];
-      if (b.x > a.x) this.gaps.push({ x0: a.x, x1: b.x, yTakeoff: a.y, yReceive: b.y });
+      if (b.x > a.x) this.gaps.push({ x0: a.x, x1: b.x, yTakeoff: a.y, yReceive: b.y, requires: 'jump' });
     }
   }
 
@@ -135,6 +137,25 @@ export class Course {
       for (const p of s.points) if (p.x > x && p.x <= x + range) hi = Math.max(hi, p.y);
     }
     return hi;
+  }
+
+  /** Rail height/slope at x (clamped). */
+  static railSample(r: Rail, x: number): { y: number; slope: number; seg: number } {
+    const p = r.points;
+    let i = 0;
+    while (i < p.length - 2 && x > p[i + 1].x) i++;
+    const a = p[i], b = p[i + 1];
+    const t = Math.min(Math.max((x - a.x) / (b.x - a.x), 0), 1);
+    return { y: a.y + (b.y - a.y) * t, slope: (b.y - a.y) / (b.x - a.x), seg: i };
+  }
+  static railX0(r: Rail): number { return r.points[0].x; }
+  static railX1(r: Rail): number { return r.points[r.points.length - 1].x; }
+
+  /** Mark a gap (by its takeoff edge) as requiring a rail or wall. */
+  markGap(x0: number, requires: Gap['requires']): void {
+    const g = this.gaps.find((q) => Math.abs(q.x0 - x0) < 0.01);
+    if (!g) throw new Error(`no gap at ${x0}`);
+    g.requires = requires;
   }
 
   /** The gap whose span contains x (or the nearest ahead within lookahead). */

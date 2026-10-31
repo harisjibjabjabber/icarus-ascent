@@ -1,11 +1,20 @@
 /**
- * Explicit movement states. One state at a time; no contradictory booleans.
- * 'grinding' and 'wallRiding' are reserved for milestone 2 — the transition
- * table in simulation.ts already routes through resolve*() hooks where they slot in.
+ * Explicit movement states. Exactly one at a time; no contradictory booleans.
+ *  grounded   – rolling on a ground chain
+ *  heelSkim   – grounded on the tail (manual), slowing progressively while held
+ *  airborne   – ballistic; may carry an `air` trick (flip / grab) and a landing prep
+ *  grinding   – locked to a rail
+ *  wallRiding – riding a right-hand wall
+ *  failed / finished – run over
  */
-export type MoveMode = 'grounded' | 'airborne' | 'failed' | 'finished' | 'grinding' | 'wallRiding';
+export type MoveMode = 'grounded' | 'heelSkim' | 'airborne' | 'grinding' | 'wallRiding' | 'failed' | 'finished';
 
-export type FailKind = 'fell-in-gap' | 'hit-ledge-face' | 'stalled';
+/** Airborne trick sub-state (only meaningful while airborne). */
+export type AirTrick = 'none' | 'flip' | 'grabLeft' | 'grabRight';
+
+export type FailKind =
+  | 'fell-in-gap' | 'hit-ledge-face' | 'unfinished-flip' | 'landed-grabbing'
+  | 'missed-rail' | 'missed-wall' | 'fell-off-wall' | 'stalled';
 
 export interface FailInfo {
   kind: FailKind;
@@ -26,12 +35,12 @@ export interface RiderState {
   /** World velocity, valid in every mode. */
   vx: number;
   vy: number;
-  /** Speed along the surface while grounded (m/s). */
+  /** Speed along the current contact (ground, rail, wall) (m/s). */
   speed: number;
-  /** Ground contact (valid while grounded). */
+  /** Ground contact (valid while grounded / heelSkim). */
   surfaceId: number;
   seg: number;
-  /** Surface angle (rad) while grounded; last takeoff angle while airborne. */
+  /** Contact angle (rad): surface/rail slope; last takeoff angle while airborne. */
   angle: number;
   airTime: number;
   groundTime: number;
@@ -42,19 +51,60 @@ export interface RiderState {
   /** Current push stroke being extended (touch strokes grow). */
   pushStrokeId: number;
   pushApplied: number;
+  /** Stroke that started the current jump: the same stroke can never also flip. */
+  jumpStrokeId: number;
+
+  // --- airborne tricks ---
+  air: AirTrick;
+  /** Flip progress 0..1 (1 = full rotation). */
+  flip: number;
+  flipsThisJump: number;
+  /** Stroke holding the current grab / wall ride. */
+  sideStrokeId: number;
+  /** Landing preparation: held (stroke id or -1) and armed-until timer (s). */
+  prepStrokeId: number;
+  prepTimer: number;
+  /** True while the stroke that armed the prep is still held. */
+  prepHeld: boolean;
+
+  // --- contacts ---
+  railId: number;
+  wallId: number;
+  /** Time in the current contact mode (grind / wall / skim) (s). */
+  contactTime: number;
+  /** Speed when the last wall ride began (for failure explanation). */
+  wallEntrySpeed: number;
+  /** What the rider last touched before the current flight. */
+  lastContact: 'ground' | 'rail' | 'wall' | 'none';
+  lastContactId: number;
+  /** True if a catch was armed at any point during the current flight. */
+  prepTriedThisAir: boolean;
+  sideTriedThisAir: boolean;
+
   /** Last takeoff point, for failure explanation. */
   takeoffX: number;
   takeoffY: number;
   takeoffSpeed: number;
-  leftBy: 'jump' | 'edge' | 'none';
+  leftBy: 'jump' | 'edge' | 'rail' | 'wall' | 'none';
   fail: FailInfo | null;
 }
 
 export type SimEvent =
   | { type: 'push'; impulse: number; strength: number; fresh: boolean; x: number; y: number }
-  | { type: 'jump'; kind: 'ground' | 'coyote' | 'buffered'; x: number; y: number; vx: number; vy: number }
+  | { type: 'jump'; kind: 'ground' | 'coyote' | 'buffered' | 'rail' | 'wall' | 'skim'; x: number; y: number; vx: number; vy: number }
   | { type: 'leave-edge'; x: number; y: number }
-  | { type: 'land'; x: number; y: number; impact: number; speedBefore: number; speedAfter: number; material: string }
+  | { type: 'land'; x: number; y: number; impact: number; speedBefore: number; speedAfter: number; material: string; flipped: boolean }
+  | { type: 'flip-start'; x: number; y: number }
+  | { type: 'flip-complete'; x: number; y: number }
+  | { type: 'grab-start'; side: 'left' | 'right' }
+  | { type: 'grab-end'; side: 'left' | 'right'; held: number }
+  | { type: 'prep'; armed: boolean }
+  | { type: 'grind-start'; railId: number; x: number; y: number; speed: number }
+  | { type: 'grind-end'; railId: number; x: number; y: number; reason: 'end' | 'jump' }
+  | { type: 'wall-start'; wallId: number; x: number; y: number; speed: number }
+  | { type: 'wall-end'; wallId: number; x: number; y: number; reason: 'end' | 'release' | 'slid-off' | 'too-slow' | 'jump' }
+  | { type: 'skim-start'; x: number; y: number }
+  | { type: 'skim-end'; x: number; y: number; reason: 'release' | 'push' | 'jump' | 'edge' | 'stopped' }
   | { type: 'fail'; info: FailInfo }
   | { type: 'finish'; x: number }
   | { type: 'resolve'; action: string; result: string }

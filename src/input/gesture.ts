@@ -151,7 +151,9 @@ export class GestureRecognizer {
       let dir: Dir | null = null;
       if (ay >= ax * G.verticalBias) dir = dy > 0 ? 'down' : 'up';
       else if (ax >= ay * G.horizontalBias) dir = dx > 0 ? 'right' : 'left';
-      else if (dist >= G.ambiguityLimit) dir = ay >= ax ? (dy > 0 ? 'down' : 'up') : dx > 0 ? 'right' : 'left';
+      // Still diagonal after ambiguityLimit: an UPWARD diagonal resolves sideways (a wall-ride /
+      // grab gesture must never become a flip); a downward diagonal resolves to down.
+      else if (dist >= G.ambiguityLimit) dir = dy > 0 ? 'down' : dx > 0 ? 'right' : 'left';
       if (!dir) { this.debug.dir = 'ambiguous'; return; }
       this.stage = 'committed';
       this.dir = dir;

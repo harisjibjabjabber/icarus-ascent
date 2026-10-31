@@ -77,6 +77,68 @@ export const TUNING = {
     failDepth: 4,
   },
 
+  /** Milestone 2: tricks and contact. */
+  tricks: {
+    // --- Backflip (second fresh Up while airborne) ---
+    /** Time for one full backflip (s). Flat-ground jumps (~0.6 s air) barely fit;
+     *  ramps and crests make it comfortable — the route decides when flips are on. */
+    flipDuration: 0.46,
+    /** Landing with at least this much of the rotation done counts as complete
+     *  (last ~36 deg is absorbed by the landing). Less = "landed mid-flip" failure. */
+    flipLandTolerance: 0.9,
+    /** One committed flip per jump (brief: add multiple rotations later). */
+    maxFlipsPerJump: 1,
+
+    // --- Landing preparation (airborne Down): rail catch / heel skim ---
+    /** A fresh airborne Down keeps the catch armed for this long (s) even after the
+     *  finger lifts; holding keeps it armed indefinitely. */
+    prepArmWindow: 0.4,
+
+    // --- Rail catch & grind ---
+    /** Vertical catch band around the rail (m): rider feet up to railCatchAbove
+     *  above the rail, or railCatchBelow below it (lifted on), count as a catch. */
+    railCatchAbove: 1.2,
+    railCatchBelow: 0.55,
+    /** Catching from below the rail is only plausible while not still rising fast (m/s). */
+    railCatchMaxRise: 2.5,
+    /** Catch area starts this far before the rail's first point (m). */
+    railCatchBefore: 0.6,
+    /** Along-rail friction (m/s^2), much lower than rolling: grinds carry speed. */
+    grindFriction: 0.12,
+    /** Below this speed a grind gently builds speed back up (m/s and m/s^2). Not a refill. */
+    grindSustainSpeed: 12,
+    grindSustainAccel: 1.2,
+    /** Small upward pop when a grind runs off the rail's end (m/s): readable release arc. */
+    grindExitPop: 2.2,
+    /** Jumping off a rail uses this fraction of the normal jump velocity. */
+    grindJumpScale: 0.9,
+
+    // --- Wall ride (airborne Right held beside a valid right-hand wall) ---
+    /** Minimum forward speed to stick to a wall (m/s). */
+    wallMinSpeed: 7,
+    /** Feet must be at least this far above the wall's bottom and this far below its top (m). */
+    wallBandBottom: 0.3,
+    wallBandTop: 0.6,
+    /** Catch area: within the wall's span, entering no later than this before its end (m). */
+    wallCatchEndMargin: 3,
+    /** Reduced gravity on the wall: the ride slowly sinks, so entry speed and height matter. */
+    wallGravity: 2,
+    /** Along-wall friction (m/s^2). Consistent; no speed refill. */
+    wallFriction: 0.45,
+    /** Entry vertical velocity is scaled and clamped so a wall never flings you upward. */
+    wallEntryVyScale: 0.35,
+    wallEntryVyMax: 3,
+    /** Upward pop when the wall ends (m/s), and when letting go early (kick off). */
+    wallExitPop: 2.6,
+    wallKickOff: 1.6,
+
+    // --- Heel skim (manual) ---
+    /** Deceleration while skimming grows the longer it is held: base + ramp * t, capped (m/s^2). */
+    heelDecelBase: 0.8,
+    heelDecelRamp: 1.8,
+    heelDecelMax: 6,
+  },
+
   gesture: {
     /** Movement below this (vu) from the touch-down point is finger noise. */
     deadZone: 0.022,

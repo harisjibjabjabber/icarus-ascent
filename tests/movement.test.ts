@@ -3,7 +3,7 @@ import { Simulation } from '../src/sim/simulation';
 import { Course } from '../src/course/course';
 import { buildLabCourse } from '../src/course/lab';
 import { TUNING } from '../src/tuning';
-import { flatCourse, slopeCourse, chains, push, up, run, stepUntil } from './helpers';
+import { flatCourse, slopeCourse, chains, push, up, run, stepUntil, driveLab } from './helpers';
 
 const M = TUNING.movement;
 
@@ -192,13 +192,13 @@ describe('jump', () => {
     expect(sim.state.mode).toBe('airborne');
   });
 
-  it('a high airborne Up is rejected rather than buffered', () => {
+  it('a high airborne Up is a backflip, not a buffered jump', () => {
     const sim = new Simulation(flatCourse());
     sim.enqueue(up()); sim.step();
     stepUntil(sim, (s) => s.state.vy <= 0);
     sim.drainEvents();
     sim.enqueue(up()); sim.step();
-    expect(sim.drainEvents().some((e) => e.type === 'reject')).toBe(true);
+    expect(sim.drainEvents().some((e) => e.type === 'flip-start')).toBe(true);
     expect(sim.state.jumpBuffer).toBe(0);
   });
 });
@@ -260,22 +260,10 @@ describe('lab course', () => {
     expect(JSON.stringify(a.surfaces)).not.toBe(JSON.stringify(c.surfaces));
   });
 
-  it('is completable across seeds with a simple scripted line', () => {
+  it('is completable across seeds by a competent scripted line (jump, rail, wall)', () => {
     for (let seed = 1; seed <= 40; seed++) {
-      const course = buildLabCourse(seed * 7919);
-      const sim = new Simulation(course);
-      const gaps = course.gaps;
-      let t = 0;
-      const ok = stepUntil(sim, (s) => {
-        t++;
-        const st = s.state;
-        if (st.mode === 'grounded') {
-          if (t % 48 === 0 && st.speed < 13) s.enqueue(push(0.65));
-          for (const g of gaps) if (st.x > g.x0 - 0.6 && st.x < g.x0) s.enqueue(up());
-        }
-        return st.mode === 'finished' || st.mode === 'failed';
-      }, 120);
-      expect(ok).toBe(true);
+      const sim = new Simulation(buildLabCourse(seed * 7919));
+      driveLab(sim, { minSpeed: 15 });
       expect(sim.state.mode, `seed ${seed * 7919}: ${sim.state.fail?.message}`).toBe('finished');
     }
   });
@@ -294,42 +282,23 @@ describe('lab course', () => {
 });
 
 describe('speedy tuning', () => {
-  it('lab is completable at full speed (push to the cap, jump every gap) across seeds', () => {
+  it('lab is completable at full speed (push to the cap) across seeds', () => {
     for (let seed = 1; seed <= 40; seed++) {
-      const course = buildLabCourse(seed * 104729);
-      const sim = new Simulation(course);
-      let t = 0, peak = 0;
-      const ok = stepUntil(sim, (s) => {
-        t++;
-        const st = s.state;
-        peak = Math.max(peak, st.speed);
-        if (st.mode === 'grounded') {
-          if (t % 36 === 0 && st.speed < M.softCap * 0.97) s.enqueue(push(1));
-          for (const g of course.gaps) if (st.x > g.x0 - 0.8 && st.x < g.x0) s.enqueue(up());
-        }
-        return st.mode === 'finished' || st.mode === 'failed';
-      }, 120);
-      expect(ok).toBe(true);
+      const sim = new Simulation(buildLabCourse(seed * 104729));
+      let peak = 0;
+      const orig = sim.step.bind(sim);
+      sim.step = () => { orig(); peak = Math.max(peak, sim.state.speed); };
+      driveLab(sim, { minSpeed: M.softCap * 0.97, strength: 1 });
       expect(sim.state.mode, `seed ${seed * 104729}: ${sim.state.fail?.message}`).toBe('finished');
       expect(peak).toBeGreaterThan(M.softCap * 0.9);
       expect(peak).toBeLessThanOrEqual(M.hardCap);
     }
   });
 
-  it('lab gaps are also clearable by a moderate rider (keeps ~11 m/s) who jumps at the lip', () => {
+  it('lab is completable by a moderate rider (keeps ~13 m/s; the wall needs ~12 m/s entry)', () => {
     for (let seed = 1; seed <= 40; seed++) {
-      const course = buildLabCourse(seed * 31337);
-      const sim = new Simulation(course);
-      sim.enqueue(push(0.65)); sim.step(); sim.enqueue(push(0.65));
-      const ok = stepUntil(sim, (s) => {
-        const st = s.state;
-        if (st.mode === 'grounded') {
-          if (st.speed < 11) s.enqueue(push(0.65));
-          for (const g of course.gaps) if (st.x > g.x0 - 0.8 && st.x < g.x0) s.enqueue(up());
-        }
-        return st.mode === 'finished' || st.mode === 'failed';
-      }, 150);
-      expect(ok).toBe(true);
+      const sim = new Simulation(buildLabCourse(seed * 31337));
+      driveLab(sim, { minSpeed: 13 });
       expect(sim.state.mode, `seed ${seed * 31337}: ${sim.state.fail?.message}`).toBe('finished');
     }
   });
