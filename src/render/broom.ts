@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { toon } from './materials';
-import { GeoBuilder, jitter } from './geo';
+import { GeoBuilder } from './geo';
 import { mulberry32 } from '../rng';
+import { BROOM_HANDLE, BROOM_STRAW, type BakedPart } from './broomMesh';
 
 /**
  * The witch's broom, ridden like a skateboard (proto/broom). Local frame = the old deck's frame:
@@ -14,7 +15,7 @@ export const BROOM = {
   /** Hover gap above the ground/rail (m) and the idle bob amplitude (m) / rate (rad/s). */
   hover: 0.05, bob: 0.012, bobRate: 2.6,
   /** Bristle tip in broom space (sparkle / dust / spark emitter). */
-  tail: new THREE.Vector3(-1.32, 0.03, 0),
+  tail: new THREE.Vector3(-1.5, 0.03, 0),
   /** Open-stance yaw (rad) so the chase camera sees the broom's length, not just its end. */
   yaw: 0.12,
   /** Grab targets on the handle (broom space): front hand ahead of the front foot, back hand behind the back foot. */
@@ -40,44 +41,19 @@ export class Broom {
 
   constructor() {
     const mat = toon('#ffffff', { vertexColors: true, rim: 2.2 });
-    const H = Math.PI / 2;
-    // v2 (Haris: "reads as a thin line from behind"): thicker handle, bigger flared straw, warm outline, contact shadow
-    const g = new GeoBuilder()
-      // round handle, binding to nose, with an upturned kick at the nose
-      .add(new THREE.CylinderGeometry(0.038, 0.04, 1.72, 10), [0.14, -0.009, 0], C.handle, { rot: [0, 0, H], top: C.handleTop })
-      .add(new THREE.CylinderGeometry(0.03, 0.038, 0.34, 10), [1.13, 0.05, 0], C.handle, { rot: [0, 0, -(H - 0.42)], top: C.handleTop })
-      .add(new THREE.SphereGeometry(0.04, 10, 7), [1.28, 0.118, 0], C.handleTop)
-      // flattened oak deck section under the feet (the concept sheet's "plank"), tapered ends
-      .add(new THREE.BoxGeometry(0.66, 0.026, 0.11), [0, 0.022, 0], C.oak, { top: C.oakTop })
-      .add(new THREE.CylinderGeometry(0.055, 0.055, 0.026, 10, 1, false, 0, Math.PI), [0.33, 0.022, 0], C.oak, { top: C.oakTop })
-      .add(new THREE.CylinderGeometry(0.055, 0.055, 0.026, 10, 1, false, Math.PI, Math.PI), [-0.33, 0.022, 0], C.oak, { top: C.oakTop })
-      // two leather foot wraps (read as bindings; her boots sit on them)
-      .add(new THREE.BoxGeometry(0.075, 0.012, 0.122), [0.23, 0.037, 0], C.wrap, { top: C.wrapTop })
-      .add(new THREE.BoxGeometry(0.075, 0.012, 0.122), [-0.23, 0.037, 0], C.wrap, { top: C.wrapTop })
-      // binding: red cord and gold band where the straw starts
-      .add(new THREE.CylinderGeometry(0.064, 0.064, 0.06, 12), [-0.71, 0.004, 0], C.ribbon, { rot: [0, 0, H], top: C.ribbonTop })
-      .add(new THREE.CylinderGeometry(0.072, 0.072, 0.03, 12), [-0.78, 0.004, 0], C.gold, { rot: [0, 0, H] });
-    const handleGeo = g.build()!;
-    this.group.add(new THREE.Mesh(handleGeo, mat), outline(handleGeo, 0.012));
-    // straw: a core plus splayed tufts that fan outward and a little up to a ragged brush end (~0.4 m across),
-    // so from behind it reads as a broom head, not a stick end
-    this.bristles.position.set(-0.8, 0.004, 0);
-    const rng = mulberry32(11);
-    const b = new GeoBuilder()
-      .add(jitter(new THREE.CylinderGeometry(0.07, 0.15, 0.52, 12, 3), 0.012, rng), [-0.26, 0.01, 0], C.straw, { rot: [0, 0, -H], top: C.strawTop, scale: [0.85, 1, 1] });
-    const N = 14;
-    for (let i = 0; i < N; i++) {
-      const a = (i / N) * Math.PI * 2 + rng() * 0.25, len = 0.5 + rng() * 0.16;
-      const fy = Math.sin(a), fz = Math.cos(a), r = 0.07 + rng() * 0.03;
-      // each tuft: a thin cone, point at the binding, wide toward the tail, splayed outward (+ a slight upward bias)
-      b.add(new THREE.ConeGeometry(0.055 + rng() * 0.02, len, 5, 1), [-0.04 - len / 2, fy * r * 1.4 + 0.02, fz * r * 1.6], i % 3 ? C.straw : C.strawTop,
-        { rot: [-fz * 0.26, 0, -H + fy * 0.22 + 0.06], top: C.strawTop });
-    }
-    for (let i = 0; i < 9; i++) { // loose straws poking out of the brush end
-      const a = (i / 9) * Math.PI * 2 + 0.3;
-      b.add(new THREE.BoxGeometry(0.24, 0.01, 0.01), [-0.6, Math.sin(a) * 0.12 + 0.02, Math.cos(a) * 0.17], C.strawTop, { rot: [Math.cos(a) * 0.3, 0, -Math.sin(a) * 0.25] });
-    }
-    const strawGeo = b.build()!;
+    // town build (Haris approved): the premade MiniPoly "Witch Broom" (CC0), palette-retextured and baked to vertex
+    // colours by art/pipeline/bake_broom.py: curled oak handle, red cord binding, fat golden straw bulb.
+    const handleGeo = baked(BROOM_HANDLE);
+    // a slim oak footplate + two leather wraps where her boots plant (keeps the leg IK contact at deckTop = 0.035)
+    const deck = new GeoBuilder()
+      .add(new THREE.BoxGeometry(0.62, 0.016, 0.075), [0, 0.027, 0], C.oak, { top: C.oakTop })
+      .add(new THREE.BoxGeometry(0.075, 0.01, 0.09), [0.23, 0.037, 0], C.wrap, { top: C.wrapTop })
+      .add(new THREE.BoxGeometry(0.075, 0.01, 0.09), [-0.23, 0.037, 0], C.wrap, { top: C.wrapTop })
+      .build()!;
+    this.group.add(new THREE.Mesh(handleGeo, mat), new THREE.Mesh(deck, mat));
+    // straw: its own group so the heel skim can bend it up (pivot at the binding)
+    this.bristles.position.set(-0.72, 0, 0);
+    const strawGeo = baked(BROOM_STRAW); strawGeo.translate(0.72, 0, 0);
     // ground-clamp samples: the lowest straw vertices along the length (bristle space)
     const sp = strawGeo.getAttribute('position'); const buckets = new Map<number, THREE.Vector3>();
     for (let i = 0; i < sp.count; i++) {
@@ -85,10 +61,10 @@ export class Broom {
       const cur = buckets.get(k); if (!cur || v.y < cur.y) buckets.set(k, v);
     }
     this.strawSamples = [...buckets.values()];
-    this.bristles.add(new THREE.Mesh(strawGeo, mat), outline(strawGeo, 0.014));
+    this.bristles.add(new THREE.Mesh(strawGeo, mat));
     this.group.add(this.bristles);
     // ribbon + gold star charm, hanging from the binding (swings a little)
-    this.charm.position.set(-0.72, -0.03, 0.065);
+    this.charm.position.set(-0.66, -0.02, 0.06);
     const r = new GeoBuilder()
       .add(new THREE.BoxGeometry(0.035, 0.17, 0.006), [0.01, -0.085, 0], C.ribbon, { rot: [0, 0, 0.18], top: C.ribbonTop })
       .add(new THREE.BoxGeometry(0.035, 0.13, 0.006), [-0.03, -0.065, 0.01], C.ribbon, { rot: [0, 0, -0.35], top: C.ribbonTop })
@@ -131,18 +107,16 @@ export class Broom {
 }
 
 const _p = new THREE.Vector3();
-/** Inverted-hull outline (warm dark brown), pushed out along the normals: keeps the broom crisp on a bright track. */
-function outline(geo: THREE.BufferGeometry, w: number): THREE.Mesh {
-  const m = new THREE.ShaderMaterial({
-    uniforms: { uW: { value: w }, uC: { value: new THREE.Color('#3a2414') } },
-    vertexShader: `uniform float uW; void main() { gl_Position = projectionMatrix * modelViewMatrix * vec4(position + normalize(normal) * uW, 1.0); }`,
-    fragmentShader: `uniform vec3 uC; void main() { gl_FragColor = vec4(uC, 1.0); }`,
-    side: THREE.BackSide,
-  });
-  const o = new THREE.Mesh(geo, m);
-  o.castShadow = false;
-  o.userData.outline = true;
-  return o;
+/** Baked part (positions, normals, 0-255 vertex colours in sRGB, indices) -> geometry (linear vertex colours). */
+function baked(b: BakedPart): THREE.BufferGeometry {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(b.p, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(b.n, 3));
+  const c = new THREE.Color(), col = new Float32Array(b.c.length);
+  for (let i = 0; i < b.c.length; i += 3) { c.setRGB(b.c[i] / 255, b.c[i + 1] / 255, b.c[i + 2] / 255, THREE.SRGBColorSpace); col[i] = c.r; col[i + 1] = c.g; col[i + 2] = c.b; }
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  g.setIndex(b.i);
+  return g;
 }
 let _blob: THREE.Texture | null = null;
 function blobTexture(): THREE.Texture {
