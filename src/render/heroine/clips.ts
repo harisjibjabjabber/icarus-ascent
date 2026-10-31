@@ -181,13 +181,16 @@ const skim: ClipDef = { name: 'skim', base: STANCE, loop: true, dur: 1.0, keys: 
 
 // ---------- landings ----------
 const SETTLE: Key = { t: 0, hips: H0, ikL: IKL, ikR: IKR, pose: STANCE };
-const landClean: ClipDef = { name: 'landClean', base: STANCE, dur: 0.7, keys: [
+const landClean: ClipDef = { name: 'landClean', base: STANCE, dur: 0.8, keys: [
   { t: 0, hips: [0, -0.12, -0.03], ikL: IKL, ikR: IKR, pose: m(STANCE, arm('L', [0.8, -0.3, 0.2], 0.3), arm('R', [-0.78, -0.25, -0.1], 0.3)) },
-  { t: 0.08, hips: [0.02, -0.25, -0.06], pose: m({ hips: E(0.22, 0.26, -0.04), spine: E(0.2, 0.15, 0.04), head: E(0.1, 0.38, -0.1) }, arm('L', [0.75, -0.5, 0.25], 0.4), arm('R', [-0.72, -0.45, -0.1], 0.4)) },
-  { t: 0.22, hips: [0, -0.02, -0.02], ikL: [0.2, 0.04, 0.04], ikR: [-0.21, 0.04, -0.01], pose: m({ hips: E(0.06, 0.24, -0.09), spine: E(-0.02, 0.1, 0.08), head: E(-0.08, 0.42, -0.18) }, arm('L', [0.62, -0.5, 0.45], 0.9, 0.4, [0, 0, 0.3]), arm('R', [-0.58, -0.55, 0.3], 0.9, 0.4, [0, 0, 0.3])) },
-  { t: 0.34, hips: [0, -0.15, -0.04], ikL: IKL, ikR: IKR },
-  { t: 0.5, hips: [0, -0.08, -0.03], pose: m({ hips: E(0.1, 0.22, -0.07), spine: E(0.06, 0.1, 0.06), head: E(0.04, 0.38, -0.13) }, arm('L', [0.56, -0.79, 0.18], 0.42, 0.2, [0, 0, 0.12]), arm('R', [-0.5, -0.84, -0.04], 0.45, 0.15, [0, 0, 0.12])) },
-  { ...SETTLE, t: 0.7 },
+  // absorb (anticipation for the hop)
+  { t: 0.09, hips: [0.02, -0.3, -0.06], pose: m({ hips: E(0.26, 0.26, -0.04), spine: E(0.22, 0.15, 0.04), head: E(0.12, 0.38, -0.1) }, arm('L', [0.72, -0.55, 0.3], 0.45), arm('R', [-0.7, -0.5, -0.05], 0.45)) },
+  // happy little hop: feet leave the deck a touch, fists in to the chest, head tilt
+  { t: 0.25, hips: [0, 0.07, -0.02], ikL: [0.2, 0.09, 0.04], ikR: [-0.21, 0.09, -0.01], pose: m({ hips: E(0.02, 0.24, -0.1), spine: E(-0.05, 0.1, 0.09), chest: E(-0.04, 0.08, 0.04), head: E(-0.1, 0.42, -0.22) }, arm('L', [0.45, -0.6, 0.65], 1.6, 0.4, [0, 0, 0.3]), arm('R', [-0.4, -0.62, 0.65], 1.6, 0.4, [0, 0, 0.3]), hand('L', FIST), hand('R', FIST)) },
+  // re-contact, soft knees (overshoot)
+  { t: 0.38, hips: [0, -0.17, -0.04], ikL: IKL, ikR: IKR },
+  { t: 0.56, hips: [0, -0.08, -0.03], pose: m({ hips: E(0.1, 0.22, -0.07), spine: E(0.06, 0.1, 0.06), head: E(0.04, 0.38, -0.13) }, arm('L', [0.5, -0.82, 0.22], 0.45, 0.2, [0, 0, 0.12]), arm('R', [-0.42, -0.86, -0.1], 0.45, 0.15, [0, 0, 0.12]), hand('L', RELAX), hand('R', RELAX)) },
+  { ...SETTLE, t: 0.8 },
 ] };
 const landBig: ClipDef = { name: 'landBig', base: STANCE, dur: 1.15, keys: [
   { t: 0, hips: [0, -0.15, -0.04], ikL: IKL, ikR: IKR },
