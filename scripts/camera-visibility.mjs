@@ -2,7 +2,7 @@
 // Usage: node scripts/camera-visibility.mjs '[[behind,height,pitchDeg,fov], ...]' [screenW screenH]
 import * as THREE from 'three';
 const W = Number(process.argv[3] ?? 390), H = Number(process.argv[4] ?? 844);
-const SOFT = 16, HARD = 22;
+const SOFT = Number(process.env.SOFT ?? 20.5), HARD = Number(process.env.HARD ?? 27.5);
 for (const [behind, height, pitchDeg, fov] of JSON.parse(process.argv[2])) {
   const cam = new THREE.PerspectiveCamera(fov, W / H, 0.3, 2000);
   cam.rotation.set((-pitchDeg * Math.PI) / 180, 0, 0, 'YXZ');

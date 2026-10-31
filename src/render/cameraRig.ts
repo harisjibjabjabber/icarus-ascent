@@ -44,6 +44,9 @@ export class CameraRig {
       this.fy += (targetY - this.fy) * (1 - Math.exp(-dt / C.heightLag));
       this.pull += (speed - this.pull) * (1 - Math.exp(-dt / C.pullLag));
     }
+    // speed sensation: gentle FOV widening (angle/pitch never change)
+    const fov = C.fov + C.fovAtCap * Math.min(1, Math.max(0, this.pull / TUNING.movement.hardCap));
+    if (Math.abs(fov - this.camera.fov) > 0.01) { this.camera.fov = fov; this.camera.updateProjectionMatrix(); }
     const behind = (C.behind + C.behindPerSpeed * this.pull) * this.scale;
     const height = (C.height + C.heightPerSpeed * this.pull) * this.scale;
     toScene(this.fx - behind, this.fy + height, 0, this.camera.position);

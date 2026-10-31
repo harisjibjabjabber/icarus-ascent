@@ -292,3 +292,50 @@ describe('lab course', () => {
     expect(sim.state.mode).toBe('failed');
   });
 });
+
+describe('speedy tuning', () => {
+  it('lab is completable at full speed (push to the cap, jump every gap) across seeds', () => {
+    for (let seed = 1; seed <= 40; seed++) {
+      const course = buildLabCourse(seed * 104729);
+      const sim = new Simulation(course);
+      let t = 0, peak = 0;
+      const ok = stepUntil(sim, (s) => {
+        t++;
+        const st = s.state;
+        peak = Math.max(peak, st.speed);
+        if (st.mode === 'grounded') {
+          if (t % 36 === 0 && st.speed < M.softCap * 0.97) s.enqueue(push(1));
+          for (const g of course.gaps) if (st.x > g.x0 - 0.8 && st.x < g.x0) s.enqueue(up());
+        }
+        return st.mode === 'finished' || st.mode === 'failed';
+      }, 120);
+      expect(ok).toBe(true);
+      expect(sim.state.mode, `seed ${seed * 104729}: ${sim.state.fail?.message}`).toBe('finished');
+      expect(peak).toBeGreaterThan(M.softCap * 0.9);
+      expect(peak).toBeLessThanOrEqual(M.hardCap);
+    }
+  });
+
+  it('lab gaps are also clearable by a moderate rider (keeps ~11 m/s) who jumps at the lip', () => {
+    for (let seed = 1; seed <= 40; seed++) {
+      const course = buildLabCourse(seed * 31337);
+      const sim = new Simulation(course);
+      sim.enqueue(push(0.65)); sim.step(); sim.enqueue(push(0.65));
+      const ok = stepUntil(sim, (s) => {
+        const st = s.state;
+        if (st.mode === 'grounded') {
+          if (st.speed < 11) s.enqueue(push(0.65));
+          for (const g of course.gaps) if (st.x > g.x0 - 0.8 && st.x < g.x0) s.enqueue(up());
+        }
+        return st.mode === 'finished' || st.mode === 'failed';
+      }, 150);
+      expect(ok).toBe(true);
+      expect(sim.state.mode, `seed ${seed * 31337}: ${sim.state.fail?.message}`).toBe('finished');
+    }
+  });
+
+  it('push impulse stays within cap-safe bounds (falloff can never overshoot)', () => {
+    expect(M.pushImpulseMax).toBeLessThanOrEqual(M.softCap / 2);
+    expect(M.hardCap).toBeGreaterThan(M.softCap);
+  });
+});

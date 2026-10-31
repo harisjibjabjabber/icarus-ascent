@@ -27,24 +27,24 @@ export const TUNING = {
     /** Constant rolling resistance while grounded (m/s^2). Small: the player should
      *  be able to enjoy a line without constant pushing. */
     rollingFriction: 0.22,
-    /** Quadratic air drag coefficient (a = k v^2). ~0.6 m/s^2 at soft cap. */
-    airDrag: 0.0024,
+    /** Quadratic air drag coefficient (a = k v^2). ~0.75 m/s^2 at soft cap. */
+    airDrag: 0.0018,
     /** Readable "normal maximum" speed. Pushes approach it asymptotically. */
-    softCap: 16,
+    softCap: 20.5,
     /** Above softCap (from slopes), extra drag proportional to the excess, per second. */
     overCapDrag: 1.4,
     /** Firm safety ceiling. Never exceeded, by anything. Sized to the camera's
      *  visibility budget (see camera.lookAheadMin/PerSpeed). */
-    hardCap: 22,
+    hardCap: 27.5,
     /** Slowest crawl when standing still (brief: "very slowly or nearly still"). */
     restCreep: 0,
 
     // --- Push ---
     /** Impulse for the shortest accepted stroke (and the floor of the curve). */
-    pushImpulseMin: 2.6,
+    pushImpulseMin: 3.0,
     /** Impulse for a full-length stroke. Must stay <= softCap/2 so the
      *  (1 - (v/cap)^2) falloff can never overshoot the cap. */
-    pushImpulseMax: 6.0,
+    pushImpulseMax: 7.0,
     /** Response-curve exponent applied to stroke strength (0..1). <1 = forgiving:
      *  a half-length stroke already gives ~71% of the extra impulse. */
     pushCurveExponent: 0.5,
@@ -102,32 +102,35 @@ export const TUNING = {
   },
 
   camera: {
-    /** Chase camera: fixed angle behind the rider, looking ahead down the route
+    /** Chase camera: fixed pitch behind the rider, looking ahead down the route
      *  (route runs away from the camera, up the screen). Never orbits or rotates;
-     *  it only translates to follow progress.
-     *  Chosen with scripts/camera-search-chase.mjs + scripts/camera-visibility.mjs
-     *  for a 390x844 portrait screen: rider ~108 px tall (12.7%) with feet at
-     *  ~77% of screen height; a 7 m gap stays >= 10 px tall out to ~44 m ahead
-     *  (2.0 s at the 22 m/s hard cap, 2.8 s at the 16 m/s soft cap); 1 m
-     *  obstacles stay >= 10 px out to ~76 m. */
-    /** Vertical field of view (deg). */
+     *  it only translates (and widens FOV a little with speed).
+     *  Chosen with scripts/camera-visibility.mjs for a 390x844 portrait screen.
+     *  At rest: rider ~103 px tall, feet at ~76% of screen height.
+     *  At the 27.5 m/s ceiling (pulled back to 13.5 m / 9.5 m, FOV 57): a 7 m gap
+     *  stays >= 10 px tall out to ~55 m = 2.0 s of approach; gap edge posts and
+     *  1 m obstacles stay readable further (~65 m). */
+    /** Vertical field of view at rest (deg). */
     fov: 52,
+    /** Extra FOV (deg) at the hard cap; scales linearly with speed. Speed sensation. */
+    fovAtCap: 5,
     /** Route yaw in the scene (deg). 90 = route runs straight away from the camera. */
     routeYawDeg: 90,
-    /** Camera distance behind the rider, and height above the rider (m). */
-    behind: 12,
-    height: 6,
-    /** Fixed downward pitch (deg). */
-    pitchDeg: 12,
-    /** Gentle pull-back with speed so faster = slightly more visible approach (m per m/s). */
-    behindPerSpeed: 0.06,
-    heightPerSpeed: 0.02,
+    /** Camera distance behind the rider, and height above the rider (m), at rest. */
+    behind: 11.5,
+    height: 7,
+    /** Fixed downward pitch (deg). Never changes. */
+    pitchDeg: 17,
+    /** Pull-back with speed (m per m/s): at the 27.5 m/s cap the camera sits at
+     *  13.5 m behind / 9.5 m up, buying look-ahead and a sense of speed. */
+    behindPerSpeed: 0.073,
+    heightPerSpeed: 0.091,
     /** Look over crests: the camera's height target is raised so it stays at least
      *  lookOverClearance above the highest ground in the next lookOverRange metres,
      *  so a landing beyond a ramp lip or crest is visible before takeoff.
      *  (Translation only; the angle never changes.) */
-    lookOverRange: 30,
-    lookOverClearance: 6.5,
+    lookOverRange: 34,
+    lookOverClearance: 7.5,
     /** ...but never lift more than this (m) above the normal follow height, so the rider stays in frame. */
     lookOverMaxLift: 2.5,
     /** Landscape screens: same angle, a touch closer since width is plentiful. */
@@ -136,6 +139,21 @@ export const TUNING = {
     followLag: 0.06,
     heightLag: 0.3,
     pullLag: 0.8,
+  },
+
+  /** Speed sensation (presentation only). */
+  speedFx: {
+    /** Speed lines start at this fraction of the soft cap and are full at the hard cap. */
+    linesStart: 0.55,
+    /** Max opacity of a speed line (restrained so the route stays readable). */
+    linesMaxOpacity: 0.32,
+    /** Lines live outside the route: |lateral| from linesInner to linesOuter (m). */
+    linesInner: 3.2,
+    linesOuter: 8,
+    /** Line length per m/s (m). */
+    linesLengthPerSpeed: 0.14,
+    /** Lines spawned per second at the hard cap. */
+    linesRate: 40,
   },
 
   feedback: {

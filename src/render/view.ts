@@ -3,7 +3,7 @@ import type { Course, Vec2 } from '../course/course';
 import type { RiderState, SimEvent } from '../sim/types';
 import { CameraRig } from './cameraRig';
 import { CourseView } from './courseView';
-import { Effects } from './effects';
+import { Effects, SpeedLines } from './effects';
 import { RiderView } from './riderView';
 import { Environment } from './environment';
 import { toScene } from './space';
@@ -28,6 +28,7 @@ export class GameView {
   private courseView: CourseView | null = null;
   private rider = new RiderView();
   private effects = new Effects();
+  private speedLines = new SpeedLines();
   private trail: Vec2[] = [];
   private trailLine: THREE.Line;
   private arcLine: THREE.Line;
@@ -48,7 +49,7 @@ export class GameView {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
     this.env = new Environment(this.scene);
-    this.scene.add(this.rider.root, this.effects.group);
+    this.scene.add(this.rider.root, this.effects.group, this.speedLines.group);
 
     this.trailLine = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineDashedMaterial({ color: '#c8553d', dashSize: 0.5, gapSize: 0.35, fog: false }));
     this.trailLine.visible = false;
@@ -155,8 +156,9 @@ export class GameView {
     }
     this.env.follow(toScene(x + 10, y), this.rig.camera.position);
     // restrained air-cutting streaks scale with actual speed
-    if (curr.speed > 11 && !failed) {
-      this.streakTimer -= dt * (curr.speed - 10) * 0.9;
+    this.speedLines.update(dt, x, y, failed ? 0 : curr.speed);
+    if (SpeedLines.intensity(curr.speed) > 0.3 && !failed) {
+      this.streakTimer -= dt * (curr.speed - 12) * 0.6;
       if (this.streakTimer <= 0) { this.effects.speedStreak(x, y, curr.speed); this.streakTimer = 1; }
     }
     this.effects.update(dt);
