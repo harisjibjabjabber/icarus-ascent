@@ -23,13 +23,15 @@ export type Dir = 'up' | 'down' | 'left' | 'right';
 export type Stage = 'idle' | 'tracking' | 'committed';
 
 export type GestureEvent =
-  | { kind: 'fire'; dir: Dir; strokeId: number; length: number; strength: number; t: number }
+  /** `lean`: sideways component of the stroke at fire time (unit vector x; + = right). */
+  | { kind: 'fire'; dir: Dir; strokeId: number; length: number; strength: number; t: number; lean: number }
   | { kind: 'extend'; dir: 'down'; strokeId: number; length: number; strength: number; t: number }
-  | { kind: 'end'; dir: Dir; strokeId: number; fired: boolean; reason: 'lift' | 'reversal' | 'new-touch' | 'cancel'; t: number }
+  | { kind: 'end'; dir: Dir; strokeId: number; fired: boolean; reason: EndReason; t: number }
   | { kind: 'tap'; t: number }
   | { kind: 'reject'; reason: string; t: number };
 
 interface Pt { x: number; y: number }
+type EndReason = 'lift' | 'reversal' | 'turn' | 'new-touch' | 'cancel';
 
 const DIR_VEC: Record<Dir, Pt> = { up: { x: 0, y: -1 }, down: { x: 0, y: 1 }, left: { x: -1, y: 0 }, right: { x: 1, y: 0 } };
 
@@ -46,8 +48,11 @@ export class GestureRecognizer {
   private fireT = 0;
   private extreme = 0; // furthest travel along dir (vu)
   private extremePt: Pt = { x: 0, y: 0 };
+  private extremeT = 0;
   private lastStrength = 0;
   private everStroked = false;
+  /** Recent (t, along) samples of the committed stroke, for reversal speed. */
+  private samples: { t: number; along: number }[] = [];
   private events: GestureEvent[] = [];
   /** Diagnostics for the dev overlay. */
   debug = { stage: 'idle' as Stage, dir: '-' as string, travel: 0, lastDetected: '-', lastReject: '-' };
@@ -60,6 +65,9 @@ export class GestureRecognizer {
   }
 
   setViewport(w: number, h: number): void { this.unit = Math.max(1, Math.min(w, h)); }
+
+  /** A finger is currently owned by this recogniser. */
+  get active(): boolean { return this.pointerId !== null; }
 
   drain(): GestureEvent[] { const e = this.events; this.events = []; return e; }
 
@@ -116,9 +124,10 @@ export class GestureRecognizer {
     this.fired = false;
     this.extreme = 0;
     this.lastStrength = 0;
+    this.samples = [];
   }
 
-  private endStroke(reason: 'lift' | 'reversal' | 'new-touch' | 'cancel', t: number): void {
+  private endStroke(reason: EndReason, t: number): void {
     if (this.stage === 'committed' && this.dir) {
       if (!this.fired) {
         this.emit({ kind: 'reject', reason: `${this.dir} stroke too short (${this.extreme.toFixed(3)} < ${this.G.fireDistance[this.fireKey(this.dir)]} vu)`, t });
@@ -159,14 +168,17 @@ export class GestureRecognizer {
       this.dir = dir;
       this.strokeId = nextStrokeId();
       this.everStroked = true;
-      this.extreme = 0;
+      this.extreme = 0; this.extremeT = t;
       this.extremePt = { ...this.anchor };
+      this.samples = [];
     }
     // committed
     const dir = this.dir!;
     const v = DIR_VEC[dir];
     const along = (p.x - this.anchor.x) * v.x + (p.y - this.anchor.y) * v.y;
-    if (along > this.extreme) { this.extreme = along; this.extremePt = { ...p }; }
+    if (along > this.extreme) { this.extreme = along; this.extremePt = { ...p }; this.extremeT = t; }
+    this.samples.push({ t, along });
+    while (this.samples.length > 2 && this.samples[1].t <= t - G.reversalSpeedWindowMs) this.samples.shift();
     this.syncDebug(along);
     // stage 3: fire
     if (!this.fired && this.extreme >= G.fireDistance[this.fireKey(dir)]) {
@@ -174,7 +186,9 @@ export class GestureRecognizer {
       this.fireT = t;
       const strength = dir === 'down' ? this.strengthFor(this.extreme, t) : 0;
       this.lastStrength = strength;
-      this.emit({ kind: 'fire', dir, strokeId: this.strokeId, length: this.extreme, strength, t });
+      const dx = p.x - this.anchor.x, dy = p.y - this.anchor.y;
+      const lean = dx / Math.max(1e-9, Math.hypot(dx, dy));
+      this.emit({ kind: 'fire', dir, strokeId: this.strokeId, length: this.extreme, strength, t, lean });
     } else if (this.fired && dir === 'down' && t - this.fireT <= G.pushGrowWindowMs) {
       // stage 4: a lengthening push stroke reports more strength (never re-fires)
       const strength = this.strengthFor(this.extreme, t);
@@ -183,12 +197,34 @@ export class GestureRecognizer {
         this.emit({ kind: 'extend', dir: 'down', strokeId: this.strokeId, length: this.extreme, strength, t });
       }
     }
-    // stage 5: reversal => new stroke anchored at the furthest point
-    if (this.extreme - along >= G.reversalDistance) {
+    // stage 5: reversal => new stroke anchored at the furthest point. Hold-aware: the finger must
+    // move back with intent (a flick), or a long way; a thumb relaxing during a hold is not a reversal.
+    const back = this.extreme - along;
+    if (back >= G.reversalDistance && (this.reversalSpeed(along, t) >= G.reversalMinSpeed || back >= G.holdReversalDistance)) {
       this.endStroke('reversal', t);
       this.beginTracking(this.extremePt, t);
       this.process(p, t);
+      return;
     }
+    // stage 5b: an UP stroke that has fired and then turns sideways becomes a new sideways stroke
+    // (jump, then right to wall-ride, in one L-shaped motion).
+    if (this.fired && dir === 'up') {
+      const side = p.x - this.extremePt.x;
+      if (Math.abs(side) >= G.turnDistance && Math.abs(side) > back * G.horizontalBias) {
+        this.endStroke('turn', t);
+        this.beginTracking({ x: this.extremePt.x, y: p.y }, t);
+        this.process(p, t);
+      }
+    }
+  }
+
+  /** Speed (vu/s) of travel back against the committed direction over the recent window. */
+  private reversalSpeed(along: number, t: number): number {
+    // measure from the window start, or from the furthest point if it was reached inside the window
+    const s0 = this.samples[0];
+    const ref = !s0 || this.extremeT >= s0.t ? { t: this.extremeT, along: this.extreme } : s0;
+    if (t - ref.t <= 1e-6) return Infinity; // a single jump in position: as fast as it gets
+    return ((ref.along - along) * 1000) / (t - ref.t);
   }
 
   private syncDebug(travel: number): void {

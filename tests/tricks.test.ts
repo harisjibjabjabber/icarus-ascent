@@ -143,12 +143,23 @@ describe('backflip', () => {
     expect(sim.drainEvents().some((e) => e.type === 'reject')).toBe(true);
   });
 
-  it('flip that cannot finish before landing fails with a readable reason', () => {
+  it('a flip that cannot finish before landing is never started: the press is a buffered jump', () => {
     const sim = new Simulation(flatCourse());
     sim.state.speed = 12;
     sim.enqueue(up()); sim.step();
     stepUntil(sim, (s) => s.state.vy <= 0); // apex: ~0.3 s left, flip needs 0.46
-    sim.enqueue(up());
+    sim.enqueue(up()); sim.step();
+    expect(sim.drainEvents().some((e) => e.type === 'resolve' && /flip would not finish/.test(e.result))).toBe(true);
+    stepUntil(sim, (s) => s.state.mode !== 'airborne', 2);
+    expect(sim.state.mode).not.toBe('failed');
+  });
+
+  it('landing mid-flip (rotation forced) still fails with a readable reason', () => {
+    const sim = new Simulation(flatCourse());
+    sim.state.speed = 12;
+    sim.enqueue(up()); sim.step();
+    stepUntil(sim, (s) => s.state.vy <= 0);
+    sim.state.air = 'flip'; sim.state.flip = 0; sim.state.flipsThisJump = 1;
     stepUntil(sim, (s) => s.state.mode !== 'airborne', 2);
     expect(sim.state.mode).toBe('failed');
     expect(sim.state.fail?.kind).toBe('unfinished-flip');
