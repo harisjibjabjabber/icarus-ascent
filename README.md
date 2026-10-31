@@ -56,3 +56,10 @@ On a 390x844 screen the rider is about 108 px tall with feet at about 77% of scr
 
 ## GitHub Pages
 `.github/workflows/deploy.yml` tests, builds with `BASE_PATH=/<repo>/` and deploys to Pages on every push to `main`. In the repo settings, set Pages to "GitHub Actions". For a local build with a base path, run `BASE_PATH=/my-repo/ npm run build` (the default `./` is relative).
+
+## Crests, kickers and downhill momentum
+
+- **Crest separation:** at each ground-polyline vertex the sim compares the rider's centripetal need with gravity. If the surface turns down by more than `crestMinTurn`, the rider is above `crestMinSpeed`, and `v²·κ > airGravity·cosθ·crestStick` (κ = turn ÷ local segment length), the rider leaves the ground ballistically (`leftBy: 'crest'`). No gap is needed. Swiping up within the coyote window right after a crest launch "pops" it for extra height. A second swipe flips.
+- **Slope gravity is asymmetric:** descents pull harder (`slopeGravityDown` 15.5) than climbs cost (`slopeGravityUp` 10). Over-soft-cap drag is scaled down (`descentOverCapScale` 0.3) on descents, so big descents can exceed the soft cap. The hard cap (27.5 m/s) still holds.
+- **Shape helpers** for courses and endless phrases (`src/course/shapes.ts`): `crestPop(pts, rise, len, drop, backLen)` builds a kicker on continuous ground followed by a down-slope landing. `rollingHills(pts, count, amp, period)` builds a pop chain at amp ≈1.4 / period 18 (fast riders pop from ~19 m/s) and stays grounded at gentle settings (amp 0.4 / period 30 never pops, even at the hard cap).
+- The opening course's Descent lesson ends in a crest pop.

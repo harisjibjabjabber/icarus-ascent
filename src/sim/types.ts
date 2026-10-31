@@ -95,14 +95,14 @@ export interface RiderState {
   takeoffX: number;
   takeoffY: number;
   takeoffSpeed: number;
-  leftBy: 'jump' | 'edge' | 'rail' | 'wall' | 'none';
+  leftBy: 'jump' | 'edge' | 'crest' | 'rail' | 'wall' | 'none';
   fail: FailInfo | null;
 }
 
 export type SimEvent =
   | { type: 'push'; impulse: number; strength: number; fresh: boolean; x: number; y: number }
   | { type: 'jump'; kind: 'ground' | 'coyote' | 'buffered' | 'rail' | 'wall' | 'skim'; x: number; y: number; vx: number; vy: number }
-  | { type: 'leave-edge'; x: number; y: number }
+  | { type: 'leave-edge'; x: number; y: number; crest: boolean }
   | { type: 'land'; x: number; y: number; impact: number; speedBefore: number; speedAfter: number; material: string; flipped: boolean }
   | { type: 'flip-start'; x: number; y: number }
   | { type: 'flip-complete'; x: number; y: number }

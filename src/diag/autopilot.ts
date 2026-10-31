@@ -9,6 +9,8 @@ export interface AutopilotOptions {
   jumpEarly?: number;
   /** Also backflip off the first gap even with no pillar after it. */
   flipAtFirstGap?: boolean;
+  /** Backflip off crest launches (no gap) for style. */
+  styleFlips?: boolean;
   /** Ride the optional rail. */
   optionalRail?: boolean;
   /** How to deal with pots: jump over them (default) or heel-break them. */
@@ -118,6 +120,7 @@ export class Autopilot {
       if (justTookOff && this.airPlan === 'none' && this.opts.flipAtFirstGap && !this.flipDone && g === course.gaps[0]) {
         if (this.predictAirtime(sim) > sim.K.flipDuration + 0.2) this.airPlan = 'flip';
       }
+      if (this.opts.styleFlips && this.airPlan === 'none' && st.leftBy === 'crest' && st.airTime > sim.M.coyoteTime + 0.01 && st.flipsThisJump === 0) this.airPlan = 'flip';
       if (this.airPlan === 'flip' && st.airTime > 0.06 && st.air === 'none') { out.push({ type: 'up', strokeId: this.id(), source: 'test' }); this.airPlan = 'done'; this.flipDone = true; }
       if (this.airPlan === 'grab' && st.airTime > 0.06 && st.air === 'none' && this.grabStroke === -1) {
         this.grabStroke = this.id(); this.grabTicks = 0;

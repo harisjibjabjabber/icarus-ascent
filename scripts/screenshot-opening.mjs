@@ -13,7 +13,7 @@ page.on('pageerror', (e) => logs.push(`pageerror: ${e.message}`));
 await page.goto(url, { waitUntil: 'networkidle' });
 await page.waitForTimeout(1200);
 await page.screenshot({ path: `${out}/opening-start.png` });
-await page.evaluate(() => { const ic = window.icarus; ic.pause(true); ic.autopilot({ minSpeed: 15, strength: 1, pillarTrick: 'grab', pots: 'heel' }); });
+await page.evaluate(() => { const ic = window.icarus; ic.pause(true); ic.autopilot({ minSpeed: 15, strength: 1, pillarTrick: 'grab', pots: 'heel', styleFlips: true }); });
 const until = (fn, extra = 0) => page.evaluate(([src, extra]) => {
   const ic = window.icarus; const pred = new Function('g', `return (${src})(g)`);
   ic.advance(120 * 200, pred, 6); if (extra) ic.advance(extra);
@@ -22,6 +22,7 @@ const until = (fn, extra = 0) => page.evaluate(([src, extra]) => {
 const shot = async (name, info) => { await page.waitForTimeout(150); await page.screenshot({ path: `${out}/${name}.png` }); console.log(name, JSON.stringify(info)); };
 const L = (i) => `g.course.lessons[${i}]`;
 await shot('opening-1-push', await until((g) => g.sim.state.x > 14));
+await shot('opening-2-crest-pop', await until((g) => g.sim.state.leftBy === 'crest' && g.sim.state.mode === 'airborne' && g.sim.state.air === 'flip', 10));
 await shot('opening-3-jump', await until((g) => g.sim.state.x > g.course.lessons[2].featureX - 22));
 await shot('opening-5-heel', await until((g) => g.sim.state.mode === 'heelSkim' && g.sim.state.x > g.course.lessons[4].featureX), 30);
 await shot('opening-7-rail', await until((g) => g.sim.state.mode === 'grinding' && g.course.rails[g.sim.state.railId].required, 60));

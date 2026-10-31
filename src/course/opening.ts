@@ -1,5 +1,5 @@
 import { Course, type Lesson, type Marker, type Rail, type Surface, type Vec2, type Wall } from './course';
-import { extend, kicker, smooth, easeOut, linear } from './shapes';
+import { extend, kicker, smooth, easeOut, linear, crestPop } from './shapes';
 import { TUNING } from '../tuning';
 
 /**
@@ -12,7 +12,7 @@ import { TUNING } from '../tuning';
  * the wall).
  *
  *  1 Push          flat start                         -> prompt: swipe down
- *  2 Descent       long smooth drop + valley
+ *  2 Descent       long smooth drop + valley -> crest pop (no gap) onto a down-slope
  *  3 Jump          small gap, broad slightly-lower receiver
  *  (recovery)
  *  4 Pot           one low pot: jump it or heel-break it
@@ -56,14 +56,17 @@ export function buildOpeningCourse(): Course {
 
   // ---------------------------------------------------------------- 1 push
   flat(72);
-  lesson({ title: 'Push', cpX: 2, cpSpeed: 0, prompt: 'Swipe down to push', keys: '↓', promptX0: -20, promptX1: 56, featureX: 30, required: false });
+  lesson({ title: 'Push', cpX: 2, cpSpeed: 0, prompt: 'Swipe down to push', keys: '↓', promptX0: -20, promptX1: 56, featureX: 40, required: false });
 
   // ---------------------------------------------------------------- 2 descent
   const d2 = cur().x;
   slope(64, -13);
-  flat(18);
-  lesson({ title: 'Descent', cpX: d2 - 8, cpSpeed: 9, prompt: 'Downhill builds speed — let it run', promptX0: d2 - 6, promptX1: d2 + 56, featureX: d2 + 64, required: false });
-  slope(22, 2.2);
+  flat(14);
+  // payoff: a crest pop on continuous ground. Carry the descent's speed into it and fly
+  // (airtime for a style flip or grab); land on the down-slope and keep the speed.
+  const crest2 = cur().x + 10;
+  crestPop(pts, 2.2, 10, 2.0, 18);
+  lesson({ title: 'Descent', cpX: d2 - 8, cpSpeed: 9, prompt: 'Downhill builds speed — carry it over the bump and fly', promptX0: d2 - 6, promptX1: crest2 + 4, featureX: crest2, required: false });
   flat(48);
 
   // ---------------------------------------------------------------- 3 jump (forgiving)

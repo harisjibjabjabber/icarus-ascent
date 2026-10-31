@@ -209,7 +209,7 @@ export class Simulation {
         this.jump('wall', strokeId);
         return this.resolve(name, 'jump off wall');
       case 'airborne': {
-        if (s.leftBy === 'edge' && s.coyote > 0) { this.jump('coyote', strokeId); return this.resolve(name, 'coyote jump'); }
+        if ((s.leftBy === 'edge' || s.leftBy === 'crest') && s.coyote > 0) { this.jump('coyote', strokeId); return this.resolve(name, 'coyote jump'); }
         if (strokeId === s.jumpStrokeId) return this.reject(name, 'same stroke as the jump (no double action)');
         const h = this.heightAboveGround();
         const ttl = this.timeToFall(h);
@@ -365,10 +365,11 @@ export class Simulation {
     let sm = Course.sample(surf, s.x, s.seg);
     const theta = Math.atan(sm.slope);
     const v = s.speed;
-    let acc = -M.slopeGravity * Math.sin(theta);
+    const sn = Math.sin(theta);
+    let acc = -(sn < 0 ? M.slopeGravityDown : M.slopeGravityUp) * sn;
     if (v > 0) acc -= M.rollingFriction + M.airDrag * v * v;
     else acc = Math.max(0, acc - M.rollingFriction);
-    if (v > M.softCap) acc -= M.overCapDrag * (v - M.softCap);
+    if (v > M.softCap) acc -= M.overCapDrag * (v - M.softCap) * (sn < -M.descentGrade ? M.descentOverCapScale : 1);
     if (s.mode === 'heelSkim') {
       s.contactTime += dt;
       if (v > 0) acc -= Math.min(K.heelDecelMax, K.heelDecelBase + K.heelDecelRamp * s.contactTime);
@@ -388,6 +389,14 @@ export class Simulation {
       dist -= remain;
       x = b.x;
       if (seg + 1 >= p.length - 1) { this.leaveEdge(b, Math.atan2(b.y - a.y, b.x - a.x)); return; }
+      // crest separation: the surface turns down faster than the rider can follow
+      const c = p[seg + 2];
+      const thA = Math.atan2(b.y - a.y, b.x - a.x), thB = Math.atan2(c.y - b.y, c.x - b.x);
+      const turn = thA - thB;
+      if (turn > M.crestMinTurn && s.speed > M.crestMinSpeed) {
+        const L = (segLen + Math.hypot(c.x - b.x, c.y - b.y)) / 2;
+        if (s.speed * s.speed * (turn / L) > M.airGravity * Math.cos(thA) * M.crestStick) { this.leaveEdge(b, thA, true); return; }
+      }
       seg++;
     }
     sm = Course.sample(surf, x, seg);
@@ -403,7 +412,7 @@ export class Simulation {
     this.emit({ type: 'skim-end', x: s.x, y: s.y, reason });
   }
 
-  private leaveEdge(lip: Vec2, angle: number): void {
+  private leaveEdge(lip: Vec2, angle: number, crest = false): void {
     const s = this.state;
     if (s.mode === 'heelSkim') this.endSkim('edge');
     s.x = lip.x; s.y = lip.y; s.angle = angle;
@@ -413,7 +422,8 @@ export class Simulation {
     this.resetAir();
     s.lastContact = 'ground';
     s.takeoffX = s.x; s.takeoffY = s.y; s.takeoffSpeed = s.speed;
-    this.emit({ type: 'leave-edge', x: s.x, y: s.y });
+    if (crest) s.leftBy = 'crest';
+    this.emit({ type: 'leave-edge', x: s.x, y: s.y, crest });
   }
 
   // ================================================================== airborne

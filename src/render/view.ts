@@ -106,6 +106,7 @@ export class GameView {
         this.trail = [{ x: e.x, y: e.y }];
         break;
       case 'leave-edge':
+        if (e.crest) this.rider.kick(-0.12);
         this.trail = [{ x: e.x, y: e.y }];
         break;
       case 'land':

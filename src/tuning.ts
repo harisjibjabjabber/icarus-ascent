@@ -24,6 +24,19 @@ export const TUNING = {
     /** Gravity component used along slopes. Lower than airGravity so a 10 m descent
      *  adds useful speed (~+15 m/s from rest) without blowing past the cap. */
     slopeGravity: 11,
+    /** Downhill pull is stronger than the uphill cost (style: big descents feed big air). */
+    slopeGravityDown: 15.5,
+    slopeGravityUp: 10,
+    /** On a descent steeper than descentGrade (sin θ) the soft-cap drag is scaled by this,
+     *  so descents can run past the soft cap; the hard cap still holds. */
+    descentGrade: 0.03,
+    descentOverCapScale: 0.3,
+    /** Crest separation: leave the ground when the surface curves away faster than the
+     *  rider's ballistic path, i.e. v^2 * curvature > airGravity * cos(θ) * crestStick.
+     *  crestMinTurn (rad) ignores sampling noise; crestMinSpeed (m/s) avoids crawl-pops. */
+    crestStick: 1.0,
+    crestMinTurn: 0.05,
+    crestMinSpeed: 6,
     /** Constant rolling resistance while grounded (m/s^2). Small: the player should
      *  be able to enjoy a line without constant pushing. */
     rollingFriction: 0.22,
