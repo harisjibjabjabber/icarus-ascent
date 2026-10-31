@@ -267,12 +267,20 @@ function clockTower(kit: Kit, near: MergeBuffer, far: MergeBuffer, base: THREE.M
   const T = TOWN, floors = 6, H = floors * T.storey, t: Tints = { plaster: lin('#f3e6cf'), shutter: lin('#3c6fa8') };
   for (const mb of [near, far]) {
     box(mb, base, 4.1, 8, 4.1, 0, -4, 0, T.stoneShade, T.stone);
-    box(mb, base, 3.6, H, 3.6, 0, H / 2, 0, T.interior);
-    for (let s = 0; s < 4; s++) for (let f = 0; f < floors; f++) for (let i = 0; i < 2; i++) {
-      const piece = f === floors - 1 ? 'wallWinThin' : f % 2 ? 'wallWinFlat' : 'wall';
-      mb.piece(kit, piece, local(base, 0, 0, 0, s * Math.PI / 2).multiply(_m.makeTranslation(-1 + i * 2, f * T.storey, 2 - 0.09)), t);
+    if (mb === far) {
+      // far LOD: plaster shaft + pyramid cap; the clock faces below still read at distance
+      const fb = new GeoBuilder();
+      fb.add(new THREE.BoxGeometry(4, H, 4), [0, H / 2, 0], lin('#e9dcc4'), { top: lin('#f3e6cf') });
+      fb.add(new THREE.ConeGeometry(Math.SQRT1_2, 1, 4, 1).rotateY(Math.PI / 4), [0, H + 2.2, 0], new THREE.Color(T.terracotta), { scale: [4.6, 4.4, 4.6] });
+      mb.geometry(fb.build()!, base);
+    } else box(mb, base, 3.6, H, 3.6, 0, H / 2, 0, T.interior);
+    if (mb !== far) {
+      for (let s = 0; s < 4; s++) for (let f = 0; f < floors; f++) for (let i = 0; i < 2; i++) {
+        const piece = f === floors - 1 ? 'wallWinThin' : f % 2 ? 'wallWinFlat' : 'wall';
+        mb.piece(kit, piece, local(base, 0, 0, 0, s * Math.PI / 2).multiply(_m.makeTranslation(-1 + i * 2, f * T.storey, 2 - 0.09)), t);
+      }
+      mb.piece(kit, 'roofTower', local(base, 0, H, 0), t);
     }
-    mb.piece(kit, 'roofTower', local(base, 0, H, 0), t);
     // clock faces on all four sides (one reads from the chase cam whichever way the tower is turned)
     for (let s = 0; s < 4; s++) {
       const b = new GeoBuilder();
