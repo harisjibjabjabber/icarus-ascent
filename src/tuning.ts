@@ -228,10 +228,10 @@ export const TUNING = {
      *  (route runs away from the camera, up the screen). Never orbits or rotates;
      *  it only translates (and widens FOV a little with speed).
      *  Chosen with scripts/camera-visibility.mjs for a 390x844 portrait screen.
-     *  At rest: rider ~103 px tall, feet at ~76% of screen height.
-     *  At the 27.5 m/s ceiling (pulled back to 13.5 m / 9.5 m, FOV 57): a 7 m gap
-     *  stays >= 10 px tall out to ~55 m = 2.0 s of approach; gap edge posts and
-     *  1 m obstacles stay readable further (~65 m). */
+     *  Oct 2026 (Haris: "zoom in so Ao reads bigger"): closer and a touch steeper.
+     *  At rest: rider ~153 px tall (was 103), ~1.36x at 12 m/s, ~1.3x at 18 m/s; feet ~78-84%.
+     *  More pull-back with speed keeps the look-ahead: at the 27.5 m/s ceiling (10.1 m / 8.3 m,
+     *  FOV 57) a 7 m gap stays >= 10 px tall for ~2.0 s of approach (camera.test.ts guards it). */
     /** Vertical field of view at rest (deg). */
     fov: 52,
     /** Extra FOV (deg) at the hard cap; scales linearly with speed. Speed sensation. */
@@ -239,22 +239,25 @@ export const TUNING = {
     /** Route yaw in the scene (deg). 90 = route runs straight away from the camera. */
     routeYawDeg: 90,
     /** Camera distance behind the rider, and height above the rider (m), at rest. */
-    behind: 11.5,
-    height: 7,
+    behind: 7.5,
+    height: 5.25,
     /** Fixed downward pitch (deg). Never changes. */
-    pitchDeg: 17,
+    pitchDeg: 18,
     /** Pull-back with speed (m per m/s): at the 27.5 m/s cap the camera sits at
-     *  13.5 m behind / 9.5 m up, buying look-ahead and a sense of speed. */
-    behindPerSpeed: 0.073,
-    heightPerSpeed: 0.091,
+     *  ~10.1 m behind / ~8.3 m up, buying look-ahead and a sense of speed. */
+    behindPerSpeed: 0.093,
+    heightPerSpeed: 0.112,
     /** Look over crests: the camera's height target is raised so it stays at least
      *  lookOverClearance above the highest ground in the next lookOverRange metres,
      *  so a landing beyond a ramp lip or crest is visible before takeoff.
      *  (Translation only; the angle never changes.) */
     lookOverRange: 34,
-    lookOverClearance: 7.5,
-    /** ...but never lift more than this (m) above the normal follow height, so the rider stays in frame. */
-    lookOverMaxLift: 2.5,
+    /** Oct 2026 zoom-in: 7.5 -> 5.75 so the flat-ground margin stays 0.5 m above the (lower) rest height;
+     *  left at 7.5 the camera sat ~2.25 m high on every flat and pushed the rider off the bottom of the screen. */
+    lookOverClearance: 5.75,
+    /** ...but never lift more than this (m) above the normal follow height, so the rider stays in frame.
+     *  Scaled with the zoom-in (was 2.5 at the old 7 m height). */
+    lookOverMaxLift: 1.9,
     /** Landscape screens: same angle, a touch closer since width is plentiful. */
     landscapeScale: 0.9,
     /** Smoothing time constants (s). Height lags more so jumps don't bob the view. */

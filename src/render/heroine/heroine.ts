@@ -7,6 +7,7 @@ import {
 } from '@pixiv/three-vrm';
 import type { SimEvent, MoveMode, AirTrick } from '../../sim/types';
 import { bake, solveTwoBone, upperBodyOnly, type RigInfo } from './kit';
+import { DEG, limitsFor, postureCorrection, torsoPitch } from './posture';
 import { CLIPS, FIDGETS } from './clips';
 
 /** What the rider presentation feeds the character every render frame (all read-only sim state). */
@@ -81,7 +82,7 @@ const MOOD: Record<string, Face> = {
 };
 
 const _v = new THREE.Vector3(), _w = new THREE.Vector3(), _q = new THREE.Quaternion(), _q2 = new THREE.Quaternion();
-const _e = new THREE.Euler();
+const _e = new THREE.Euler(), _ax = new THREE.Vector3();
 const smooth = (x: number) => x * x * (3 - 2 * x);
 const sstep = (a: number, b: number, x: number) => smooth(THREE.MathUtils.clamp((x - a) / (b - a), 0, 1));
 const DECK_Y = 0.06; // the board mesh sits this high in the stance group (riderView)
@@ -111,6 +112,8 @@ export class Heroine {
   readonly vrm: VRM;
   private rig: RigInfo;
   private mixer: THREE.AnimationMixer;
+  /** Last mixer output per humanoid bone (quaternion, position): the base the procedural/IK layers build on. */
+  private animCache: [THREE.Object3D, THREE.Quaternion, THREE.Vector3][] = [];
   private actions = new Map<string, THREE.AnimationAction>();
   private state: StateName = 'loco';
   private fidgetClip = 'fidgetHip';
@@ -142,7 +145,8 @@ export class Heroine {
   private outlineMats: MToonMaterial[] = [];
   private deck: THREE.Object3D | null = null;
   private center: THREE.Object3D | null = null;
-  readonly stats = { cpuMs: 0, state: 'loco' as string, ik: [0, 0] };
+  private compK = 0; private lastDt = 1 / 60; private postureLim: { forward: number; travel: number } | null = null;
+  readonly stats = { cpuMs: 0, state: 'loco' as string, ik: [0, 0], posture: [0, 0, 0, 0] as number[] }; // posture: torso pF, pT, correction X, Z (deg)
   private v0: boolean;
 
   constructor(vrm: VRM) {
@@ -185,6 +189,10 @@ export class Heroine {
       this.actions.set(def.name, a);
     }
     const flip = this.actions.get('flip')!; flip.timeScale = 0;
+    for (const name of Object.keys(vrm.humanoid.normalizedHumanBones)) {
+      const n = vrm.humanoid.getNormalizedBoneNode(name as never);
+      if (n) this.animCache.push([n, n.quaternion.clone(), n.position.clone()]);
+    }
     this.exprNames = new Set(vrm.expressionManager?.expressions.map((e) => e.expressionName) ?? []);
     // VRoid VRM0 exports sometimes name a preset with a capital (e.g. 'Surprised'): alias to the preset name
     for (const n of [...this.exprNames]) { const l = n.charAt(0).toLowerCase() + n.slice(1); if (l !== n && !this.exprNames.has(l)) this.alias.set(l, n); }
@@ -338,6 +346,7 @@ export class Heroine {
   update(dt: number, f: HeroineFrame): void {
     const c0 = performance.now();
     dt = Math.min(dt, 1 / 20);
+    this.lastDt = Math.max(dt, 1e-4);
     this.t += dt; this.stateTime += dt;
     const ease = (r: number) => 1 - Math.exp(-dt * r);
     this.sp += (f.speed - this.sp) * ease(4);
@@ -385,7 +394,8 @@ export class Heroine {
     else if (this.state === 'respawn') this.moodBase = 'calm';
 
     // --- inner blends ---
-    const tuck = sstep(0.1, 0.32, -this.slope) * sstep(4, 9, this.sp);
+    // speed tuck on downhills: capped so it stays an athletic crouch (the clip is a hip hinge with a flat back)
+    const tuck = 0.7 * sstep(0.1, 0.32, -this.slope) * sstep(4, 9, this.sp);
     const cruise = sstep(2, 14, this.sp) * (1 - tuck);
     this.inner.tuck = tuck; this.inner.cruise = cruise; this.inner.idle = Math.max(0, 1 - tuck - cruise);
     this.inner.down = sstep(2.5, -3.5, f.vy);
@@ -405,10 +415,16 @@ export class Heroine {
     // flip is progress-driven: the clip time follows the sim rotation exactly
     const fa = this.actions.get('flip')!; fa.time = THREE.MathUtils.clamp(f.flip, 0, 0.999) * fa.getClip().duration;
     const fl = this.actions.get('flinch')!; fl.setEffectiveWeight(this.flinchW * (fl.time < fl.getClip().duration - 0.01 ? 1 : 0));
+    for (const [node, q, p] of this.animCache) { node.quaternion.copy(q); node.position.copy(p); } // see the note after mixer.update
     if (this.debugFreeze) { // review tooling: hold one clip at a time
       for (const [n, a] of this.actions) { a.setEffectiveWeight(n === this.debugFreeze.clip ? 1 : 0); if (n === this.debugFreeze.clip) a.time = this.debugFreeze.t; }
       this.mixer.update(0);
     } else this.mixer.update(dt);
+    // (restored just before mixer.update, snapshot here) three's PropertyMixer skips writing a property whose blended value did not change since its last write. Our
+    // procedural/IK layers write on top of the mixer output, so an unchanged track (a held pose: cruise hips, a still
+    // chest) would keep last frame's *final* value and the additive layers would compound every frame (the "broken
+    // spine" spin while coasting, the hip flip after a heel skim). Restore the mixer's own last output first.
+    for (const [node, q, p] of this.animCache) { q.copy(node.quaternion); p.copy(node.position); }
 
     // --- procedural layer ---
     const H = this.vrm.humanoid;
@@ -435,6 +451,7 @@ export class Heroine {
       this.addRot('leftUpperArm', 0, 0, w * Math.sin(this.t * 9.1)); this.addRot('rightUpperArm', 0, 0, w * Math.sin(this.t * 8.3 + 1));
     }
     this.object.updateMatrixWorld(true);
+    this.applyPosture(f);
 
     // --- head + eyes look-at (ahead on the ground, the landing zone in the air) ---
     const ctl = this.rig.ik.ctl.position;
@@ -460,6 +477,45 @@ export class Heroine {
       this.vrm.humanoid.update(); this.vrm.expressionManager?.update(); this.vrm.lookAt?.update(dt);
     }
     this.stats.cpuMs = performance.now() - c0;
+  }
+
+  /**
+   * Posture guard rails, after every animated/procedural layer and before the IK:
+   * 1) the torso leans back toward gravity against the board pitch on slopes / in a heel skim (the figure rides the
+   *    pitched board; without this a downhill slope tipped her whole body over with the deck),
+   * 2) the hips->neck pitch is soft-limited (25 deg forward / along travel; tricks a little more; crash free).
+   * Rotations are applied at the hips about the rider-root axes; the leg IK then re-plants the feet.
+   */
+  private applyPosture(f: HeroineFrame): void {
+    const H = this.vrm.humanoid;
+    const hips = H.getNormalizedBoneNode('hips')!, neck = H.getNormalizedBoneNode('neck')!;
+    const rootQ = (this.center ?? this.object).getWorldQuaternion(new THREE.Quaternion());
+    const invRoot = rootQ.clone().invert();
+    // (eased: a mode switch, e.g. the skim exit, must not step the hips)
+    const kTarget = f.mode === 'heelSkim' ? 0.35 : f.mode === 'grounded' ? 0.5 : 0;
+    this.compK += (kTarget - this.compK) * (1 - Math.exp(-this.lastDt * 10));
+    const rel = invRoot.clone().multiply(this.object.getWorldQuaternion(_q));
+    const pitch = f.mode === 'grounded' || f.mode === 'heelSkim' || this.compK > 0.01 ? _e.setFromQuaternion(rel, 'XYZ').z : 0;
+    const comp = Math.abs(pitch) < 1.2 ? -pitch * this.compK : 0; // never while the pivot is mid-flip
+    // the limits are body-relative (figure frame = the board's frame), so flips, wall rides and boardslides are unaffected
+    const figQ = this.object.getWorldQuaternion(new THREE.Quaternion());
+    const t = neck.getWorldPosition(new THREE.Vector3()).sub(hips.getWorldPosition(_v)).applyQuaternion(figQ.clone().invert());
+    t.applyAxisAngle(_ax.set(0, 0, 1), comp);
+    let lim = limitsFor(this.state === 'fidget' ? 'loco' : this.state, f.mode);
+    if (lim) { // blend the limits with the state crossfade so leaving a skim/trick never snaps the clamp
+      const prev = this.postureLim ?? lim; const k = 1 - Math.exp(-this.lastDt * 8);
+      lim = { forward: prev.forward + (lim.forward - prev.forward) * k, travel: prev.travel + (lim.travel - prev.travel) * k };
+    }
+    this.postureLim = lim;
+    const c = lim ? postureCorrection(t, lim) : { aboutX: 0, aboutZ: 0 };
+    this.stats.posture = [torsoPitch(t).pF / DEG, torsoPitch(t).pT / DEG, c.aboutX / DEG, (comp + c.aboutZ) / DEG];
+    const aZ = comp + c.aboutZ, aX = c.aboutX;
+    if (Math.abs(aZ) < 1e-5 && Math.abs(aX) < 1e-5) return;
+    const rw = new THREE.Quaternion().setFromAxisAngle(_ax.set(1, 0, 0).applyQuaternion(figQ), aX)
+      .multiply(_q2.setFromAxisAngle(_ax.set(0, 0, 1).applyQuaternion(figQ), aZ));
+    const pw = hips.parent!.getWorldQuaternion(new THREE.Quaternion()).invert();
+    hips.quaternion.copy(pw.multiply(rw.multiply(hips.getWorldQuaternion(_q))));
+    this.object.updateMatrixWorld(true);
   }
 
   private addRot(bone: string, x: number, y: number, z: number): void {

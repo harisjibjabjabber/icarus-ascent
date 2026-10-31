@@ -12,7 +12,7 @@ const page = await browser.newPage({ viewport: { width: 390, height: 844 }, devi
 const logs = [];
 page.on('console', (m) => logs.push(`${m.type()}: ${m.text()}`));
 page.on('pageerror', (e) => logs.push(`pageerror: ${e.message}`));
-const mode = scenario === 'idle' || scenario === 'push' || scenario === 'crash' || scenario === 'lessons' ? '' : 'lab&';
+const mode = scenario === 'idle' || scenario === 'push' || scenario === 'coast' || scenario === 'skimexit' || scenario === 'crash' || scenario === 'lessons' ? '' : 'lab&';
 await page.goto(`${BASE}?${mode}seed=12345&look=${look}${process.env.Q ? '&q=' + process.env.Q : ''}`, { waitUntil: 'networkidle' });
 await page.waitForFunction(() => window.icarus?.game?.view?.rider?.figureStats, null, { timeout: 60000 });
 await page.evaluate(() => { const ic = window.icarus; ic.pause(true); document.querySelector('.hint')?.classList.add('gone'); let s = 7; Math.random = () => ((s = (s * 16807) % 2147483647) / 2147483647); });
@@ -54,7 +54,21 @@ await page.evaluate(() => {
     }
     if (cams.length > 1) v.renderer.render(v.scene, v.rig.camera);
     const s = ic.game.sim.state, st = v.rider.figureStats;
-    out.meta = { tick: s.tick, x: +s.x.toFixed(2), mode: s.mode, air: s.air, flip: +s.flip.toFixed(2), speed: +s.speed.toFixed(1), state: st?.state, cpu: +(st?.cpuMs ?? 0).toFixed(3), ik: st?.ik.map((x) => +(x * 100).toFixed(2)), calls: v.renderer.info.render.calls, st: +(v.rider.figure?.stateTime ?? 0).toFixed(2), rt: +(v.rider.figure?.actions?.get('respawn')?.time ?? 0).toFixed(2), sm: s.mode };
+    // posture metrics in the rider-root frame (+X travel, +Y up, +Z her facing): torso pitch toward her front (F) and along travel (T),
+    // hips yaw/roll relative to the root, knee offsets (+ = toward her front)
+    const f0 = v.rider.figure; let pm = {};
+    if (f0) {
+      const Hn = (b) => f0.vrm.humanoid.getNormalizedBoneNode(b); const V3c = v.rider.root.position.constructor;
+      const inv = v.rider.root.matrixWorld.clone().invert();
+      const P = (b) => Hn(b).getWorldPosition(new V3c()).applyMatrix4(inv);
+      const hp = P('hips'), nk = P('neck'), t = nk.clone().sub(hp);
+      const rq = v.rider.root.getWorldQuaternion(Hn('hips').quaternion.clone()).invert().multiply(Hn('hips').getWorldQuaternion(Hn('hips').quaternion.clone()));
+      const e = new (v.rider.root.rotation.constructor)().setFromQuaternion(rq, 'YXZ');
+      const knee = (s) => { const u = P(s + 'UpperLeg'), l = P(s + 'LowerLeg'), ft = P(s + 'Foot'); const mid = u.clone().add(ft).multiplyScalar(0.5); return +(l.z - mid.z).toFixed(3); };
+      const D = 180 / Math.PI;
+      pm = { pF: +(Math.atan2(t.z, t.y) * D).toFixed(1), pT: +(Math.atan2(t.x, t.y) * D).toFixed(1), hy: +(e.y * D).toFixed(1), hx: +(e.x * D).toFixed(1), hz: +(e.z * D).toFixed(1), kL: knee('left'), kR: knee('right'), slope: +(s.angle ?? 0).toFixed(3) };
+    }
+    out.meta = { ...pm, tick: s.tick, x: +s.x.toFixed(2), mode: s.mode, air: s.air, flip: +s.flip.toFixed(2), speed: +s.speed.toFixed(1), state: st?.state, cpu: +(st?.cpuMs ?? 0).toFixed(3), ik: st?.ik.map((x) => +(x * 100).toFixed(2)), calls: v.renderer.info.render.calls, st: +(v.rider.figure?.stateTime ?? 0).toFixed(2), rt: +(v.rider.figure?.actions?.get('respawn')?.time ?? 0).toFixed(2), sm: s.mode };
     return out;
   };
 });
@@ -62,11 +76,12 @@ fs.mkdirSync(outDir, { recursive: true });
 const save = (name, data) => fs.writeFileSync(`${outDir}/${name}.jpg`, Buffer.from(data.split(',')[1], 'base64'));
 const meta = [];
 let frame = 0;
+const STEP = Number(process.env.STEP ?? 4); // sim ticks per captured frame (4 = 30 fps of game time)
 const FROM = Number(process.env.FROM ?? 0); // skip (simulate without capture) to this frame
 async function record(n, cams = (process.env.CAMS ?? 'chase,side').split(',').filter(Boolean)) {
   if (FROM && frame === 0) { await page.evaluate((k) => { for (let i = 0; i < k; i++) window.icarus.advance(4, undefined, 4); }, FROM); frame = FROM; }
   for (let i = 0; i < n; i++) {
-    const r = await page.evaluate((cams) => { window.icarus.advance(4, undefined, 4); return window.__cap(cams); }, cams);
+    const r = await page.evaluate(([cams, step]) => { window.icarus.advance(step, undefined, 4); return window.__cap(cams); }, [cams, STEP]);
     for (const c of cams) save(`${c}-${String(frame).padStart(5, '0')}`, r[c]);
     meta.push({ f: frame, ...r.meta }); frame++;
     if (frame % 30 === 0) fs.writeFileSync(`${outDir}/meta.json`, JSON.stringify(meta)); // survive interruptions
@@ -119,6 +134,20 @@ if (scenario === 'probe') {
   // opening start: a full push stroke every second (no jumps) so the whole push cycle reads
   await page.evaluate(() => { const ic = window.icarus; ic.game.retry(); ic.autopilot({ minSpeed: 99, strength: 0.8, pushEvery: 120, jumpEarly: 999 }); });
   await record(Number(process.env.N ?? 150));
+} else if (scenario === 'coast' || scenario === 'skimexit') {
+  // coast: three pushes then no input for ~N frames. skimexit: pushes, jump, hold a down stroke in the air, land into a heel skim,
+  // hold ~1.5 s, release, then coast. Actions go straight into the game's input queue (same path as touch/keys).
+  await page.evaluate(() => { const g = window.icarus.game; g.retry(); window.__act = (a) => g.pending.push({ source: 'test', ...a }); });
+  const plan = scenario === 'coast'
+    ? { 5: [{ type: 'down', strokeId: 1, strength: 0.8, fresh: true }], 40: [{ type: 'down', strokeId: 2, strength: 0.8, fresh: true }], 75: [{ type: 'down', strokeId: 3, strength: 0.8, fresh: true }] }
+    : { 5: [{ type: 'down', strokeId: 1, strength: 0.8, fresh: true }], 40: [{ type: 'down', strokeId: 2, strength: 0.8, fresh: true }], 75: [{ type: 'down', strokeId: 3, strength: 0.8, fresh: true }],
+        110: [{ type: 'up', strokeId: 4 }], 118: [{ type: 'down', strokeId: 5, strength: 0.7, fresh: true }], 200: [{ type: 'release', dir: 'down', strokeId: 5 }] };
+  const n = Number(process.env.N ?? 900);
+  for (let i = 0; i < n; i++) {
+    const acts = plan[frame];
+    if (acts) await page.evaluate((acts) => { for (const a of acts) window.__act(a); }, acts);
+    await record(1);
+  }
 } else if (scenario === 'crash') {
   // opening course: push to speed then ride into the first gap without jumping -> crash, retry -> respawn
   await page.evaluate(() => { const ic = window.icarus; ic.game.retry(); ic.autopilot({ minSpeed: 11, strength: 1, jumpEarly: 999 }); });

@@ -28,10 +28,16 @@ describe('chase camera visibility budget', () => {
   it('rider stays a reasonable size and low in frame at rest and at the cap', () => {
     for (const v of [0, TUNING.movement.hardCap]) {
       const f = framing(v);
-      expect(f.riderPx).toBeGreaterThan(65);
-      expect(f.riderPx).toBeLessThan(130);
+      // Oct 2026 zoom-in (Haris): ~153 px at rest, ~94 px at the cap (was 103 / 75)
+      expect(f.riderPx).toBeGreaterThan(85);
+      expect(f.riderPx).toBeLessThan(175);
       expect(f.feetPx).toBeGreaterThan(844 * 0.68);
       expect(f.feetPx).toBeLessThan(844 * 0.88);
     }
+  });
+  it('look-over adds only a small lift on flat ground (keeps the rider in frame after the zoom-in)', () => {
+    const C = TUNING.camera;
+    expect(C.lookOverClearance - C.height).toBeLessThanOrEqual(0.6);
+    expect(C.lookOverMaxLift / C.height).toBeLessThanOrEqual(0.37);
   });
 });
