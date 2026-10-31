@@ -12,7 +12,7 @@ await page.evaluate(() => { const ic = window.icarus; ic.pause(true); let s = 7;
 await page.waitForTimeout(1500);
 const rows = [];
 for (let i = 0; i < Number(process.env.STEPS ?? 12); i++) {
-  const r = await page.evaluate(() => { const ic = window.icarus, v = ic.game.view; ic.advance(150); v.renderer.render(v.scene, v.rig.camera);
+  const r = await page.evaluate(() => { const ic = window.icarus, v = ic.game.view; ic.advance(150); v.present(v.rig.camera);
     const info = ic.renderInfo(); const env = v.env; let near = 0, far = 0; for (const c of env.town.values()) { if (c.near?.visible) near++; else if (c.far?.visible) far++; }
     let ao = 0; v.rider.root.traverse((o) => { if (o.isMesh && o.geometry) { const g = o.geometry; ao += (g.index ? g.index.count : g.attributes.position.count) / 3; } });
     return { x: Math.round(ic.game.state?.x ?? ic.game.rider?.x ?? 0), calls: info.calls, tris: info.triangles, townTris: env.townTris(), chunks: env.town.size, near, far, ao: Math.round(ao) }; });

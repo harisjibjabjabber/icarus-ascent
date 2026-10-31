@@ -24,16 +24,16 @@ for (const vName of variants) {
   await page.evaluate(() => window.icarus.advance(4));
   const shots = await page.evaluate(() => {
     const ic = window.icarus, v = ic.game.view; const canvas = v.renderer.domElement; const out = {};
-    v.renderer.render(v.scene, v.rig.camera); out.chase = canvas.toDataURL('image/jpeg', 0.92); out.info = ic.renderInfo();
+    v.present(v.rig.camera); out.chase = canvas.toDataURL('image/jpeg', 0.92); out.info = ic.renderInfo();
     const c = v.rig.camera.clone(); const V = c.position.constructor; const r = v.rider.root;
     const hips = new V(); v.rider.figure.vrm.humanoid.getNormalizedBoneNode('hips').getWorldPosition(hips);
     const fwd = r.localToWorld(new V(1, 0, 0)).sub(r.position).normalize(), right = r.localToWorld(new V(0, 0, 1)).sub(r.position).normalize();
     // tasteful: camera above chest height looking DOWN at the broom (never low, never looking up)
     c.fov = 40; c.position.copy(hips).addScaledVector(right, 4.4).addScaledVector(fwd, 0.2).add(new V(0, 1.7, 0)); c.lookAt(hips.clone().addScaledVector(fwd, -0.45).add(new V(0, -0.75, 0))); c.updateProjectionMatrix(); c.updateMatrixWorld();
-    v.renderer.render(v.scene, c); out.broomcu = canvas.toDataURL('image/jpeg', 0.92);
+    v.present(c); out.broomcu = canvas.toDataURL('image/jpeg', 0.92);
     c.fov = 50; c.position.copy(hips).addScaledVector(right, -1.5).addScaledVector(fwd, 3).add(new V(0, 1.2, 0)); c.lookAt(hips.clone().addScaledVector(fwd, 12).addScaledVector(right, 6.5).add(new V(0, 4.2, 0))); c.updateProjectionMatrix(); c.updateMatrixWorld();
-    v.renderer.render(v.scene, c); out.wide = canvas.toDataURL('image/jpeg', 0.92);
-    v.renderer.render(v.scene, v.rig.camera);
+    v.present(c); out.wide = canvas.toDataURL('image/jpeg', 0.92);
+    v.present(v.rig.camera);
     return out;
   });
   for (const k of ['chase', 'broomcu', 'wide']) fs.writeFileSync(`${outDir}/${vName}-${k}.jpg`, Buffer.from(shots[k].split(',')[1], 'base64'));

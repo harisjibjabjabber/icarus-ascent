@@ -16,7 +16,7 @@ export const TOWN = {
   panel: 2, storey: 3.12, depth: 4,
   plaster: ['#fff8ee', '#fbe7cc', '#f6d9c4', '#fff1d6', '#f3e4e8', '#e9efe6', '#fde3b8', '#f7ddd0', '#eaf0f6'],
   shutter: ['#3f8f8a', '#3c6fa8', '#6a9a4c', '#c0533e', '#2f7d6d', '#5b84b8', '#d08a3a', '#8a5aa0'],
-  pavement: '#d8c7b4', pavementAlt: '#cdb9a6', water: '#3f8fa0', waterDeep: '#2c6f86', stone: '#b9a796', trimCream: '#efe4d0', stoneShade: '#8f8088',
+  pavement: '#b3a28e', pavementAlt: '#a69482', water: '#3f8fa0', waterDeep: '#2c6f86', stone: '#b9a796', trimCream: '#efe4d0', stoneShade: '#8f8088',
   interior: '#3a3442', terracotta: '#c96a42', terracottaTop: '#e0875a',
   flowers: ['#e84a6a', '#f4f0ea', '#f2c04a', '#d94a3a', '#b768c8'], leaf: '#5f8f4a', leafTop: '#86b05c',
   cloth: ['#ffffff', '#f2b8c6', '#a8d4e8', '#f6e3a0', '#c8e6c0', '#e8eef8'],
@@ -168,7 +168,7 @@ export function buildTownChunk(kit: Kit, k: number, seed: number, ground: Ground
   const pick = <V>(a: V[]) => a[Math.floor(rng() * a.length)];
   const harbour = opts.harbourFrom !== undefined && x0 >= opts.harbourFrom;
   // pavement/canal ribbons (both LODs share: put in far, near copies)
-  const rib = new GeoBuilder();
+  const ribs: THREE.BufferGeometry[] = [];
   const pv = new THREE.Vector3();
   const ribbon = (latA: number, latB: number, yAt: (x: number) => number, ca: string, cb: string) => {
     const pos: number[] = [], col: number[] = [], cA = lin(ca), cB = lin(cb);
@@ -186,7 +186,7 @@ export function buildTownChunk(kit: Kit, k: number, seed: number, ground: Ground
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
     g.computeVertexNormals();
-    rib.add(g, [0, 0, 0], '#ffffff');
+    ribs.push(g);
   };
   const streetY = (x: number) => { const g = ground(x); return g.gap ? level(ground, x) - 7 : g.y - 0.14; };
   const canalY = (x: number) => level(ground, x) - 6.5;
@@ -195,8 +195,7 @@ export function buildTownChunk(kit: Kit, k: number, seed: number, ground: Ground
   ribbon(-T.front - 0.2, T.front + 0.2, canalY, T.water, T.waterDeep);
   ribbon(-26, -T.front, (x) => level(ground, x) - 0.2, T.pavementAlt, T.pavementAlt);
   if (!harbour) ribbon(T.front, 26, (x) => level(ground, x) - 0.2, T.pavementAlt, T.pavementAlt);
-  const rg = rib.build();
-  if (rg) { near.geometry(rg); far.geometry(rg); }
+  for (const rg of ribs) { near.geometry(rg); far.geometry(rg); rg.dispose(); }
 
   for (const side of [1, -1] as const) {
     if (side === 1 && harbour) continue;

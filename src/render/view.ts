@@ -7,6 +7,7 @@ import { Effects, SpeedLines, Petals } from './effects';
 import { QualityManager, type Quality } from './quality';
 import { ART_UNIFORMS } from './materials';
 import { RiderView } from './riderView';
+import { PostPass } from './post';
 import { Environment } from './environment';
 import { Debris } from './debris';
 import { toScene, ORIGIN, rebaseTarget, rebaseDelta } from './space';
@@ -47,6 +48,7 @@ export class GameView {
   private arcLine: THREE.Line;
   private failMarker: THREE.Mesh;
   private edgeMarker: THREE.Mesh;
+  readonly post: PostPass;
   private streakTimer = 0;
   private contactFx = 0;
   showArc = false;
@@ -68,6 +70,8 @@ export class GameView {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 0.95;
     this.env = new Environment(this.scene);
+    this.post = new PostPass(this.renderer, new URLSearchParams(location.search).get('outline') === '0' ? 0 : 4);
+    if (new URLSearchParams(location.search).get('outline') === '0') this.post.enabled = false;
     this.scene.add(this.rider.root, this.effects.group, this.speedLines.group, this.petals.mesh);
     this.quality.onChange = (q) => this.applyQuality(q);
     this.applyQuality(this.quality.level);
@@ -134,6 +138,7 @@ export class GameView {
   resize(): void {
     const w = window.innerWidth, h = window.innerHeight;
     this.renderer.setSize(w, h, false);
+    this.post?.setSize(w, h, this.renderer.getPixelRatio());
     this.rig.resize(w, h);
   }
 
@@ -297,6 +302,9 @@ export class GameView {
     this.effects.update(dt);
     this.debris.update(dt);
     if (this.failMarker.visible) this.failMarker.scale.setScalar(1 + 0.1 * Math.sin(performance.now() / 120));
-    this.renderer.render(this.scene, this.rig.camera);
+    this.post.render(this.scene, this.rig.camera);
   }
+
+  /** Draw the scene through the post pass from any camera (review/capture scripts). */
+  present(camera: THREE.Camera = this.rig.camera): void { this.post.render(this.scene, camera); }
 }

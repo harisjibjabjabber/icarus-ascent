@@ -49,13 +49,13 @@ await page.evaluate(() => {
           c.fov = 22; c.position.copy(hw).addScaledVector(fd, 1.25).addScaledVector(right, 0.25).add(new V(0, 0.08, 0)); c.lookAt(hw.clone().add(new V(0, 0.02, 0)));
         }
         c.updateProjectionMatrix(); c.updateMatrixWorld();
-        v.renderer.render(v.scene, c);
+        v.present(c);
       } else if (cams.length > 1) {
-        v.renderer.render(v.scene, v.rig.camera);
+        v.present(v.rig.camera);
       }
       out[cam] = canvas.toDataURL('image/jpeg', 0.92);
     }
-    if (cams.length > 1) v.renderer.render(v.scene, v.rig.camera);
+    if (cams.length > 1) v.present(v.rig.camera);
     const s = ic.game.sim.state, st = v.rider.figureStats;
     // posture metrics in the rider-root frame (+X travel, +Y up, +Z her facing): torso pitch toward her front (F) and along travel (T),
     // hips yaw/roll relative to the root, knee offsets (+ = toward her front)
@@ -121,7 +121,7 @@ if (scenario === 'probe') {
   const r = await page.evaluate(() => {
     const ic = window.icarus, v = ic.game.view; ic.game.retry(); ic.autopilot({ minSpeed: 13, strength: 1, styleGrabs: true });
     const cpu = []; for (let i = 0; i < 240; i++) { ic.advance(4, undefined, 4); cpu.push(v.rider.figureStats.cpuMs); }
-    const fig = v.rider.figureObject; const measure = () => { v.renderer.info.autoReset = false; v.renderer.info.reset(); v.renderer.render(v.scene, v.rig.camera); const i = v.renderer.info.render; const o = { calls: i.calls, tris: i.triangles }; v.renderer.info.autoReset = true; return o; };
+    const fig = v.rider.figureObject; const measure = () => { v.renderer.info.autoReset = false; v.renderer.info.reset(); v.present(v.rig.camera); const i = v.renderer.info.render; const o = { calls: i.calls, tris: i.triangles }; v.renderer.info.autoReset = true; return o; };
     const on = measure(); fig.visible = false; const off = measure(); fig.visible = true;
     cpu.sort((a, b) => a - b);
     return { avg: cpu.reduce((a, b) => a + b, 0) / cpu.length, p95: cpu[Math.floor(cpu.length * 0.95)], max: cpu[cpu.length - 1], callsWith: on.calls, callsWithout: off.calls, figCalls: on.calls - off.calls, figTris: on.tris - off.tris };
@@ -146,7 +146,7 @@ if (scenario === 'probe') {
     v.renderer.info.autoReset = false;
     for (let i = 0; i < 600; i++) {
       v.renderer.info.reset();
-      const t0 = performance.now(); ic.advance(4, undefined, 4); v.renderer.render(v.scene, v.rig.camera); v.renderer.getContext().finish(); ms.push(performance.now() - t0);
+      const t0 = performance.now(); ic.advance(4, undefined, 4); v.present(v.rig.camera); v.renderer.getContext().finish(); ms.push(performance.now() - t0);
       calls.push(v.renderer.info.render.calls); tris.push(v.renderer.info.render.triangles);
     }
     v.renderer.info.autoReset = true;
