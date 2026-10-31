@@ -13,8 +13,8 @@ export interface AutopilotOptions {
   optionalRail?: boolean;
   /** How to deal with pots: jump over them (default) or heel-break them. */
   pots?: 'jump' | 'heel';
-  /** How to power pillar breaks: pick by predicted airtime (default), or force one. */
-  pillarTrick?: 'auto' | 'flip' | 'grab';
+  /** How to smash pillars: jump into them grabbing (default) or flipping, or heel-skim through. */
+  pillarTrick?: 'grab' | 'flip' | 'heel';
 }
 
 /**
@@ -34,6 +34,8 @@ export class Autopilot {
   private heelStroke = -1;
   private lastMode = '';
   private potsTried = new Set<number>();
+  private pillarsTried = new Set<number>();
+  private pillarId = -1;
   constructor(private opts: AutopilotOptions) {}
 
   private id(): number { return ++this.sid; }
@@ -62,7 +64,7 @@ export class Autopilot {
     this.lastMode = st.mode;
     const pots = this.opts.pots ?? 'jump';
     if (st.mode === 'grounded') {
-      this.prepDone = false; this.airPlan = 'none';
+      this.prepDone = false; this.airPlan = 'none'; this.pillarId = -1;
       if (this.wallStroke !== -1) { out.push({ type: 'side', side: 'right', held: false, strokeId: this.wallStroke, source: 'test' }); this.wallStroke = -1; }
       if (this.heelStroke !== -1) { out.push({ type: 'release', dir: 'down', strokeId: this.heelStroke, source: 'test' }); this.heelStroke = -1; }
       if (this.t % (this.opts.pushEvery ?? 36) === 0 && st.speed < this.opts.minSpeed) out.push({ type: 'down', strokeId: this.id(), strength: this.opts.strength ?? 0.65, fresh: true, source: 'test' });
@@ -79,10 +81,16 @@ export class Autopilot {
         const lead = Math.max(1.2, st.speed * (pots === 'heel' ? 0.56 : 0.3));
         if (st.x > o.x - lead && st.x < o.x - 0.8 && !this.potsTried.has(o.id)) { jump = true; this.potsTried.add(o.id); }
       }
+      const pt = this.opts.pillarTrick ?? 'grab';
+      const p = this.pillarAhead(sim, 30);
+      if (p && !this.pillarsTried.has(p.id)) {
+        const lead = pt === 'heel' ? st.speed * 0.613 + 1.5 : Math.max(1.5, st.speed * 0.3);
+        if (st.x > p.x - lead) { jump = true; this.pillarsTried.add(p.id); this.airPlan = pt === 'heel' ? 'none' : pt; this.pillarId = p.id; }
+      }
       if (jump) out.push({ type: 'up', strokeId: this.id(), source: 'test' });
     } else if (st.mode === 'heelSkim') {
       // keep holding through the pot, then let go
-      const potNear = course.obstacles.some((o) => o.kind === 'pot' && !st.broken.includes(o.id) && o.x > st.x - 0.5 && o.x - st.x < 4);
+      const potNear = course.obstacles.some((o) => !st.broken.includes(o.id) && o.x > st.x - 0.5 && o.x - st.x < 4);
       if (!potNear && this.heelStroke !== -1) { out.push({ type: 'release', dir: 'down', strokeId: this.heelStroke, source: 'test' }); this.heelStroke = -1; }
       else if (this.heelStroke === -1) out.push({ type: 'down', strokeId: this.id(), strength: 0.65, fresh: true, source: 'test' });
     } else if (st.mode === 'airborne') {
@@ -95,24 +103,22 @@ export class Autopilot {
         if (st.x >= w.x0) { this.wallStroke = this.id(); out.push({ type: 'side', side: 'right', held: true, strokeId: this.wallStroke, source: 'test' }); }
       }
       // heel-break a pot: hold down through the landing in front of it
-      if (pots === 'heel' && this.heelStroke === -1 && st.vy < 0) {
-        const pot = course.obstacles.find((o) => o.kind === 'pot' && !st.broken.includes(o.id) && o.x > st.x && o.x - st.x < 8);
+      const heelPillar = (this.opts.pillarTrick ?? 'grab') === 'heel';
+      if (this.heelStroke === -1 && st.vy < 0) {
+        const pot = course.obstacles.find((o) => (o.kind === 'pot' ? pots === 'heel' : heelPillar) && !st.broken.includes(o.id) && o.x > st.x && o.x - st.x < 8);
         if (pot) { this.heelStroke = this.id(); out.push({ type: 'down', strokeId: this.heelStroke, strength: 0.65, fresh: true, source: 'test' }); }
       }
-      // trick before a pillar (decided at takeoff from the predicted airtime)
-      if (justTookOff && this.airPlan === 'none' && st.lastContact === 'ground') {
-        const want = this.pillarAhead(sim, 45) ? (this.opts.pillarTrick ?? 'auto') : (this.opts.flipAtFirstGap && !this.flipDone && g === course.gaps[0] ? 'flip' : null);
-        if (want) {
-          const air = this.predictAirtime(sim);
-          this.airPlan = want === 'auto' ? (air > sim.K.flipDuration + 0.2 ? 'flip' : 'grab') : want;
-        }
+      if (justTookOff && this.airPlan === 'none' && this.opts.flipAtFirstGap && !this.flipDone && g === course.gaps[0]) {
+        if (this.predictAirtime(sim) > sim.K.flipDuration + 0.2) this.airPlan = 'flip';
       }
       if (this.airPlan === 'flip' && st.airTime > 0.06 && st.air === 'none') { out.push({ type: 'up', strokeId: this.id(), source: 'test' }); this.airPlan = 'done'; this.flipDone = true; }
       if (this.airPlan === 'grab' && st.airTime > 0.06 && st.air === 'none' && this.grabStroke === -1) {
         this.grabStroke = this.id(); this.grabTicks = 0;
         out.push({ type: 'side', side: 'left', held: true, strokeId: this.grabStroke, source: 'test' });
       }
-      if (this.grabStroke !== -1 && ++this.grabTicks > Math.round(0.2 / sim.dt)) {
+      // hold the grab through the pillar, then let go
+      const holdUntilPast = this.pillarId >= 0 && !st.broken.includes(this.pillarId) && course.obstacles[this.pillarId].x + 0.5 > st.x;
+      if (this.grabStroke !== -1 && ++this.grabTicks > Math.round(0.2 / sim.dt) && !holdUntilPast) {
         out.push({ type: 'side', side: 'left', held: false, strokeId: this.grabStroke, source: 'test' });
         this.grabStroke = -1; this.airPlan = 'done';
       }

@@ -152,6 +152,12 @@ export const TUNING = {
     grabMinHold: 0.12,
     /** After landing, an airborne trick still powers a pillar break for this much ground travel (m). */
     pillarCreditDistance: 26,
+    /** Forgiving pillar hitbox. With a valid trick the break triggers this far early (m) and this much higher (m). */
+    pillarBreakReach: 0.8,
+    pillarBreakTopExtra: 0.6,
+    /** Without one, a plain hit needs a solid overlap: narrower footprint and a grace off the top (m). */
+    pillarFailWidthScale: 0.7,
+    pillarFailTopGrace: 0.3,
   },
 
   gesture: {

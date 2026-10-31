@@ -104,12 +104,18 @@ export class Simulation {
     if (s.mode === 'grinding' || s.mode === 'wallRiding') return; // rails/walls pass over/beside obstacles
     for (const o of this.course.obstacles) {
       if (s.broken.includes(o.id)) continue;
-      const x0 = o.x - o.halfWidth, x1 = o.x + o.halfWidth;
+      // forgiving pillars: a valid break reaches further; a plain hit needs a solid overlap
+      const O = this.T.obstacles;
+      let hw = o.halfWidth, reach = 0, top = o.baseY + o.height;
+      if (o.kind === 'pillar') {
+        if (this.pillarBreaker()) { reach = O.pillarBreakReach; top += O.pillarBreakTopExtra; }
+        else { hw *= O.pillarFailWidthScale; top -= O.pillarFailTopGrace; }
+      }
+      const x0 = o.x - hw - reach, x1 = o.x + hw;
       if (s.x < x0 || px > x1 || s.x <= px) continue;
       // lowest point of the path while overlapping the obstacle's footprint
       const yAt = (x: number) => py + ((s.y - py) * (x - px)) / (s.x - px);
       const lo = Math.min(yAt(Math.max(px, x0)), yAt(Math.min(s.x, x1)));
-      const top = o.baseY + o.height;
       if (lo >= top) continue; // cleared it
       if (lo < o.baseY - 0.5 && pmode === 'airborne' && s.mode === 'airborne') continue; // passing below (in a gap)
       this.resolveObstacle(o, Math.max(px, x0), Math.max(o.baseY, Math.min(top, lo)));
@@ -131,14 +137,27 @@ export class Simulation {
       this.breakObstacle(o, 'heel', O.potBreakRetention, x, y);
       return;
     }
-    // pillar
-    if (airborne && s.air === 'flip') return this.fail({ kind: 'hit-pillar', x, y, message: `Hit the pillar mid-flip (${Math.round(s.flip * 100)}%) — finish the flip before you reach it` });
-    if (airborne && (s.air === 'grabLeft' || s.air === 'grabRight')) return this.fail({ kind: 'hit-pillar', x, y, message: 'Hit the pillar still holding the grab — release it before the pillar to break through' });
-    if (s.trickCredit === 'none') {
-      return this.fail({ kind: 'hit-pillar', x, y, message: 'Hit a pillar — break it with an airborne trick first: a completed backflip or a released grab off the jump before it' });
+    // pillar: breaks if you hit it while doing a trick (grab / flip / heel skim)
+    const by = this.pillarBreaker();
+    if (!by) {
+      return this.fail({ kind: 'hit-pillar', x, y, message: airborne
+        ? 'Hit a pillar with a plain jump — grab (hold left/right) or backflip (swipe up again) as you reach it to smash through'
+        : 'Rolled into a pillar — jump and grab or flip into it, or heel-skim (jump, hold down) through it' });
     }
-    this.breakObstacle(o, s.trickCredit, O.pillarBreakRetention, x, y);
-    s.trickCredit = 'none';
+    this.breakObstacle(o, by, O.pillarBreakRetention, x, y);
+    if (by === s.trickCredit) s.trickCredit = 'none';
+  }
+
+  /** What would break a pillar right now: an active trick, else a recent trick's credit. */
+  private pillarBreaker(): 'grab' | 'flip' | 'heel' | null {
+    const s = this.state;
+    if (s.mode === 'airborne') {
+      if (s.air === 'grabLeft' || s.air === 'grabRight') return 'grab';
+      if (s.air === 'flip') return 'flip';
+      if (this.isPrepArmed() && s.prepHeld && s.vy <= 0) return 'heel';
+    }
+    if (s.mode === 'heelSkim') return 'heel';
+    return s.trickCredit === 'none' ? null : s.trickCredit;
   }
 
   private breakObstacle(o: Obstacle, by: 'heel' | 'flip' | 'grab', retention: number, x: number, y: number): void {

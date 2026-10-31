@@ -31,7 +31,6 @@ function stepCollect(sim: Simulation, ticks: number, ev: SimEvent[] = []): SimEv
   return ev;
 }
 
-const untilX = (sim: Simulation, x: number) => stepUntil(sim, (s) => s.state.x >= x, 60);
 
 describe('pots', () => {
   it('can be jumped: rider clears it, nothing breaks, no fail', () => {
@@ -99,50 +98,73 @@ describe('pots', () => {
 });
 
 describe('pillars', () => {
-  /** Flat: jump at x=150, optional trick, pillar at 150 + dist. */
-  function attempt(trick: (sim: Simulation) => void, pillarDist = 22, v = 14) {
-    const sim = new Simulation(flatWith(['pillar', 150 + pillarDist]));
-    approach(sim, v, 150);
+  const P = 200;
+  /** Approach on flat ground, jump `lead(v)` before the pillar, then run `trick`. */
+  function into(lead: (v: number) => number, trick: (sim: Simulation, ev: SimEvent[]) => void, v = 14) {
+    const sim = new Simulation(flatWith(['pillar', P]));
+    let t = 0;
+    while (sim.state.x < P - 40 && t++ < 120 * 120) { if (t % 30 === 0 && sim.state.speed < v) sim.enqueue(push(0.5)); sim.step(); }
+    stepUntil(sim, (q) => q.state.x >= P - lead(q.state.speed), 20);
+    sim.drainEvents();
     sim.enqueue(up());
     sim.step();
-    trick(sim);
-    const ev = stepCollect(sim, 900);
+    const ev: SimEvent[] = [...sim.drainEvents()];
+    trick(sim, ev);
+    stepCollect(sim, 600, ev);
     return { sim, ev, brk: ev.find((e) => e.type === 'break') };
   }
+  const apex = (v: number) => Math.max(1.5, v * 0.3);
 
-  it('breaks with a completed backflip; flow kept', () => {
-    const { sim, ev, brk } = attempt((s) => { s.step(); s.enqueue(up()); });
-    expect(sim.state.fail?.message ?? '').toBe('');
-    expect(ev.some((e) => e.type === 'flip-complete')).toBe(true);
-    expect(brk && brk.type === 'break' && brk.by).toBe('flip');
-    expect(sim.state.x).toBeGreaterThan(180);
-  });
-
-  it('breaks with a grab that was released before landing', () => {
-    const { sim, brk } = attempt((s) => {
-      const id = newId();
+  it('breaks while a grab is held at contact (no release needed), then a clean landing after letting go', () => {
+    const id = newId();
+    const { sim, brk } = into(apex, (s, ev) => {
       s.enqueue(side('left', true, id));
-      for (let i = 0; i < 30; i++) s.step(); // 0.25 s hold
+      stepUntil(s, (q) => { ev.push(...q.drainEvents()); return q.state.broken.length > 0 || q.state.mode !== 'airborne'; }, 2);
+      expect(s.state.air).toBe('grabLeft'); // still grabbing right after the break
       s.enqueue(side('left', false, id));
     });
     expect(sim.state.fail?.message ?? '').toBe('');
     expect(brk && brk.type === 'break' && brk.by).toBe('grab');
+    expect(sim.state.x).toBeGreaterThan(P + 5);
   });
 
-  it('a token grab (shorter than the minimum hold) does not count', () => {
-    const { sim } = attempt((s) => {
-      const id = newId();
-      s.enqueue(side('left', true, id));
-      s.step(); s.step();
-      s.enqueue(side('left', false, id));
+  it('breaking through mid-grab does not excuse the landing rule: still holding at touchdown fails as landed-grabbing', () => {
+    const { sim, brk } = into(apex, (s) => s.enqueue(side('left', true, newId())));
+    expect(brk).toBeTruthy();
+    expect(sim.state.fail?.kind).toBe('landed-grabbing');
+  });
+
+  it('breaks mid-flip; the flip then finishes and lands clean', () => {
+    let flipAtBreak = -1;
+    const { sim, ev, brk } = into(apex, (s, evs) => {
+      s.step(); s.enqueue(up());
+      stepUntil(s, (q) => { evs.push(...q.drainEvents()); if (q.state.broken.length && flipAtBreak < 0) flipAtBreak = q.state.flip; return q.state.broken.length > 0 || q.state.mode !== 'airborne'; }, 2);
     });
-    expect(sim.state.fail?.kind).toBe('hit-pillar');
+    expect(sim.state.fail?.message ?? '').toBe('');
+    expect(brk && brk.type === 'break' && brk.by).toBe('flip');
+    expect(flipAtBreak).toBeGreaterThan(0);
+    expect(flipAtBreak).toBeLessThan(1);
+    expect(ev.some((e) => e.type === 'flip-complete')).toBe(true);
   });
 
-  it('hitting it plain fails, and the reason names the trick', () => {
-    const { sim } = attempt(() => {});
+  it('breaks under a heel skim, skim continues', () => {
+    const hold = newId();
+    const { sim, brk } = into((v) => v * 0.613 + 1.5, (s) => {
+      stepUntil(s, (q) => q.state.vy < 0, 2);
+      s.enqueue(down(hold));
+      stepUntil(s, (q) => q.state.broken.length > 0 || q.state.mode === 'failed', 3);
+      expect(s.state.mode).toBe('heelSkim');
+      s.enqueue(releaseDown(hold));
+    });
+    expect(sim.state.fail?.message ?? '').toBe('');
+    expect(brk && brk.type === 'break' && brk.by).toBe('heel');
+  });
+
+  it('a plain jump into it fails, and the reason names the tricks', () => {
+    const { sim } = into(apex, () => {});
     expect(sim.state.fail?.kind).toBe('hit-pillar');
-    expect(sim.state.fail?.message).toMatch(/backflip|grab/);
+    expect(sim.state.fail?.message).toMatch(/grab/);
+    expect(sim.state.fail?.message).toMatch(/flip/);
   });
 
   it('rolling into it fails', () => {
@@ -151,26 +173,29 @@ describe('pillars', () => {
     expect(sim.state.fail?.kind).toBe('hit-pillar');
   });
 
-  it('hitting it in the air while still grabbing, or mid-flip, fails with that reason', () => {
-    const grab = attempt((s) => s.enqueue(side('left', true, newId())), 5, 14);
-    expect(grab.sim.state.fail?.kind).toBe('hit-pillar');
-    expect(grab.sim.state.fail?.message).toMatch(/grab/);
-    const flip = attempt((s) => { s.step(); s.enqueue(up()); }, 3.5, 14);
-    expect(flip.sim.state.fail?.kind).toBe('hit-pillar');
-    expect(flip.sim.state.fail?.message).toMatch(/mid-flip/);
+  it('a token grab released before reaching it does not count', () => {
+    const { sim } = into((v) => v * 0.45, (s) => {
+      const id = newId();
+      s.enqueue(side('left', true, id)); s.step(); s.step();
+      s.enqueue(side('left', false, id));
+    });
+    expect(sim.state.fail?.kind).toBe('hit-pillar');
   });
 
-  it('the trick credit expires after the credit distance and is cleared by a new plain jump', () => {
-    const far = attempt((s) => { s.step(); s.enqueue(up()); }, O.pillarCreditDistance + 25);
-    expect(far.sim.state.fail?.kind).toBe('hit-pillar');
-    // flip, land, then a plain jump before the pillar: needs a new trick
-    const sim = new Simulation(flatWith(['pillar', 190]));
+  it('hitbox is forgiving with a trick: the break triggers up to the reach distance early', () => {
+    const { brk } = into(apex, (s) => s.enqueue(side('left', true, newId())));
+    expect(brk && brk.type === 'break' && brk.x).toBeLessThan(P - O.pillarHalfWidth + 0.01);
+    expect(brk && brk.type === 'break' && brk.x).toBeGreaterThanOrEqual(P - O.pillarHalfWidth - O.pillarBreakReach - 1e-6);
+  });
+
+  it('(lenient extra) a trick completed on the jump just before still counts for a short distance', () => {
+    const sim = new Simulation(flatWith(['pillar', 175]));
     approach(sim, 14, 150); sim.enqueue(up()); sim.step(); sim.step(); sim.enqueue(up());
     stepUntil(sim, (q) => q.state.mode === 'grounded', 3);
     expect(sim.state.trickCredit).toBe('flip');
-    untilX(sim, 175); sim.enqueue(up());
-    stepCollect(sim, 400);
-    expect(sim.state.fail?.kind).toBe('hit-pillar');
+    const ev = stepCollect(sim, 600);
+    expect(sim.state.fail?.message ?? '').toBe('');
+    expect(ev.some((e) => e.type === 'break')).toBe(true);
   });
 });
 
@@ -200,27 +225,28 @@ describe('lab breakables are fair and genuine', () => {
     }
   });
 
-  it('every pillar follows a jump within the credit distance that has airtime for its trick', () => {
+  it('every pillar has a flat run-up and room after it to release a grab / finish a flip', () => {
     for (const seed of seeds) {
       const c = buildLabCourse(seed);
       for (const p of c.obstacles.filter((q) => q.kind === 'pillar')) {
-        const launch = [...c.gaps].reverse().find((g) => g.x1 < p.x);
-        expect(launch, `seed ${seed}: no launch before pillar`).toBeTruthy();
-        // landing area to pillar leaves room inside the credit distance
-        expect(p.x - launch!.x1, `seed ${seed}`).toBeLessThan(O.pillarCreditDistance - 2);
-        expect(p.x - launch!.x1).toBeGreaterThan(8); // readable after landing
-        // no other gap/rail/wall between the launch and the pillar
-        expect(c.gaps.some((g) => g.x0 > launch!.x1 && g.x0 < p.x)).toBe(false);
+        for (const dx of [-6, -3, 0, 3, 6, 10]) {
+          const g = c.groundBelow(p.x + dx, 1e6)!;
+          expect(g, `seed ${seed}`).toBeTruthy();
+          expect(Math.abs(g.sample.slope), `seed ${seed} pillar@${p.x.toFixed(0)} dx ${dx}`).toBeLessThan(0.03);
+        }
+        for (const g of c.gaps) expect(p.x < g.x0 - 15 || p.x > g.x1 + 8, `seed ${seed}`).toBe(true);
+        for (const o of c.obstacles) if (o !== p) expect(Math.abs(o.x - p.x)).toBeGreaterThan(12);
       }
     }
   });
 
-  it('is completable on every seed both ways (flip / grab for pillars, jump / heel for pots), across speeds', () => {
+  it('is completable on every seed with each tactic (grab / flip / heel for pillars, jump / heel for pots), across speeds', () => {
     const fails: string[] = [];
     for (const seed of seeds) {
       for (const cfg of [
         { minSpeed: 13 }, { minSpeed: 15, strength: 1 }, { minSpeed: 30, strength: 1 },
         { minSpeed: 15, pots: 'heel' as const }, { minSpeed: 15, pillarTrick: 'grab' as const }, { minSpeed: 15, pillarTrick: 'flip' as const, pots: 'heel' as const },
+        { minSpeed: 15, pillarTrick: 'heel' as const }, { minSpeed: 30, strength: 1, pillarTrick: 'flip' as const }, { minSpeed: 13, pillarTrick: 'heel' as const },
       ]) {
         const sim = new Simulation(buildLabCourse(seed));
         const ev = driveLab(sim, cfg);
@@ -232,12 +258,4 @@ describe('lab breakables are fair and genuine', () => {
     expect(fails).toEqual([]);
   });
 
-  it('a pillar is never placed where the run-in only allows a plain roll (no launch)', () => {
-    // sanity: removing the jump (rolling off the edge without a trick) at each pillar's launch must fail
-    for (const seed of seeds.slice(0, 5)) {
-      const sim = new Simulation(buildLabCourse(seed));
-      const ev = driveLab(sim, { minSpeed: 15, pillarTrick: 'flip' });
-      for (const e of ev) if (e.type === 'break' && e.kind === 'pillar') expect(['flip', 'grab']).toContain(e.by);
-    }
-  });
 });

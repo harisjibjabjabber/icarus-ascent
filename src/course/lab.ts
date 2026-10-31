@@ -122,8 +122,8 @@ export function buildLabCourse(seed: number): Course {
 
   // --- breakables (brief §8) ---
   // Pots sit on flat ground with a readable run-up: jump them or heel-break them.
-  // Pillars sit on the landing run of a jump that gives airtime for a trick
-  // (GAP1 off the ramp: room for a backflip; GAP4: a grab), within the credit distance.
+  // Pillars sit on flat ground with a run-up for a jump/heel-skim into them and room
+  // after them to release a grab or finish a flip before landing.
   const O = TUNING.obstacles;
   const pot = (x: number) => course.addObstacle('pot', x, O.potHalfWidth, O.potHeight);
   const pillar = (x: number) => course.addObstacle('pillar', x, O.pillarHalfWidth, O.pillarHeight);
@@ -131,9 +131,9 @@ export function buildLabCourse(seed: number): Course {
   markers.push({ x: 18, label: 'POT' });
   pot(94);
   pillar(bx + 22);
-  markers.push({ x: bx + 17, label: 'PILLAR · TRICK' });
+  markers.push({ x: bx + 17, label: 'PILLAR · GRAB, FLIP OR HEEL' });
   pillar(ex + 22);
-  markers.push({ x: ex + 16, label: 'PILLAR' });
+  markers.push({ x: ex + 16, label: 'PILLAR · GRAB, FLIP OR HEEL' });
   pot(ex + 38);
   return course;
 }

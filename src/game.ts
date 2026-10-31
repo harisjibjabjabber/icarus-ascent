@@ -41,7 +41,7 @@ export class Game {
     const hud = document.createElement('div');
     hud.className = 'hud';
     hud.innerHTML = `
-      <div class="hint">Swipe <b>down</b> push · <b>up</b> jump<br>In the air: <b>up</b> backflip · <b>down</b> grind a rail · hold <b>right</b> by a wall to wall-ride (else grab)<br>Hold <b>down</b> into a landing to heel-skim (slows you)<br>Pots: jump them or heel-break them · Pillars: flip or grab (and let go) on the jump before<br><span>Keys: ↓ push/grind/skim · ↑ / Space jump/flip · → / ← hold wall-ride/grab · M sound</span></div>
+      <div class="hint">Swipe <b>down</b> push · <b>up</b> jump<br>In the air: <b>up</b> backflip · <b>down</b> grind a rail · hold <b>right</b> by a wall to wall-ride (else grab)<br>Hold <b>down</b> into a landing to heel-skim (slows you)<br>Pots: jump them or heel-break them · Pillars: smash through mid-grab, mid-flip or heel-skimming<br><span>Keys: ↓ push/grind/skim · ↑ / Space jump/flip · → / ← hold wall-ride/grab · M sound</span></div>
       <div class="fail"><div class="fail-text"></div><div class="fail-sub">Tap / ↑ to retry · same course</div></div>
       <div class="buttons"><button data-act="sound" class="sound"></button><button data-act="new">New run</button><button data-act="dev">Dev</button></div>
       <div class="speed"></div>`;
