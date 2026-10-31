@@ -33,12 +33,12 @@ await page.evaluate(() => {
         const far = ic.game.sim.state.mode === 'airborne' && Math.abs(ic.game.sim.state.flip) > 0.01 ? 1.25 : 1;
         const crashed = ic.game.sim.state.mode === 'failed';
         if (cam === 'side' && crashed) { c.fov = 34; c.up.set(0, 1, 0); c.position.copy(hipsW).addScaledVector(fwd, -3.4).addScaledVector(right, 1.2).add(new V(0, 1.2, 0)); c.lookAt(hipsW); }
-        else if (cam === 'side' && ic.game.sim.state.mode === 'wallRiding') { c.fov = 34; c.up.set(0, 1, 0); c.fov = 36; c.position.copy(hipsW).addScaledVector(fwd, -5.5).addScaledVector(right, -1.2).add(new V(0, 1.4, 0)); c.lookAt(hipsW); }
-        else if (cam === 'side' && ic.game.sim.state.mode === 'grinding') { c.fov = 34; c.up.set(0, 1, 0); c.position.copy(hipsW).addScaledVector(fwd, 3.4).addScaledVector(right, 2.6).add(new V(0, 0.7, 0)); c.lookAt(hipsW); }
+        else if (cam === 'side' && ic.game.sim.state.mode === 'wallRiding') { c.up.set(0, 1, 0); c.fov = 38; c.position.copy(hipsW).addScaledVector(fwd, -6.5).addScaledVector(right, -1.6).add(new V(0, 1.6, 0)); c.lookAt(hipsW.clone().addScaledVector(fwd, -0.4)); }
+        else if (cam === 'side' && ic.game.sim.state.mode === 'grinding') { c.fov = 36; c.up.set(0, 1, 0); c.position.copy(hipsW).addScaledVector(fwd, 4.4).addScaledVector(right, 4.4).add(new V(0, 1.0, 0)); c.lookAt(hipsW.clone().addScaledVector(fwd, -0.4).add(new V(0, -0.35, 0))); }
         // broom v2: a rear three-quarter from her facing side, far enough to frame the whole broom (nose to straw tail)
-        else if (cam === 'side') { c.fov = 36; c.up.copy(sideY); c.position.copy(hipsW).addScaledVector(sideZ, 5.2 * far).addScaledVector(fwd, -4.4 * far).addScaledVector(sideY, 0.9); c.lookAt(hipsW.clone().addScaledVector(fwd, -0.2).addScaledVector(sideY, -0.3)); }
+        else if (cam === 'side') { c.fov = 36; c.up.copy(sideY); c.position.copy(hipsW).addScaledVector(sideZ, 6.0 * far).addScaledVector(fwd, -5.0 * far).addScaledVector(sideY, 1.0); c.lookAt(hipsW.clone().addScaledVector(fwd, -0.5).addScaledVector(sideY, -0.35)); }
         // grab close-up: low front three-quarter on her facing side, looking at the hands/handle
-        if (cam === 'grabcu') { c.fov = 34; c.up.set(0, 1, 0); c.position.copy(hipsW).addScaledVector(right, 3.0).addScaledVector(fwd, 1.5).add(new V(0, 1.1, 0)); c.lookAt(hipsW.clone().add(new V(0, -0.3, 0))); }
+        if (cam === 'grabcu') { c.fov = 34; c.up.set(0, 1, 0); c.position.copy(hipsW).addScaledVector(right, 3.3).addScaledVector(fwd, 1.4).add(new V(0, 0.6, 0)); c.lookAt(hipsW.clone().add(new V(0, -0.2, 0))); }
         // 3/4 front: ahead of her along travel and out on her facing side, a touch above the hips
         if (cam === 'q34') { c.fov = 34; c.up.set(0, 1, 0); c.position.copy(hipsW).addScaledVector(fwd, 3.2).addScaledVector(right, 3.2).add(new V(0, 0.55, 0)); c.lookAt(hipsW.clone().add(new V(0, 0.1, 0))); }
         if (cam === 'profile') { c.fov = 32; c.position.copy(p).addScaledVector(fwd, 4.6).addScaledVector(right, 0.9).add(new V(0, 1.1, 0)); c.lookAt(p.clone().add(new V(0, 0.8, 0))); }

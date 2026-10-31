@@ -240,8 +240,8 @@ export class BristleTrail {
       const c = BristleTrail.COLORS[k];
       const tw = k === 0 ? 0.6 + 0.4 * Math.sin(this.life[i] * 40 + i) : 1; // sparkles twinkle
       this.col[j] = c[0]; this.col[j + 1] = c[1]; this.col[j + 2] = c[2];
-      this.alpha[i] = k === 1 ? 0.32 * u * Math.min(1, (1 - u) * 6) : (k === 2 ? 1 : 0.95) * Math.min(1, u * 1.6) * tw;
-      this.size[i] = k === 1 ? 0.06 + (1 - u) * 0.1 : k === 2 ? 0.06 : 0.085 * (0.55 + u * 0.6);
+      this.alpha[i] = k === 1 ? 0.28 * u * Math.min(1, (1 - u) * 6) : (k === 2 ? 1 : 0.95) * Math.min(1, u * 1.6) * tw;
+      this.size[i] = k === 1 ? 0.05 + (1 - u) * 0.08 : k === 2 ? 0.075 : 0.13 * (0.55 + u * 0.6); // sized to read from the chase camera (~9 m)
       this.kindF[i] = k;
     }
     const g = this.points.geometry;
