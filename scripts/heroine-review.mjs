@@ -36,6 +36,8 @@ await page.evaluate(() => {
         else if (cam === 'side' && ic.game.sim.state.mode === 'wallRiding') { c.fov = 34; c.up.set(0, 1, 0); c.fov = 36; c.position.copy(hipsW).addScaledVector(fwd, -5.5).addScaledVector(right, -1.2).add(new V(0, 1.4, 0)); c.lookAt(hipsW); }
         else if (cam === 'side' && ic.game.sim.state.mode === 'grinding') { c.fov = 34; c.up.set(0, 1, 0); c.position.copy(hipsW).addScaledVector(fwd, 3.4).addScaledVector(right, 2.6).add(new V(0, 0.7, 0)); c.lookAt(hipsW); }
         else if (cam === 'side') { c.fov = 34; c.up.copy(sideY); c.position.copy(hipsW).addScaledVector(sideZ, 4.6 * far).addScaledVector(fwd, 1.3).addScaledVector(sideY, 0.45); c.lookAt(hipsW.clone().addScaledVector(sideY, 0.05)); }
+        // 3/4 front: ahead of her along travel and out on her facing side, a touch above the hips
+        if (cam === 'q34') { c.fov = 34; c.up.set(0, 1, 0); c.position.copy(hipsW).addScaledVector(fwd, 3.2).addScaledVector(right, 3.2).add(new V(0, 0.55, 0)); c.lookAt(hipsW.clone().add(new V(0, 0.1, 0))); }
         if (cam === 'profile') { c.fov = 32; c.position.copy(p).addScaledVector(fwd, 4.6).addScaledVector(right, 0.9).add(new V(0, 1.1, 0)); c.lookAt(p.clone().add(new V(0, 0.8, 0))); }
         if (cam === 'back') { c.fov = 32; c.position.copy(p).addScaledVector(fwd, -4.2).addScaledVector(right, -1.2).add(new V(0, 1.9, 0)); c.lookAt(p.clone().add(new V(0, 0.8, 0))); }
         if (cam === 'face') {

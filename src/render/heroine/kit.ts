@@ -24,7 +24,15 @@ export interface Key {
   fL?: V3; fR?: V3;
   ctl?: Partial<Ctl>;
 }
-export interface ClipDef { name: string; base: Pose; keys: Key[]; loop?: boolean; dur?: number }
+export interface ClipDef { name: string; base: Pose; keys: Key[]; loop?: boolean; dur?: number;
+  /** Restraint: authored upper-body rotations and hips offsets are scaled toward the riding stance by this (1 = as authored). */
+  amp?: number }
+
+/** Reference the restraint scales toward (set once by clips.ts): the stance pose and its hips offset. */
+let REST: { pose: Pose; hips: V3 } | null = null;
+export function setRestraintReference(pose: Pose, hips: V3): void { REST = { pose, hips }; }
+/** Bones the restraint touches: the trunk, head and arms. Legs are IK-driven and hands keep their gestures. */
+const RESTRAINED = new Set(['hips', 'spine', 'chest', 'upperChest', 'neck', 'head', 'leftShoulder', 'rightShoulder', 'leftUpperArm', 'rightUpperArm', 'leftLowerArm', 'rightLowerArm', 'leftHand', 'rightHand']);
 
 export const E = (x = 0, y = 0, z = 0): V3 => [x, y, z];
 const FPS = 30;
@@ -98,6 +106,18 @@ export function bake(def: ClipDef, rig: RigInfo): THREE.AnimationClip {
   const chan = (get: (k: (typeof keys)[number]) => number) => { const v = keys.map(get); const m = tangents(T, v, loop); return (x: number) => hermite(T, v, m, x); };
   const tracks: THREE.KeyframeTrack[] = [];
   const bones = new Set<string>(); for (const k of keys) for (const b of Object.keys(k.pose)) bones.add(b);
+  const amp = def.amp ?? 1;
+  if (REST && amp !== 1) {
+    const hipsAmp = 0.5 + 0.5 * amp; // crouch depth reads; keep more of it than of the rotations
+    for (const k of keys) {
+      for (const bn of Object.keys(k.pose)) {
+        if (!RESTRAINED.has(bn)) continue;
+        const r = REST.pose[bn] ?? [0, 0, 0], v = k.pose[bn];
+        k.pose[bn] = [r[0] + (v[0] - r[0]) * amp, r[1] + (v[1] - r[1]) * amp, r[2] + (v[2] - r[2]) * amp];
+      }
+      k.hips = [REST.hips[0] + (k.hips[0] - REST.hips[0]) * hipsAmp, REST.hips[1] + (k.hips[1] - REST.hips[1]) * hipsAmp, REST.hips[2] + (k.hips[2] - REST.hips[2]) * hipsAmp];
+    }
+  }
   for (const b of bones) {
     const node = rig.vrm.humanoid.getNormalizedBoneNode(b as never); if (!node) continue;
     const cx = chan((k) => (k.pose[b] ?? [0, 0, 0])[0]), cy = chan((k) => (k.pose[b] ?? [0, 0, 0])[1]), cz = chan((k) => (k.pose[b] ?? [0, 0, 0])[2]);

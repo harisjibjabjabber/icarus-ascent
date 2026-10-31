@@ -226,8 +226,9 @@ export class Heroine {
       if (kind !== 'hair') j.colliderGroups = [...j.colliderGroups, legs];
       // VRoid ships zero gravity: give everything a little weight so it hangs and settles
       j.settings.gravityPower = Math.max(j.settings.gravityPower, kind === 'hair' ? 0.12 : kind === 'skirt' ? 0.22 : 0.16);
-      if (kind === 'skirt') j.settings.stiffness *= 1.1;
-      if (kind === 'hair') j.settings.dragForce = Math.min(j.settings.dragForce, 0.32);
+      // damped so hair and skirt flow but never flail (restraint pass)
+      j.settings.stiffness *= kind === 'hair' ? 1.25 : 1.45;
+      j.settings.dragForce = Math.min(0.85, Math.max(j.settings.dragForce, kind === 'hair' ? 0.45 : 0.55));
       this.joints.push(j);
       this.jointBase.push({ stiff: j.settings.stiffness, grav: j.settings.gravityPower, kind });
     }
@@ -267,7 +268,7 @@ export class Heroine {
   private actionFor(s: StateName): THREE.AnimationAction { return this.actions.get(STATES[s].once?.clip ?? (s === 'fidget' ? this.fidgetClip : STATES[s].acts[0][0]))!; }
   private mood(name: string, hold = 0): void { if (hold > 0) this.moodOver = { name, until: this.t + hold }; else this.moodBase = name; }
 
-  kick(amount: number): void { this.squash = Math.max(this.squash, amount); this.squashVel = 0; }
+  kick(amount: number): void { this.squash = Math.max(this.squash, amount * 0.6); this.squashVel = 0; } // restrained: a firm dip, not a bounce
 
   /** Sim events (presentation reacts; nothing flows back). */
   event(e: SimEvent): void {
@@ -276,7 +277,7 @@ export class Heroine {
         if (!e.fresh) break;
         if (this.state === 'loco' || this.state === 'push' || this.state === 'fidget' || this.state.startsWith('land')) {
           this.go('push', this.state === 'push' ? 0.06 : 0.12, true);
-          this.actions.get('push')!.timeScale = THREE.MathUtils.clamp(0.8 + this.sp / 40, 0.8, 1.3);
+          this.actions.get('push')!.timeScale = THREE.MathUtils.clamp(0.85 + this.sp / 60, 0.85, 1.15);
         }
         break;
       case 'jump': this.go('pop', 0.05, true); this.mood('whee', 0.5); break;
@@ -412,23 +413,25 @@ export class Heroine {
     // --- procedural layer ---
     const H = this.vrm.humanoid;
     const F = 10; // squash spring (presentation feel, same recover rate as the old rider)
-    this.squashVel += (-this.squash * F * F - this.squashVel * 2 * F * 0.7) * dt;
+    this.squashVel += (-this.squash * F * F - this.squashVel * 2 * F * 1.0) * dt; // critically damped: no overshoot wobble
     this.squash += this.squashVel * dt;
     const sq = THREE.MathUtils.clamp(this.squash, -0.25, 0.5);
     const ground = (this.stateW.get('loco') ?? 0) + (this.stateW.get('push') ?? 0) + (this.stateW.get('fidget') ?? 0);
     const hipsN = H.getNormalizedBoneNode('hips')!;
     // squash -> hips drop (the IK bends the knees), lean into speed and uphill, roll with lateral moves
-    _v.set(0, -sq * 0.2, 0);
-    const lean = ground * (Math.min(0.12, this.sp * 0.006) + Math.max(0, this.slope) * 0.25);
+    _v.set(0, -sq * 0.16, 0);
+    // lean into speed/uphill hinges from the hips (a tall spine reads graceful; folding the spine read as a crunch)
+    const lean = ground * (Math.min(0.09, this.sp * 0.0045) + Math.max(0, this.slope) * 0.2);
     _v.x += ground * (Math.min(0.05, this.sp * 0.0025) + Math.max(0, this.slope) * 0.08);
     _v.applyQuaternion(_q.copy(hipsN.parent!.getWorldQuaternion(_q2)).invert().multiply(this.object.getWorldQuaternion(_q2)));
     hipsN.position.add(_v);
-    const roll = THREE.MathUtils.clamp(this.latVel * 0.05, -0.18, 0.18);
-    this.addRot('spine', lean + sq * 0.3, 0, roll);
-    this.addRot('chest', 0.04 * Math.sin(this.t * 2 * Math.PI / 3.6) + lean * 0.3, 0, roll * 0.5); // breathing
-    this.addRot('head', -sq * 0.15, 0, 0);
+    const roll = THREE.MathUtils.clamp(this.latVel * 0.03, -0.1, 0.1);
+    this.addRot('hips', lean * 0.75, 0, 0);
+    this.addRot('spine', lean * 0.25 + sq * 0.12, 0, roll);
+    this.addRot('chest', 0.015 * Math.sin(this.t * 2 * Math.PI / 3.6), 0, roll * 0.3); // breathing
+    this.addRot('head', -sq * 0.08, 0, 0);
     if (this.stateW.has('air')) { // wind flutter on the arms in flight
-      const w = (this.stateW.get('air') ?? 0) * Math.min(1, this.sp / 15) * 0.06;
+      const w = (this.stateW.get('air') ?? 0) * Math.min(1, this.sp / 15) * 0.02;
       this.addRot('leftUpperArm', 0, 0, w * Math.sin(this.t * 9.1)); this.addRot('rightUpperArm', 0, 0, w * Math.sin(this.t * 8.3 + 1));
     }
     this.object.updateMatrixWorld(true);
@@ -572,9 +575,9 @@ export class Heroine {
     const tuck = (this.stateW.get('flip') ?? 0) + (this.stateW.get('crash') ?? 0) * 0.5 + this.inner.tuck * (this.stateW.get('loco') ?? 0);
     for (let i = 0; i < this.joints.length; i++) {
       const j = this.joints[i], b = this.jointBase[i];
-      const gust = 1 + 0.25 * Math.sin(this.t * 3.1 + i * 0.7) * w;
+      const gust = 1 + 0.1 * Math.sin(this.t * 3.1 + i * 0.7) * w;
       j.settings.gravityDir.set(0, -1, 0).multiplyScalar(1 - w * 0.8 - fall).addScaledVector(travel, -w * 1.2 * gust).normalize();
-      j.settings.gravityPower = b.grav + w * (b.kind === 'hair' ? 0.35 : 0.25);
+      j.settings.gravityPower = b.grav + w * (b.kind === 'hair' ? 0.24 : 0.18);
       j.settings.stiffness = b.stiff * (b.kind === 'hair' ? 1 : 1 + tuck * 0.8);
     }
   }
