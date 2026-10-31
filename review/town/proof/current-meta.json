@@ -1,0 +1,16 @@
+{
+ "info": {},
+ "render": {
+  "frame": 142,
+  "calls": 102,
+  "triangles": 201148,
+  "points": 220,
+  "lines": 917,
+  "geometries": 81,
+  "programs": 32,
+  "quality": "medium"
+ },
+ "logs": [
+  "error: Failed to load resource: the server responded with a status of 404 (Not Found)"
+ ]
+}

@@ -1,0 +1,17 @@
+{
+ "info": {
+  "houses": 72,
+  "bbox": null
+ },
+ "render": {
+  "frame": 142,
+  "calls": 4029,
+  "triangles": 585398,
+  "points": 220,
+  "lines": 0,
+  "geometries": 115,
+  "programs": 40,
+  "quality": "medium"
+ },
+ "logs": []
+}
