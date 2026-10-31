@@ -36,6 +36,8 @@ const _v = new THREE.Vector3(), _n = new THREE.Vector3(), _nm = new THREE.Matrix
 
 /** Growable merge buffer: kit pieces + small helper geometries -> one indexed BufferGeometry (position, normal, color). */
 export class MergeBuffer {
+  /** Optional per-piece triangle tally (debug/perf breakdown). */
+  static stats: Map<string, number> | null = null;
   private pos = new Float32Array(1 << 14);
   private nrm = new Float32Array(1 << 14);
   private col = new Float32Array(1 << 14);
@@ -52,6 +54,7 @@ export class MergeBuffer {
   piece(kit: Kit, name: string, m: THREE.Matrix4, t: Tints = {}): void {
     const p = kit.pieces.get(name);
     if (!p) return;
+    if (MergeBuffer.stats) MergeBuffer.stats.set(name, (MergeBuffer.stats.get(name) ?? 0) + p.i / 3);
     this.grow(p.v, p.i);
     _nm.getNormalMatrix(m);
     const base = this.nv;
@@ -74,6 +77,7 @@ export class MergeBuffer {
   }
   /** Append a helper geometry (must carry a `color` attribute; GeoBuilder output). */
   geometry(g: THREE.BufferGeometry, m?: THREE.Matrix4): void {
+    if (MergeBuffer.stats) MergeBuffer.stats.set('#geo', (MergeBuffer.stats.get('#geo') ?? 0) + (g.index ? g.index.count : g.getAttribute('position').count) / 3);
     const P = g.getAttribute('position'), N = g.getAttribute('normal'), C = g.getAttribute('color');
     const I = g.index;
     const ni = I ? I.count : P.count;

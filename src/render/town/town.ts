@@ -16,7 +16,7 @@ export const TOWN = {
   panel: 2, storey: 3.12, depth: 4,
   plaster: ['#fff8ee', '#fbe7cc', '#f6d9c4', '#fff1d6', '#f3e4e8', '#e9efe6', '#fde3b8', '#f7ddd0', '#eaf0f6'],
   shutter: ['#3f8f8a', '#3c6fa8', '#6a9a4c', '#c0533e', '#2f7d6d', '#5b84b8', '#d08a3a', '#8a5aa0'],
-  pavement: '#d8c7b4', pavementAlt: '#cdb9a6', water: '#3f8fa0', waterDeep: '#2c6f86', stone: '#b9a796', stoneShade: '#8f8088',
+  pavement: '#d8c7b4', pavementAlt: '#cdb9a6', water: '#3f8fa0', waterDeep: '#2c6f86', stone: '#b9a796', trimCream: '#efe4d0', stoneShade: '#8f8088',
   interior: '#3a3442', terracotta: '#c96a42', terracottaTop: '#e0875a',
   flowers: ['#e84a6a', '#f4f0ea', '#f2c04a', '#d94a3a', '#b768c8'], leaf: '#5f8f4a', leafTop: '#86b05c',
   cloth: ['#ffffff', '#f2b8c6', '#a8d4e8', '#f6e3a0', '#c8e6c0', '#e8eef8'],
@@ -56,6 +56,9 @@ function box(mb: MergeBuffer, base: THREE.Matrix4, w: number, h: number, d: numb
   if (g) mb.geometry(g, base);
 }
 
+/** Presentation knobs (perf vs looks). */
+export const TOWN_LOD = { fullRoofs: false };
+
 interface HouseSpec { w: 4 | 6; floors: number; plaster: THREE.Color; shutter: THREE.Color; roof: number; chimney: boolean; balcony: boolean; sign: number; door: number; flowers: boolean }
 
 function house(kit: Kit, near: MergeBuffer, far: MergeBuffer, base: THREE.Matrix4, h: HouseSpec, rng: () => number, nearDetail: boolean): void {
@@ -64,6 +67,7 @@ function house(kit: Kit, near: MergeBuffer, far: MergeBuffer, base: THREE.Matrix
   const roof = h.w === 4 ? 'roof44' : 'roof46';
   const roofRot = h.w === 4 ? 0 : Math.PI / 2;
   for (const [mb, full] of [[near, nearDetail], [far, false]] as const) {
+    if (!full) { cheapHouse(mb, base, h); continue; }
     // foundation (the hill drops away): stone block under the house
     box(mb, base, h.w + 0.1, 7, T.depth + 0.1, 0, -3.5, 0, T.stoneShade, T.stone);
     if (full) box(mb, base, h.w - 0.5, H - 0.3, T.depth - 0.7, 0, (H - 0.3) / 2, -0.1, T.interior); // dark interiors behind the windows
@@ -83,12 +87,38 @@ function house(kit: Kit, near: MergeBuffer, far: MergeBuffer, base: THREE.Matrix
     }
     if (full) {
       // end walls (row houses touch, but heights step so the sides show)
-      for (const sx of [-1, 1]) for (let f = 0; f < h.floors; f++) for (let i = 0; i < 2; i++) mb.piece(kit, 'wall', local(base, sx * half, f * T.storey, -1 + i * 2, sx * Math.PI / 2 + Math.PI), tints);
+      for (const sx of [-1, 1]) box(mb, base, 0.18, H, T.depth - 0.2, sx * (half - 0.09), H / 2, -0.1, h.plaster.clone().multiply(lin('#efe6dc')), h.plaster); // plain plaster end walls
       if (h.sign >= 0 && h.sign < T.sign.length) hangingSign(mb, base, -half + 0.4, 2.7, 2.15, T.sign[h.sign]);
     }
-    mb.piece(kit, full ? roof : roof + 'lite', local(base, 0, H, 0, roofRot), tints);
+    mb.piece(kit, roof + (TOWN_LOD.fullRoofs ? '' : 'lite'), local(base, 0, H, 0, roofRot), tints);
     if (full && h.chimney) mb.piece(kit, 'chimney', local(base, half - 1, H + 0.6, -0.8, 0, [0.8, 0.8, 0.8]), tints);
   }
+}
+
+/**
+ * Cheap house for the far LOD and the back rows: one plaster body, flat painted windows/shutters/door quads on the
+ * street face and a low hip roof (~10 tris) instead of kit pieces (a 4x3 house drops from ~4k to ~200 tris).
+ */
+function cheapHouse(mb: MergeBuffer, base: THREE.Matrix4, h: HouseSpec): void {
+  const T = TOWN, n = h.w / 2, H = h.floors * T.storey, half = h.w / 2, b = new GeoBuilder();
+  b.add(new THREE.BoxGeometry(h.w + 0.1, 7, T.depth + 0.1), [0, -3.5, 0], T.stoneShade, { top: T.stone });
+  b.add(new THREE.BoxGeometry(h.w, H, T.depth - 0.2), [0, H / 2, -0.1], h.plaster.clone().multiply(lin('#f7efe6')), { top: h.plaster });
+  b.add(new THREE.BoxGeometry(h.w + 0.04, 0.22, T.depth - 0.1), [0, H - 0.11, -0.1], T.trimCream);
+  const zf = T.depth / 2 - 0.3 + 0.02;
+  for (let f = 0; f < h.floors; f++) for (let i = 0; i < n; i++) {
+    const px = -half + 1 + i * 2, y = f * T.storey;
+    if (f === 0) {
+      if (i === h.door) b.add(new THREE.PlaneGeometry(1.0, 2.1), [px, y + 1.05, zf], h.shutter);
+      else b.add(new THREE.PlaneGeometry(1.1, 1.5), [px, y + 1.25, zf], T.interior);
+      continue;
+    }
+    b.add(new THREE.PlaneGeometry(0.72, 1.3), [px, y + 1.55, zf], T.interior);
+    b.add(new THREE.PlaneGeometry(0.36, 1.36), [px - 0.56, y + 1.55, zf + 0.005], h.shutter);
+    b.add(new THREE.PlaneGeometry(0.36, 1.36), [px + 0.56, y + 1.55, zf + 0.005], h.shutter);
+  }
+  const roof = new THREE.Color(T.terracotta).multiplyScalar(h.roof);
+  b.add(new THREE.ConeGeometry(Math.SQRT1_2, 1, 4, 1).rotateY(Math.PI / 4), [0, H + 0.75, -0.1], roof, { scale: [h.w + 0.7, 1.5, T.depth + 0.5], top: roof });
+  mb.geometry(b.build()!, base);
 }
 
 function flowerBox(mb: MergeBuffer, base: THREE.Matrix4, x: number, y: number, z: number, rng: () => number): void {

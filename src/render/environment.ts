@@ -158,7 +158,7 @@ export class Environment {
   private sceneryMat = toon('#ffffff', { vertexColors: true, sway: true, rim: 0.6 });
   static readonly SEG = 200;
   /** Town streaming window (route m behind / ahead of the rider) and the near-LOD radius. */
-  static readonly TOWN = { behind: 60, ahead: 300, near: 75 };
+  static readonly TOWN = { behind: 60, ahead: 300, near: 50 };
 
   constructor(scene: THREE.Scene) {
     scene.fog = new THREE.Fog(ENV_STYLE.fog, ENV_STYLE.fogNear, ENV_STYLE.fogFar);
@@ -331,7 +331,7 @@ export class Environment {
     this.sea.position.set(cameraPos.x, this.seaFollow ? this.seaY : this.seaBase - ORIGIN.y, cameraPos.z);
     const N = Environment.TOWN.near;
     for (const v of this.town.values()) {
-      const c = v.x0 + TOWN.chunk / 2, near = Math.abs(c - routeX) < N || (c > routeX && c - TOWN.chunk / 2 < routeX + 20);
+      const c = v.x0 + TOWN.chunk / 2, near = c > routeX - 30 && c < routeX + N;
       if (v.near) v.near.visible = near || !v.far;
       if (v.far) v.far.visible = !near;
     }
