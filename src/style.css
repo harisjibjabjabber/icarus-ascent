@@ -1,0 +1,18 @@
+html, body { margin: 0; height: 100%; overflow: hidden; background: #e9d6d4; overscroll-behavior: none; }
+body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; touch-action: none; font-family: system-ui, -apple-system, sans-serif; }
+#app { position: fixed; inset: 0; }
+#app canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+.hud { position: absolute; inset: 0; pointer-events: none; color: #4b3f5c; }
+.hint { position: absolute; left: 0; right: 0; bottom: 12%; text-align: center; font-size: 17px; line-height: 1.5; transition: opacity .6s; opacity: .9; text-shadow: 0 1px 0 #fff8; }
+.hint span { font-size: 13px; opacity: .7; }
+.hint.gone { opacity: 0; }
+.fail { position: absolute; left: 8%; right: 8%; top: 44%; text-align: center; opacity: 0; transform: translateY(-6px); transition: opacity .15s, transform .15s; background: #fff9f3d9; border-radius: 14px; padding: 14px 12px; }
+.fail.show { opacity: 1; transform: none; }
+.fail-text { font-size: 17px; font-weight: 600; }
+.fail-sub { font-size: 13px; opacity: .7; margin-top: 6px; }
+.buttons { position: absolute; top: max(10px, env(safe-area-inset-top)); right: 10px; display: flex; gap: 8px; pointer-events: auto; }
+.buttons button { font: 600 13px system-ui, sans-serif; color: #4b3f5c; background: #fff8f2b3; border: 1px solid #4b3f5c33; border-radius: 10px; padding: 7px 11px; touch-action: manipulation; }
+.speed { position: absolute; left: 12px; bottom: max(14px, env(safe-area-inset-bottom)); width: 6px; height: 90px; border-radius: 3px; background: #4b3f5c22; overflow: hidden; }
+.speed::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: calc(var(--v, 0) * 100%); background: #4b3f5c88; }
+.dev-overlay { position: absolute; left: 6px; top: max(6px, env(safe-area-inset-top)); max-width: 62vw; font: 10.5px/1.35 ui-monospace, Menlo, monospace; white-space: pre-wrap; color: #1f1a29; background: #ffffffc4; border-radius: 8px; padding: 6px 8px; pointer-events: none; }
+.dev-trail { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }

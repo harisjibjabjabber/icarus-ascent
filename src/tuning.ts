@@ -72,8 +72,9 @@ export const TUNING = {
     /** If the rider is below the surface by less than this while within a surface's
      *  x-range and moving *away* from it, we snap up instead of falling through. */
     surfaceSnapTolerance: 0.6,
-    /** Falling this far below the lowest nearby surface means the gap was missed. */
-    failDepth: 7,
+    /** Falling this far below the lowest nearby surface means the gap was missed.
+     *  Small, so the failure is declared while the miss is still on screen. */
+    failDepth: 4,
   },
 
   gesture: {
@@ -102,25 +103,29 @@ export const TUNING = {
 
   camera: {
     /** Vertical field of view (deg). */
-    fov: 40,
-    /** Angle (deg) between the route and the screen plane: route recedes up-left. */
-    routeYawDeg: 32,
-    /** Camera distance from focus point (m) for a portrait (9:19.5) screen. Wider
-     *  aspect ratios use less so the rider stays a similar size. */
+    fov: 48,
+    /** Angle (deg) between the route and the screen plane. The route recedes from
+     *  lower-right foreground to upper-left distance. Found with
+     *  scripts/camera-search.mjs / camera-probe.mjs: on a 390x844 portrait screen,
+     *  70 deg keeps ~45 m of route visible ahead (2 s at the soft cap) while the
+     *  rider is still ~5.5% of screen height and slopes stay readable. */
+    routeYawDeg: 70,
+    /** Camera distance from the focus point (m), portrait vs landscape. */
     distancePortrait: 34,
     distanceLandscape: 26,
-    /** Camera pitch (deg, downwards). */
-    pitchDeg: 18,
-    /** Focus point is this far ahead of the rider along the route (m), plus
-     *  lookAheadPerSpeed * speed, so faster = more visible approach. */
-    lookAheadMin: 9,
-    lookAheadPerSpeed: 0.55,
-    /** Focus is this far above the rider so the rider sits low in the frame. */
-    focusHeight: 4.5,
+    /** Camera pitch (deg, downwards). Low enough to keep a band of sky/horizon. */
+    pitchDeg: 22,
+    /** Focus point is lookAheadMin + lookAheadPerSpeed*speed metres ahead of the
+     *  rider, so faster = more visible approach (visibility budget):
+     *  ~32 m (1.5-2 s at cap) of route stays on screen ahead of the rider. */
+    lookAheadMin: 7,
+    lookAheadPerSpeed: 0.25,
+    /** Focus height above the rider (m): pushes the rider into the lower frame. */
+    focusHeight: 6,
     /** Smoothing time constants (s). */
-    followLag: 0.12,
+    followLag: 0.1,
     leadLag: 0.6,
-    heightLag: 0.35,
+    heightLag: 0.3,
   },
 
   feedback: {
