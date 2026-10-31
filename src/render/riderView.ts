@@ -138,7 +138,9 @@ export class RiderView {
     const grinding = s.mode === 'grinding', skim = s.mode === 'heelSkim', wall = s.mode === 'wallRiding';
     const failed = s.mode === 'failed';
     const hov = grinding ? 0.015 : BROOM.hover + (airborne ? 0 : BROOM.bob * Math.sin(this.t * BROOM.bobRate));
-    this.board.position.y += (0.06 + hov - this.board.position.y) * ease(12);
+    // grab: she pulls the broom up to her hand (knees tuck, like a real skate grab) instead of reaching to her feet
+    const lift = Math.max(Math.abs(this.grab), this.figure?.grabWeight ?? 0) * BROOM.grabLift;
+    this.board.position.y += (0.06 + hov + lift - this.board.position.y) * ease(12);
     this.broom.update(dt, this.heel, s.speed);
     this.root.updateMatrixWorld(true);
     const tip = this.board.localToWorld(_tip.copy(BROOM.tail));

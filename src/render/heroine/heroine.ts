@@ -146,6 +146,8 @@ export class Heroine {
   private deck: THREE.Object3D | null = null;
   private center: THREE.Object3D | null = null;
   private compK = 0; private lastDt = 1 / 60; private postureLim: { forward: number; travel: number } | null = null;
+  /** 0..1 blend weight of the grab poses (the broom rises to her hand with it). */
+  get grabWeight(): number { return Math.min(1, (this.stateW.get('grabL') ?? 0) + (this.stateW.get('grabR') ?? 0)); }
   /** Grab-hand targets in deck space (defaults: the board's toe/heel edges; the broom moves them onto the handle). */
   readonly grabTargets = { L: new THREE.Vector3(0.12, 0.05, 0.2), R: new THREE.Vector3(-0.1, 0.05, -0.21) };
   readonly stats = { cpuMs: 0, state: 'loco' as string, ik: [0, 0], posture: [0, 0, 0, 0] as number[] }; // posture: torso pF, pT, correction X, Z (deg)

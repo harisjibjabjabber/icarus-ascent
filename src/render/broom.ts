@@ -16,7 +16,9 @@ export const BROOM = {
   /** Bristle tip in broom space (sparkle / dust / spark emitter). */
   tail: new THREE.Vector3(-1.32, 0, 0),
   /** Grab targets on the handle (broom space): front hand ahead of the front foot, back hand behind the back foot. */
-  grabL: new THREE.Vector3(0.43, 0.05, 0.03), grabR: new THREE.Vector3(-0.43, 0.05, -0.01),
+  grabL: new THREE.Vector3(0.36, 0.05, 0.03), grabR: new THREE.Vector3(-0.36, 0.05, -0.01),
+  /** How far (m) the broom comes up to her hand in a grab (feet stay planted, so the knees tuck). */
+  grabLift: 0.3,
 };
 
 const C = {
