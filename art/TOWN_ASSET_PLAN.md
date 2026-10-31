@@ -108,3 +108,7 @@ plan to get back to ≤ ~150 calls / ≤ 350k tris:
   attribution not required. Navy dress, gold sash, black capelet, wide witch hat, round glasses; non-explicit, no school
   uniform. Reads young-adult but quite youthful (glasses, small frame) – judge vs Ao before switching. Thumbnail:
   `review/town/sourcing/vroid-ki-witch-thumb.jpg`. Download needs a VRoid Hub login (not done).
+
+## Status (build-out, 2026-10-31)
+Done on level/witch-town: the baked MiniPoly broom is in game. The town streams in 40 m chunks: Quaternius MVM pieces are baked into vertex colours, one material, one draw call per chunk LOD, and the far LOD and back rows use cheap houses. The course has the restyle (cobbles, tiled plazas, iron rails, plaster and harbour walls, flower pots, crate stacks, lamp gap posts). There's a harbour, sea and clock towers, plus a painted sky/sea band, a far-town layer and a sky dome. The full-screen depth outline and colour grade replace the per-mesh hulls.
+Perf and media are in review/town/README.md.
