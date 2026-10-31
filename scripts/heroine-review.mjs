@@ -76,11 +76,12 @@ fs.mkdirSync(outDir, { recursive: true });
 const save = (name, data) => fs.writeFileSync(`${outDir}/${name}.jpg`, Buffer.from(data.split(',')[1], 'base64'));
 const meta = [];
 let frame = 0;
+const STEP = Number(process.env.STEP ?? 4); // sim ticks per captured frame (4 = 30 fps of game time)
 const FROM = Number(process.env.FROM ?? 0); // skip (simulate without capture) to this frame
 async function record(n, cams = (process.env.CAMS ?? 'chase,side').split(',').filter(Boolean)) {
   if (FROM && frame === 0) { await page.evaluate((k) => { for (let i = 0; i < k; i++) window.icarus.advance(4, undefined, 4); }, FROM); frame = FROM; }
   for (let i = 0; i < n; i++) {
-    const r = await page.evaluate((cams) => { window.icarus.advance(4, undefined, 4); return window.__cap(cams); }, cams);
+    const r = await page.evaluate(([cams, step]) => { window.icarus.advance(step, undefined, 4); return window.__cap(cams); }, [cams, STEP]);
     for (const c of cams) save(`${c}-${String(frame).padStart(5, '0')}`, r[c]);
     meta.push({ f: frame, ...r.meta }); frame++;
     if (frame % 30 === 0) fs.writeFileSync(`${outDir}/meta.json`, JSON.stringify(meta)); // survive interruptions
