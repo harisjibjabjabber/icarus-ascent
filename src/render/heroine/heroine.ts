@@ -146,6 +146,8 @@ export class Heroine {
   private deck: THREE.Object3D | null = null;
   private center: THREE.Object3D | null = null;
   private compK = 0; private lastDt = 1 / 60; private postureLim: { forward: number; travel: number } | null = null;
+  /** Grab-hand targets in deck space (defaults: the board's toe/heel edges; the broom moves them onto the handle). */
+  readonly grabTargets = { L: new THREE.Vector3(0.12, 0.05, 0.2), R: new THREE.Vector3(-0.1, 0.05, -0.21) };
   readonly stats = { cpuMs: 0, state: 'loco' as string, ik: [0, 0], posture: [0, 0, 0, 0] as number[] }; // posture: torso pF, pT, correction X, Z (deg)
   private v0: boolean;
 
@@ -584,11 +586,11 @@ export class Heroine {
     const H = this.vrm.humanoid;
     const up = new THREE.Vector3(0, 1, 0).applyQuaternion(this.object.getWorldQuaternion(new THREE.Quaternion()));
     if (gl > 0.01) { // toe edge (+Z), just ahead of the front foot
-      const t = this.deck.localToWorld(new THREE.Vector3(0.12, 0.05, 0.2));
+      const t = this.deck.localToWorld(this.grabTargets.L.clone());
       solveTwoBone(H.getNormalizedBoneNode('leftUpperArm')!, H.getNormalizedBoneNode('leftLowerArm')!, H.getNormalizedBoneNode('leftHand')!, t, up, null, gl);
     }
     if (gr > 0.01) { // heel edge (-Z), behind the back foot
-      const t = this.deck.localToWorld(new THREE.Vector3(-0.1, 0.05, -0.21));
+      const t = this.deck.localToWorld(this.grabTargets.R.clone());
       solveTwoBone(H.getNormalizedBoneNode('rightUpperArm')!, H.getNormalizedBoneNode('rightLowerArm')!, H.getNormalizedBoneNode('rightHand')!, t, up, null, gr);
     }
   }

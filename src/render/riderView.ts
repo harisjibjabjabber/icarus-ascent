@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ROUTE_YAW, toScene } from './space';
+import { ROUTE_RIGHT, ROUTE_YAW, toScene } from './space';
 import { TUNING } from '../tuning';
 import { toon } from './materials';
 import { GeoBuilder, jitter } from './geo';
@@ -8,6 +8,7 @@ import type { Snapshot } from './view';
 import type { SimEvent } from '../sim/types';
 import type { Heroine, HeroineTier } from './heroine/heroine';
 import { initialLook, lookUrl, saveLook, type Look } from './heroine/looks';
+import { BROOM, Broom, BristleTrail } from './broom';
 
 /** Rider palette: a terracotta-red chiton keeps Icarus readable against white marble and cloud. */
 export const RIDER_STYLE = {
@@ -16,7 +17,8 @@ export const RIDER_STYLE = {
 };
 
 /**
- * The rider: board + Ao (VRM heroine, src/render/heroine) riding it. Until her model has
+ * The rider: Ao (VRM heroine, src/render/heroine) riding her broom like a skateboard (proto/broom:
+ * the broom replaces the board mesh; same hierarchy, same sim inputs). Until her model has
  * loaded (or if it fails to load) a procedural low-poly stand-in rides instead.
  * Hierarchy: root (route yaw, position) -> roll (wall lean about the travel axis)
  *   -> pivot (pitch: slope + heel lift + flip) -> stance (yaw: grind boardslide) -> parts.
@@ -28,7 +30,10 @@ export class RiderView {
   private roll = new THREE.Group();
   private pivot = new THREE.Group();
   private stance = new THREE.Group();
-  private board: THREE.Mesh;
+  private board: THREE.Group;
+  private broom: Broom;
+  private trail: BristleTrail;
+  private latSign: number;
   private body: THREE.Group;
   private head: THREE.Mesh;
   private arms: THREE.Group[] = [];
@@ -49,15 +54,15 @@ export class RiderView {
     this.root.add(this.roll);
     this.roll.add(this.pivot);
     this.pivot.add(this.stance);
-    // board: deck, darker rails, gold nose fin and trim stripe
-    const bb = new GeoBuilder()
-      .add(new THREE.BoxGeometry(1.25, 0.07, 0.42), [0, 0, 0], R.boardEdge, { top: R.board })
-      .add(new THREE.BoxGeometry(1.1, 0.012, 0.06), [0, 0.04, 0], R.gold)
-      .add(new THREE.BoxGeometry(0.25, 0.08, 0.44), [0.56, 0.05, 0], R.gold, { rot: [0, 0, 0.35] })
-      .add(new THREE.BoxGeometry(0.22, 0.08, 0.44), [-0.56, 0.04, 0], R.boardEdge, { rot: [0, 0, -0.3] });
-    this.board = new THREE.Mesh(bb.build()!, vmat);
-    this.board.position.y = 0.06;
+    // broom (was the board): its group is the deck the feet plant on; the trail hangs off the root
+    this.broom = new Broom();
+    this.board = this.broom.group;
+    this.board.position.y = 0.06 + BROOM.hover;
     this.stance.add(this.board);
+    this.trail = new BristleTrail();
+    this.root.add(this.trail.points);
+    const localZ = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), ROUTE_YAW);
+    this.latSign = Math.sign(localZ.dot(ROUTE_RIGHT)) || 1;
     // body (scaled for squash): legs, chiton skirt, red tunic, gold belt. Faces +X (down the
     // route), so the chase camera sees his back and the wings open sideways against the sky.
     const body = new GeoBuilder();
@@ -112,18 +117,40 @@ export class RiderView {
     // (the return is softer than the lift so the skim exit eases back to the cruise instead of snapping)
     this.heel += ((s.mode === 'heelSkim' ? 1 : 0) - this.heel) * ease(s.mode === 'heelSkim' ? 18 : 9);
     // backflip: full rotation about the rider's lateral axis (nose up and over backwards)
-    this.pivot.rotation.z = this.boardAngle + this.heel * 0.42 + flip * Math.PI * 2;
+    // broom: a gentler tail-down than the board (it is longer) and lifted a touch so the handle stays clear
+    // of the ground while the straw drags
+    this.pivot.rotation.z = this.boardAngle + this.heel * 0.24 + flip * Math.PI * 2;
     this.pivot.position.x = -this.heel * 0.5; // rotate about the tail
+    this.pivot.position.y = this.heel * 0.13;
     // wall ride: lean the whole rider away from the wall (board flat against it)
     this.rollAngle += ((s.mode === 'wallRiding' ? -1.15 : 0) - this.rollAngle) * ease(14);
     this.roll.rotation.x = this.rollAngle;
     // grind: boardslide stance (board across the rail)
-    this.stanceAngle += ((s.mode === 'grinding' ? Math.PI / 2 * 0.85 : 0) - this.stanceAngle) * ease(20);
+    // broom: the handle slides along the rail (a 50-50, like the ridge-grind concept), just a slight yaw for style
+    this.stanceAngle += ((s.mode === 'grinding' ? 0.14 : 0) - this.stanceAngle) * ease(20);
     this.stance.rotation.y = this.stanceAngle;
     // grabs: crouch and reach to the side
     const g = s.air === 'grabLeft' ? -1 : s.air === 'grabRight' ? 1 : 0;
     this.grab += (g - this.grab) * ease(20);
-    this.board.rotation.x = this.grab * 0.35;
+    this.board.rotation.x = this.grab * 0.25;
+    // hover + bob (grounded), resting low on a rail, hover kept in the air; the trail at the bristles
+    this.t += dt;
+    const grinding = s.mode === 'grinding', skim = s.mode === 'heelSkim', wall = s.mode === 'wallRiding';
+    const failed = s.mode === 'failed';
+    const hov = grinding ? 0.015 : BROOM.hover + (airborne ? 0 : BROOM.bob * Math.sin(this.t * BROOM.bobRate));
+    this.board.position.y += (0.06 + hov - this.board.position.y) * ease(12);
+    this.broom.update(dt, this.heel, s.speed);
+    this.root.updateMatrixWorld(true);
+    const tip = this.board.localToWorld(_tip.copy(BROOM.tail));
+    this.root.worldToLocal(tip);
+    const lat = this.lateral * this.latSign;
+    const sp = s.speed;
+    const rates: [number, number, number] = failed ? [0, 0, 0] : [
+      (grinding || skim ? 4 : 8 + Math.min(16, sp * 0.8)) * (airborne ? 0.8 : 1),
+      skim ? 55 : wall ? 30 : 0,
+      grinding ? 60 : 0,
+    ];
+    this.trail.update(dt, rates, x + tip.x, y + tip.y, lat + tip.z, x, y, lat, sp);
     if (this.figure) {
       this.root.updateMatrixWorld(true);
       const latVel = dt > 0 ? (this.lateral - this.latPrev) / dt : 0;
@@ -147,7 +174,6 @@ export class RiderView {
     this.head.rotation.z = lean * 0.5;
 
     // arms: balance on the ground, raised in flight, reaching for the board on a grab
-    this.t += dt;
     const air = airborne ? 1 : 0;
     const reach = Math.abs(this.grab);
     for (let i = 0; i < 2; i++) {
@@ -181,6 +207,7 @@ export class RiderView {
       const h = new Heroine(vrm);
       h.setTier(this.tier);
       this.figure?.dispose();
+      h.grabTargets.L.copy(BROOM.grabL); h.grabTargets.R.copy(BROOM.grabR);
       h.attach(this.stance, this.board, this.root);
       this.figure = h;
       this.body.visible = false; this.head.visible = false;
@@ -202,3 +229,4 @@ export class RiderView {
 
   get currentLateral(): number { return this.lateral; }
 }
+const _tip = new THREE.Vector3();
