@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { E, type ClipDef, type Pose, type V3, type Key } from './kit';
+import { E, setRestraintReference, type ClipDef, type Pose, type V3, type Key } from './kit';
 
 /**
  * Ao's performance, authored for the Icarus board (regular stance: left foot to the nose, +X).
@@ -77,33 +77,48 @@ const idle: ClipDef = { name: 'idle', base: STANCE, loop: true, dur: 2.6, keys: 
     arm('L', [0.42, -0.88, 0.18], 0.48, 0.2, [0, 0, 0.18]), arm('R', [-0.26, -0.95, -0.1], 0.38, 0.15, [0, 0, 0.08])) },
 ] };
 const cruise: ClipDef = { name: 'cruise', base: STANCE, loop: true, dur: 1.6, keys: [
-  { t: 0, hips: [0.03, -0.16, -0.06], ikL: IKL, ikR: IKR, pose: m({ hips: E(0.1, 0.3, -0.04), spine: E(0.14, 0.22, 0.04), chest: E(0.04, 0.12, 0.02), neck: E(-0.08, 0.2, 0), head: E(-0.02, 0.4, -0.08) },
+  { t: 0, hips: [0.03, -0.16, -0.06], ikL: IKL, ikR: IKR, pose: m({ hips: E(0.1, 0.26, -0.04), spine: E(0.05, 0.12, 0.04), chest: E(-0.02, 0.06, 0.02), upperChest: E(-0.03, 0.03, 0), neck: E(-0.04, 0.16, 0), head: E(-0.02, 0.34, -0.08) },
     arm('L', [0.45, -0.84, 0.28], 0.65, 0.3, [0, 0, 0.2]), arm('R', [-0.38, -0.88, -0.2], 0.6, 0.2, [0, 0, 0.15])) },
-  { t: 0.8, hips: [0.035, -0.175, -0.065], pose: m({ spine: E(0.16, 0.24, 0.02), head: E(0.0, 0.42, -0.06) }, arm('L', [0.47, -0.82, 0.3], 0.7, 0.3, [0, 0, 0.24]), arm('R', [-0.4, -0.86, -0.22], 0.64, 0.2, [0, 0, 0.18])) },
+  { t: 0.8, hips: [0.035, -0.175, -0.065], pose: m({ spine: E(0.06, 0.13, 0.02), head: E(-0.01, 0.35, -0.06) }, arm('L', [0.47, -0.82, 0.3], 0.7, 0.3, [0, 0, 0.24]), arm('R', [-0.4, -0.86, -0.22], 0.64, 0.2, [0, 0, 0.18])) },
 ] };
 /** Downhill tuck / charge: deep C-curve, hands by the knees, eyes up the line. */
 const tuck: ClipDef = { name: 'tuck', base: STANCE, loop: true, dur: 1.2, keys: [
-  { t: 0, hips: [0.04, -0.3, -0.1], ikL: IKL, ikR: IKR, pose: m({ hips: E(0.35, 0.3, -0.03), spine: E(0.38, 0.22, 0.02), chest: E(0.16, 0.1, 0), upperChest: E(0.06, 0.04, 0), neck: E(-0.3, 0.2, 0), head: E(-0.22, 0.38, -0.06) },
+  { t: 0, hips: [0.04, -0.3, -0.1], ikL: IKL, ikR: IKR, pose: m({ hips: E(0.5, 0.28, -0.03), spine: E(0.16, 0.16, 0.02), chest: E(0.02, 0.08, 0), upperChest: E(-0.04, 0.03, 0), neck: E(-0.22, 0.16, 0), head: E(-0.2, 0.34, -0.06) },
     arm('L', [0.45, -0.7, 0.55], 0.95, 0.5, [0.1, 0, 0.25]), arm('R', [-0.3, -0.75, 0.55], 1.05, 0.4, [0.1, 0, 0.2]), hand('L', [0.4, 0.5, 0.55, 0.6]), hand('R', [0.4, 0.5, 0.55, 0.6])) },
-  { t: 0.6, hips: [0.04, -0.315, -0.1], pose: { spine: E(0.4, 0.23, 0.0) } },
+  { t: 0.6, hips: [0.04, -0.315, -0.1], pose: { spine: E(0.18, 0.17, 0.0) } },
 ] };
-/** Push: weight to the front foot, back foot steps down on the toe side, sweeps back, returns. */
-const pushLean = m({ hips: E(0.12, 0.42, -0.02), spine: E(0.2, 0.38, -0.04), chest: E(0.06, 0.16, -0.02), neck: E(-0.1, 0.18, 0), head: E(-0.02, 0.48, -0.06) });
-const push: ClipDef = { name: 'push', base: STANCE, dur: 0.9, keys: [
-  { t: 0, hips: H0, ikL: IKL, ikR: IKR },
-  { t: 0.1, hips: [0.06, -0.14, -0.02], pose: m(pushLean, arm('L', [0.5, -0.82, 0.25], 0.5), arm('R', [-0.35, -0.8, 0.3], 0.5)), ikR: [-0.14, 0.12, 0.08], fR: [-0.1, 0.2, 0] },
-  { t: 0.24, hips: [0.12, -0.24, 0.0], ikR: [-0.08, -0.07, 0.24], fR: [-0.15, 0.05, 0], pose: m(arm('L', [0.4, -0.85, -0.15], 0.45), arm('R', [-0.2, -0.75, 0.5], 0.7)) },
-  { t: 0.48, hips: [0.13, -0.25, 0.0], ikR: [-0.58, -0.075, 0.22], fR: [-0.2, 0.35, 0], pose: m(arm('L', [0.35, -0.75, 0.45], 0.7), arm('R', [-0.5, -0.8, -0.25], 0.45)) },
-  { t: 0.66, hips: [0.08, -0.16, -0.02], ikR: [-0.38, 0.14, 0.06], fR: [-0.15, 0.1, 0] },
-  { t: 0.78, hips: [0.02, -0.13, -0.035], ikR: IKR, fR: [-0.15, 0, 0], pose: m({ hips: E(0.12, 0.24, -0.06), spine: E(0.1, 0.12, 0.06), chest: E(0.06, 0.1, 0.04), head: E(0.05, 0.38, -0.11), neck: E(-0.04, 0.18, -0.02) }, arm('L', [0.56, -0.79, 0.18], 0.42), arm('R', [-0.5, -0.84, -0.04], 0.45)) },
-  { t: 0.9, hips: H0 },
+/** Push (v2, Haris: no crunch): tall spine, hinge ~12 deg from the hips only, chest open, head up looking ahead.
+ *  Front knee softens, the back foot steps down on the toe side, makes one long smooth sweep back and returns.
+ *  Arms swing loosely, opposite to the kicking leg, never across the chest. Gentle hip sway. */
+const PUSH_UP = (hipF: number, sway: number, twist: number): Pose => ({
+  hips: E(hipF, 0.26 + twist, -0.04 + sway), spine: E(0.02, 0.08 + twist * 0.4, 0.04 - sway * 0.5), chest: E(-0.03, 0.05, 0.02),
+  upperChest: E(-0.04, 0.03, 0), neck: E(-0.04, 0.14, -0.02), head: E(-0.05, 0.3, -0.08),
+  leftShoulder: E(0, 0, 0), rightShoulder: E(0, 0, 0),
+});
+const push: ClipDef = { name: 'push', base: STANCE, dur: 1.0, keys: [
+  { t: 0, hips: H0, ikL: IKL, ikR: IKR, fR: [0, 0, 0] },
+  // weight onto the front foot, back foot lifts (anticipation: tiny settle down)
+  { t: 0.14, hips: [0.05, -0.15, -0.03], ikL: IKL, ikR: [-0.15, 0.1, 0.1], fR: [-0.08, 0.15, 0],
+    pose: m(PUSH_UP(0.12, 0.02, 0.06), arm('L', [0.38, -0.91, 0.12], 0.38, 0.2, [0, 0, 0.12]), arm('R', [-0.36, -0.91, 0.06], 0.4, 0.15, [0, 0, 0.12]), hand('L', RELAX), hand('R', RELAX)) },
+  // foot plants on the toe side, front knee soft (deepest hinge ~12 deg)
+  { t: 0.3, hips: [0.06, -0.19, -0.02], ikR: [-0.08, -0.07, 0.25], fR: [-0.12, 0.05, 0],
+    pose: m(PUSH_UP(0.2, 0.04, 0.08), arm('L', [0.3, -0.93, 0.1], 0.35, 0.2, [0, 0, 0.12]), arm('R', [-0.3, -0.93, 0.08], 0.38, 0.15, [0, 0, 0.12])) },
+  // long sweep back: left arm drifts forward, right arm back (opposite to the kicking leg), hips sway over the front foot
+  { t: 0.56, hips: [0.07, -0.19, -0.02], ikR: [-0.6, -0.075, 0.22], fR: [-0.18, 0.3, 0],
+    pose: m(PUSH_UP(0.2, -0.04, 0.1), arm('L', [0.52, -0.84, 0.14], 0.42, 0.2, [0, 0, 0.14]), arm('R', [-0.55, -0.82, -0.08], 0.32, 0.15, [0, 0, 0.1])) },
+  // foot comes off the ground and swings home
+  { t: 0.74, hips: [0.05, -0.15, -0.03], ikR: [-0.4, 0.12, 0.08], fR: [-0.12, 0.1, 0],
+    pose: m(PUSH_UP(0.13, 0, 0.05), arm('L', [0.4, -0.9, 0.12], 0.4, 0.2, [0, 0, 0.12]), arm('R', [-0.38, -0.9, 0.0], 0.4, 0.15, [0, 0, 0.12])) },
+  // back on the deck: soft overshoot down, then settle tall
+  { t: 0.86, hips: [0.02, -0.13, -0.035], ikR: IKR, fR: [-0.04, 0, 0] },
+  { t: 1.0, hips: H0, fR: [0, 0, 0], pose: STANCE },
 ] };
 
 // ---------- air ----------
 const AIR_OPEN = m({ hips: E(0.05, 0.28, -0.04), spine: E(-0.02, 0.18, 0.04), chest: E(-0.04, 0.12, 0.02), neck: E(-0.1, 0.16, 0), head: E(-0.14, 0.4, -0.1) },
   arm('L', [0.85, -0.08, 0.28], 0.35, 0.4, [0, 0, 0.15]), arm('R', [-0.84, 0.04, -0.15], 0.4, 0.4, [0, 0, 0.15]), hand('L', OPEN), hand('R', OPEN));
 const pop: ClipDef = { name: 'pop', base: STANCE, dur: 0.34, keys: [
-  { t: 0, hips: [0.02, -0.28, -0.08], ikL: IKL, ikR: IKR, pose: m({ hips: E(0.3, 0.3, -0.04), spine: E(0.32, 0.2, 0), head: E(-0.15, 0.4, -0.05) }, arm('L', [0.3, -0.85, -0.4], 0.5), arm('R', [-0.3, -0.85, -0.45], 0.5)) },
+  { t: 0, hips: [0.02, -0.28, -0.08], ikL: IKL, ikR: IKR, pose: m({ hips: E(0.4, 0.28, -0.04), spine: E(0.12, 0.14, 0), chest: E(0, 0.06, 0), upperChest: E(-0.04, 0, 0), neck: E(-0.12, 0.14, 0), head: E(-0.18, 0.34, -0.05) }, arm('L', [0.3, -0.88, -0.3], 0.4), arm('R', [-0.3, -0.88, -0.35], 0.4)) },
   { t: 0.08, hips: [0.0, -0.02, -0.02], pose: m({ hips: E(0.0, 0.25, -0.04), spine: E(-0.1, 0.16, 0.04), chest: E(-0.06, 0.1, 0), head: E(-0.22, 0.38, -0.08) }, arm('L', [0.55, 0.75, 0.3], 0.3), arm('R', [-0.45, 0.8, 0.1], 0.35), hand('L', OPEN), hand('R', OPEN)) },
   { t: 0.2, hips: [0.0, -0.18, -0.04], pose: m({ hips: E(0.12, 0.28, -0.04), spine: E(0.06, 0.18, 0.04) }, arm('L', [0.8, 0.3, 0.2], 0.3, 0.4), arm('R', [-0.78, 0.38, -0.05], 0.35, 0.4)) },
   { t: 0.34, hips: [0.0, -0.14, -0.04], pose: AIR_OPEN },
@@ -184,7 +199,7 @@ const SETTLE: Key = { t: 0, hips: H0, ikL: IKL, ikR: IKR, pose: STANCE };
 const landClean: ClipDef = { name: 'landClean', base: STANCE, dur: 0.8, keys: [
   { t: 0, hips: [0, -0.12, -0.03], ikL: IKL, ikR: IKR, pose: m(STANCE, arm('L', [0.8, -0.3, 0.2], 0.3), arm('R', [-0.78, -0.25, -0.1], 0.3)) },
   // absorb (anticipation for the hop)
-  { t: 0.09, hips: [0.02, -0.3, -0.06], pose: m({ hips: E(0.26, 0.26, -0.04), spine: E(0.22, 0.15, 0.04), head: E(0.12, 0.38, -0.1) }, arm('L', [0.72, -0.55, 0.3], 0.45), arm('R', [-0.7, -0.5, -0.05], 0.45)) },
+  { t: 0.09, hips: [0.02, -0.3, -0.06], pose: m({ hips: E(0.32, 0.26, -0.04), spine: E(0.1, 0.12, 0.04), head: E(0.12, 0.38, -0.1) }, arm('L', [0.72, -0.55, 0.3], 0.45), arm('R', [-0.7, -0.5, -0.05], 0.45)) },
   // happy little hop: feet leave the deck a touch, fists in to the chest, head tilt
   { t: 0.25, hips: [0, 0.07, -0.02], ikL: [0.2, 0.09, 0.04], ikR: [-0.21, 0.09, -0.01], pose: m({ hips: E(0.02, 0.24, -0.1), spine: E(-0.05, 0.1, 0.09), chest: E(-0.04, 0.08, 0.04), head: E(-0.1, 0.42, -0.22) }, arm('L', [0.45, -0.6, 0.65], 1.6, 0.4, [0, 0, 0.3]), arm('R', [-0.4, -0.62, 0.65], 1.6, 0.4, [0, 0, 0.3]), hand('L', FIST), hand('R', FIST)) },
   // re-contact, soft knees (overshoot)
@@ -194,7 +209,7 @@ const landClean: ClipDef = { name: 'landClean', base: STANCE, dur: 0.8, keys: [
 ] };
 const landBig: ClipDef = { name: 'landBig', base: STANCE, dur: 1.15, keys: [
   { t: 0, hips: [0, -0.15, -0.04], ikL: IKL, ikR: IKR },
-  { t: 0.1, hips: [0.04, -0.36, -0.08], pose: m({ hips: E(0.3, 0.3, -0.02), spine: E(0.28, 0.2, 0), chest: E(0.1, 0.1, 0), neck: E(-0.2, 0.2, 0), head: E(-0.1, 0.4, -0.05) }, arm('R', [-0.15, -0.8, 0.6], 0.3, 0.2, [0.6, 0, 0]), arm('L', [0.75, 0.2, 0.3], 0.4), hand('R', OPEN)) },
+  { t: 0.1, hips: [0.04, -0.36, -0.08], pose: m({ hips: E(0.4, 0.3, -0.02), spine: E(0.14, 0.16, 0), chest: E(0.02, 0.08, 0), neck: E(-0.18, 0.18, 0), head: E(-0.1, 0.4, -0.05) }, arm('R', [-0.15, -0.8, 0.6], 0.3, 0.2, [0.6, 0, 0]), arm('L', [0.75, 0.2, 0.3], 0.4), hand('R', OPEN)) },
   { t: 0.36, hips: [0.04, -0.34, -0.08] },
   { t: 0.56, hips: [0, -0.06, -0.02], pose: m({ hips: E(0.08, 0.24, -0.06), spine: E(-0.04, 0.16, 0.08), chest: E(-0.02, 0.1, 0.03), neck: E(-0.08, 0.15, 0), head: E(-0.12, 0.3, -0.12) }, arm('L', [0.35, 0.85, 0.3], 1.7, 0.5), arm('R', [-0.55, -0.82, 0.0], 0.5), hand('L', FIST), hand('R', RELAX)) },
   { t: 0.68, hips: [0, -0.1, -0.03], pose: m(arm('L', [0.3, 0.6, 0.45], 2.0, 0.5)) },
@@ -204,7 +219,7 @@ const landBig: ClipDef = { name: 'landBig', base: STANCE, dur: 1.15, keys: [
 /** Flip landing: absorb, free-arm swirl, hair flip, peace sign by the face, wink. */
 const landFlip: ClipDef = { name: 'landFlip', base: STANCE, dur: 1.45, keys: [
   { t: 0, hips: [0, -0.12, -0.03], ikL: IKL, ikR: IKR },
-  { t: 0.09, hips: [0.02, -0.28, -0.06], pose: m({ hips: E(0.25, 0.26, -0.04), spine: E(0.22, 0.15, 0.04), head: E(0.12, 0.38, -0.08) }, arm('L', [0.8, -0.4, 0.2], 0.4), arm('R', [-0.75, -0.4, -0.1], 0.4)) },
+  { t: 0.09, hips: [0.02, -0.28, -0.06], pose: m({ hips: E(0.3, 0.26, -0.04), spine: E(0.1, 0.12, 0.04), head: E(0.12, 0.38, -0.08) }, arm('L', [0.8, -0.4, 0.2], 0.4), arm('R', [-0.75, -0.4, -0.1], 0.4)) },
   { t: 0.28, hips: [0, -0.1, -0.03], pose: m({ hips: E(0.1, 0.24, -0.08), spine: E(0.0, 0.16, 0.07), head: E(-0.05, 0.1, -0.12) }, arm('L', [0.5, 0.8, 0.3], 0.3, 0.6)) },
   { t: 0.42, pose: m(arm('L', [-0.1, 0.95, 0.3], 0.35, 0.8), { head: E(-0.1, -0.15, -0.05) }) },
   { t: 0.56, pose: m(arm('L', [0.7, 0.4, 0.55], 0.4, 0.6), { head: E(0.0, 0.55, -0.2), neck: E(-0.05, 0.25, -0.05) }) },
@@ -254,7 +269,7 @@ const crashSit: ClipDef = { name: 'crashSit', base: STANCE, loop: true, dur: 1.6
 ] };
 const respawn: ClipDef = { name: 'respawn', base: STANCE, dur: 1.25, keys: [
   { t: 0, hips: [0, 0.06, -0.02], ikL: [0.2, 0.16, 0.04], ikR: [-0.21, 0.16, -0.01], pose: m(AIR_OPEN), ctl: { look: 0.5 } },
-  { t: 0.12, hips: [0, -0.24, -0.06], ikL: IKL, ikR: IKR, pose: m({ hips: E(0.25, 0.25, -0.04), spine: E(0.25, 0.15, 0.04), head: E(0.1, 0.35, -0.08) }, arm('L', [0.8, -0.3, 0.2], 0.4), arm('R', [-0.75, -0.3, -0.1], 0.4)) },
+  { t: 0.12, hips: [0, -0.24, -0.06], ikL: IKL, ikR: IKR, pose: m({ hips: E(0.3, 0.25, -0.04), spine: E(0.1, 0.12, 0.04), head: E(0.1, 0.35, -0.08) }, arm('L', [0.8, -0.3, 0.2], 0.4), arm('R', [-0.75, -0.3, -0.1], 0.4)) },
   { t: 0.3, hips: [0, -0.08, -0.03], pose: m({ hips: E(0.1, 0.15, -0.05), spine: E(0.12, 0.0, 0.04), chest: E(0.06, -0.05, 0.02), neck: E(0.08, -0.05, 0), head: E(0.2, -0.05, -0.06) }, arm('L', [0.15, -0.6, 0.75], 1.4, 0.8, [0, 0, 0]), arm('R', [-0.15, -0.6, 0.75], 1.4, 0.8, [0, 0, 0]), hand('L', OPEN), hand('R', OPEN)) },
   { t: 0.42, pose: m(arm('L', [0.2, -0.55, 0.78], 1.55, 0.9), arm('R', [-0.1, -0.62, 0.75], 1.3, 0.7)) },
   { t: 0.54, pose: m(arm('L', [0.12, -0.62, 0.75], 1.35, 0.8), arm('R', [-0.2, -0.55, 0.78], 1.55, 0.9)) },
@@ -264,7 +279,7 @@ const respawn: ClipDef = { name: 'respawn', base: STANCE, dur: 1.25, keys: [
 ] };
 const finish: ClipDef = { name: 'finish', base: STANCE, dur: 2.0, keys: [
   { t: 0, hips: H0, ikL: IKL, ikR: IKR },
-  { t: 0.2, hips: [0, -0.26, -0.06], pose: m({ hips: E(0.25, 0.25, -0.04), spine: E(0.25, 0.15, 0.04) }, arm('L', [0.4, -0.85, -0.3], 0.5), arm('R', [-0.4, -0.85, -0.3], 0.5)) },
+  { t: 0.2, hips: [0, -0.26, -0.06], pose: m({ hips: E(0.3, 0.25, -0.04), spine: E(0.1, 0.12, 0.04) }, arm('L', [0.4, -0.85, -0.3], 0.5), arm('R', [-0.4, -0.85, -0.3], 0.5)) },
   { t: 0.36, hips: [0, 0.12, 0], ikL: [0.2, 0.18, 0.04], ikR: [-0.21, 0.18, -0.01], pose: m({ hips: E(0.0, 0.6, -0.04), spine: E(-0.06, 0.4, 0.04), chest: E(-0.04, 0.2, 0), head: E(-0.15, 0.3, -0.12) }, arm('L', [0.55, 0.8, 0.2], 0.3), arm('R', [-0.5, 0.82, 0.1], 0.35), hand('L', OPEN), hand('R', OPEN)) },
   { t: 0.56, hips: [0, -0.2, -0.05], ikL: IKL, ikR: IKR, pose: m({ hips: E(0.2, -0.2, -0.04), spine: E(0.15, -0.3, 0.06), chest: E(0.05, -0.15, 0.02), head: E(0.05, -0.3, 0.1) }, arm('L', [0.8, -0.2, 0.3], 0.5), arm('R', [-0.8, -0.1, -0.3], 0.5)) },
   { t: 0.8, hips: [0, -0.06, -0.02], pose: m({ hips: E(0.1, 0.0, -0.1), spine: E(0.02, -0.15, 0.1), chest: E(0, -0.1, 0.05), neck: E(0, -0.2, 0.05), head: E(0.0, -0.5, 0.16) }, arm('L', [0.15, 0.3, 0.8], 2.15, -0.3, [0, -0.3, 0]), hand('L', PEACE, 0.9), arm('R', [-0.42, -0.6, 0.2], 1.6, 0.4, [0, 0, -0.5]), hand('R', RELAX)) },
@@ -316,3 +331,17 @@ const fidgetLook: ClipDef = { name: 'fidgetLook', base: STANCE, dur: 2.6, keys: 
 export const CLIPS: ClipDef[] = [idle, cruise, tuck, push, pop, airUp, airDown, float, grabL, grabR, flip, prep, grind, wall, skim,
   landClean, landBig, landFlip, landSketchy, flinch, crash, crashSit, respawn, finish, finishIdle, fidgetHip, fidgetHair, fidgetStretch, fidgetLook];
 export const FIDGETS = ['fidgetHip', 'fidgetHair', 'fidgetStretch', 'fidgetLook'];
+
+/**
+ * Restraint pass (Haris: "too OTT ... floppy like a rag doll"): authored trunk/head/arm motion is scaled toward the
+ * stance so she reads controlled and athletic, core engaged. Appeal comes from small touches (head tilt, face, a hand).
+ * Poses that must land somewhere (flip tuck, grabs reaching the board, the crash sit) keep more amplitude.
+ */
+const AMP: Record<string, number> = {
+  idle: 0.55, fidgetHip: 0.55, fidgetHair: 0.65, fidgetStretch: 0.6, fidgetLook: 0.55, cruise: 0.7, tuck: 0.8, push: 0.85,
+  pop: 0.65, airUp: 0.6, airDown: 0.6, float: 0.6, grabL: 0.8, grabR: 0.8, flip: 0.9, prep: 0.6, grind: 0.55, wall: 0.65, skim: 0.6,
+  landClean: 0.6, landBig: 0.65, landFlip: 0.7, landSketchy: 0.6, flinch: 0.5, crash: 0.8, crashSit: 0.85, respawn: 0.6,
+  finish: 0.65, finishIdle: 0.6,
+};
+setRestraintReference(STANCE, H0);
+for (const c of CLIPS) c.amp = AMP[c.name] ?? 0.65;
