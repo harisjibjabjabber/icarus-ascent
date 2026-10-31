@@ -21,7 +21,7 @@ export interface HeroineFrame {
 export type HeroineTier = 'low' | 'medium' | 'high';
 
 /** Minimum visual hold of a grab pose (s), so a quick tap-grab still reads. Presentation only. */
-const GRAB_MIN_HOLD = 0.35;
+const GRAB_MIN_HOLD = 0.45; // broom polish: a grab holds for a satisfying beat (presentation only; the sim's trick timing is untouched)
 type StateName = 'loco' | 'push' | 'pop' | 'air' | 'float' | 'grabL' | 'grabR' | 'flip' | 'prep' | 'grind' | 'wall' | 'skim'
   | 'landClean' | 'landBig' | 'landFlip' | 'landSketchy' | 'crash' | 'crashSit' | 'respawn' | 'finish' | 'finishIdle' | 'fidget';
 interface StateDef { acts: [string, (h: Heroine) => number][]; once?: { clip: string; next: StateName; fade: number } }
@@ -146,7 +146,14 @@ export class Heroine {
   private deck: THREE.Object3D | null = null;
   private center: THREE.Object3D | null = null;
   private compK = 0; private lastDt = 1 / 60; private postureLim: { forward: number; travel: number } | null = null;
-  readonly stats = { cpuMs: 0, state: 'loco' as string, ik: [0, 0], posture: [0, 0, 0, 0] as number[] }; // posture: torso pF, pT, correction X, Z (deg)
+  /** 0..1 blend weight of the grab poses (the broom rises to her hand with it). */
+  get grabWeight(): number {
+    if (this.debugFreeze) return this.debugFreeze.clip.startsWith('grab') ? 1 : 0; // review stills: frozen grab poses lift the broom too
+    return Math.min(1, (this.stateW.get('grabL') ?? 0) + (this.stateW.get('grabR') ?? 0));
+  }
+  /** Grab-hand targets in deck space (defaults: the board's toe/heel edges; the broom moves them onto the handle). */
+  readonly grabTargets = { L: new THREE.Vector3(0.12, 0.05, 0.2), R: new THREE.Vector3(-0.1, 0.05, -0.21) };
+  readonly stats = { cpuMs: 0, state: 'loco' as string, ik: [0, 0], posture: [0, 0, 0, 0] as number[], hand: [0, 0] }; // hand: grab wrist-to-target error (m) // posture: torso pF, pT, correction X, Z (deg)
   private v0: boolean;
 
   constructor(vrm: VRM) {
@@ -445,7 +452,12 @@ export class Heroine {
     this.addRot('hips', lean * 0.75, 0, 0);
     this.addRot('spine', lean * 0.25 + sq * 0.12, 0, roll);
     this.addRot('chest', 0.015 * Math.sin(this.t * 2 * Math.PI / 3.6), 0, roll * 0.3); // breathing
-    this.addRot('head', -sq * 0.08, 0, 0);
+    // grab: a small cute head tilt toward the grabbing hand (and a glance down at it)
+    const gL = this.debugFreeze ? (this.debugFreeze.clip === 'grabL' ? 1 : 0) : (this.stateW.get('grabL') ?? 0);
+    const gR = this.debugFreeze ? (this.debugFreeze.clip === 'grabR' ? 1 : 0) : (this.stateW.get('grabR') ?? 0);
+    this.addRot('head', -sq * 0.08 + (gL + gR) * 0.06, 0, (gL - gR) * 0.16);
+    // ...and she bends down to the handle from the waist (within the grab posture limit) so the hand meets it
+    this.addRot('spine', (gL + gR) * 0.3, 0, 0); this.addRot('chest', (gL + gR) * 0.12, 0, 0);
     if (this.stateW.has('air')) { // wind flutter on the arms in flight
       const w = (this.stateW.get('air') ?? 0) * Math.min(1, this.sp / 15) * 0.02;
       this.addRot('leftUpperArm', 0, 0, w * Math.sin(this.t * 9.1)); this.addRot('rightUpperArm', 0, 0, w * Math.sin(this.t * 8.3 + 1));
@@ -580,16 +592,19 @@ export class Heroine {
   }
 
   private solveHands(gl: number, gr: number): void {
+    this.stats.hand[0] = this.stats.hand[1] = 0;
     if (!this.deck || (gl < 0.01 && gr < 0.01)) return;
     const H = this.vrm.humanoid;
     const up = new THREE.Vector3(0, 1, 0).applyQuaternion(this.object.getWorldQuaternion(new THREE.Quaternion()));
     if (gl > 0.01) { // toe edge (+Z), just ahead of the front foot
-      const t = this.deck.localToWorld(new THREE.Vector3(0.12, 0.05, 0.2));
+      const t = this.deck.localToWorld(this.grabTargets.L.clone());
       solveTwoBone(H.getNormalizedBoneNode('leftUpperArm')!, H.getNormalizedBoneNode('leftLowerArm')!, H.getNormalizedBoneNode('leftHand')!, t, up, null, gl);
+      this.stats.hand[0] = H.getNormalizedBoneNode('leftHand')!.getWorldPosition(_w).distanceTo(t);
     }
     if (gr > 0.01) { // heel edge (-Z), behind the back foot
-      const t = this.deck.localToWorld(new THREE.Vector3(-0.1, 0.05, -0.21));
+      const t = this.deck.localToWorld(this.grabTargets.R.clone());
       solveTwoBone(H.getNormalizedBoneNode('rightUpperArm')!, H.getNormalizedBoneNode('rightLowerArm')!, H.getNormalizedBoneNode('rightHand')!, t, up, null, gr);
+      this.stats.hand[1] = H.getNormalizedBoneNode('rightHand')!.getWorldPosition(_w).distanceTo(t);
     }
   }
 

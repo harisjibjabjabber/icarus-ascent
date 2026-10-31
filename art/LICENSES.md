@@ -43,3 +43,10 @@ Art. 11 / VRM Public License with modification + redistribution allowed". Nothin
 | meshoptimizer, sharp, three-mesh-bvh (pipeline tools) | npm | MIT (meshoptimizer, three-mesh-bvh), Apache-2.0 (sharp) | package licences | tool only |
 
 Content rule kept: Ao is an adult-presenting character; animations are playful but non-explicit.
+
+### Broom prototype concept art (branch `proto/broom`, 2026-10-31)
+
+| Asset | Where | Licence | Evidence | Ships? |
+|---|---|---|---|---|
+| `art/concepts/broom/01..06-*.jpg` (key art, town overview, rooftop grind, wall run, mood board, broom + stance sheet) | Generated for this project with the Grok Bot image tool from text prompts (`art/concepts/broom/README.md`); no reference images, no third-party art | Our own generated concept art; internal reference only | prompts in the README | no (reference only, not in `public/`) |
+| Broom mesh + trail (`src/render/broom.ts`) | Procedural three.js geometry written for this project | project code | — | yes (branch only) |
