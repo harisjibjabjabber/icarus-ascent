@@ -43,6 +43,8 @@ export class DevOverlay {
     if (e.type === 'jump' && e.kind !== 'ground') this.push(`${e.kind} jump`);
     if (e.type === 'grind-start' || e.type === 'wall-start' || e.type === 'flip-start' || e.type === 'flip-complete' || e.type === 'skim-start' || e.type === 'grab-start') this.push(e.type);
     if (e.type === 'grind-end' || e.type === 'wall-end' || e.type === 'skim-end') this.push(`${e.type} (${e.reason})`);
+    if (e.type === 'break') this.push(`BREAK ${e.kind} by ${e.by} @${e.speed.toFixed(1)}`);
+    if (e.type === 'credit') this.push(`credit ${e.credit}`);
     if (e.type === 'fail') this.push(`FAIL ${e.info.kind}`);
   }
 
@@ -62,7 +64,7 @@ export class DevOverlay {
       `speed   ${speed.toFixed(2)} m/s  (peak ${this.peakSpeed.toFixed(1)})`,
       `x ${st.x.toFixed(1)}  y ${st.y.toFixed(2)}  vx ${st.vx.toFixed(1)} vy ${st.vy.toFixed(1)}`,
       `coyote ${(st.coyote * 1000).toFixed(0)}ms  buffer ${(st.jumpBuffer * 1000).toFixed(0)}ms  air ${st.airTime.toFixed(2)}s`,
-      `trick   air=${st.air}${st.air === 'flip' ? ` ${(st.flip * 100).toFixed(0)}%` : ''} flips=${st.flipsThisJump} prep=${st.prepHeld ? 'held' : st.prepTimer > 0 ? 'armed' : '-'} contact ${st.contactTime.toFixed(2)}s`,
+      `trick   air=${st.air}${st.air === 'flip' ? ` ${(st.flip * 100).toFixed(0)}%` : ''} flips=${st.flipsThisJump} prep=${st.prepHeld ? 'held' : st.prepTimer > 0 ? 'armed' : '-'} contact ${st.contactTime.toFixed(2)}s credit=${st.trickCredit}${st.trickCredit !== 'none' ? ` ${st.creditGround.toFixed(0)}m` : ''}`,
       `context ${extra.context ?? '-'}`,
       `gesture ${gd.stage} dir=${gd.dir} travel=${gd.travel.toFixed(3)}vu`,
       `detected ${gd.lastDetected}`,

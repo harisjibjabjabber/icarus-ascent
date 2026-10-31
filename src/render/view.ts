@@ -6,6 +6,7 @@ import { CourseView } from './courseView';
 import { Effects, SpeedLines } from './effects';
 import { RiderView } from './riderView';
 import { Environment } from './environment';
+import { Debris } from './debris';
 import { toScene } from './space';
 import { TUNING } from '../tuning';
 
@@ -32,6 +33,7 @@ export class GameView {
   private courseView: CourseView | null = null;
   private rider = new RiderView();
   private effects = new Effects();
+  private debris = new Debris();
   private speedLines = new SpeedLines();
   private trail: Vec2[] = [];
   private trailLine: THREE.Line;
@@ -64,7 +66,7 @@ export class GameView {
     this.failMarker.visible = false;
     this.edgeMarker = new THREE.Mesh(new THREE.BoxGeometry(0.12, 4, 0.12), new THREE.MeshBasicMaterial({ color: '#2f7d6d', fog: false }));
     this.edgeMarker.visible = false;
-    this.scene.add(this.trailLine, this.arcLine, this.failMarker, this.edgeMarker);
+    this.scene.add(this.trailLine, this.arcLine, this.failMarker, this.edgeMarker, this.debris.group);
     this.resize();
   }
 
@@ -72,6 +74,7 @@ export class GameView {
     if (this.courseView) { this.scene.remove(this.courseView.group); this.courseView.dispose(); }
     this.courseView = new CourseView(course);
     this.scene.add(this.courseView.group);
+    this.debris.setCourse(course);
     this.env.buildScenery(course.seed, course.finishX + 80);
   }
 
@@ -83,6 +86,8 @@ export class GameView {
 
   resetRun(s: Snapshot): void {
     this.trail = [];
+    this.courseView?.resetObstacles();
+    this.debris.clear();
     this.failCam = null;
     this.trailLine.visible = false;
     this.failMarker.visible = false;
@@ -107,6 +112,17 @@ export class GameView {
         this.effects.landPuff(e.x, e.y, e.impact, e.material, e.speedAfter);
         if (e.flipped) this.effects.ring(e.x, e.y, 0, '#fff3c4');
         break;
+      case 'break': {
+        const o = this.courseView?.course.obstacles[e.obstacleId];
+        if (!o) break;
+        const F = TUNING.feedback;
+        this.courseView!.setBroken(o.id, true);
+        this.debris.burst(o.kind, o.x, o.baseY, o.height, e.vx, e.vy, o.kind === 'pot' ? F.potFragments : F.pillarFragments);
+        this.effects.landPuff(o.x + 0.6, o.baseY, o.kind === 'pot' ? 2 : 7, 'stone', e.speed);
+        this.rig.jolt(o.kind === 'pot' ? F.breakShakePot : F.breakShakePillar);
+        this.rider.kick(o.kind === 'pot' ? 0.12 : 0.22);
+        break;
+      }
       case 'grind-start': {
         this.rider.kick(0.25);
         const r = this.courseView?.course.rails[e.railId];
@@ -216,6 +232,7 @@ export class GameView {
       if (this.streakTimer <= 0) { this.effects.speedStreak(x, y, curr.speed); this.streakTimer = 1; }
     }
     this.effects.update(dt);
+    this.debris.update(dt);
     if (this.failMarker.visible) this.failMarker.scale.setScalar(1 + 0.1 * Math.sin(performance.now() / 120));
     this.renderer.render(this.scene, this.rig.camera);
   }

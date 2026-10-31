@@ -56,6 +56,17 @@ export interface Gap {
 
 export interface Marker { x: number; label: string }
 
+/** Breakable obstacle standing on the ground at x (brief §8). */
+export interface Obstacle {
+  id: number;
+  kind: 'pot' | 'pillar';
+  x: number;
+  halfWidth: number;
+  height: number;
+  /** Ground height at x. */
+  baseY: number;
+}
+
 export interface SurfaceSample {
   y: number;
   /** dy/dx of the segment under x. */
@@ -74,6 +85,7 @@ export class Course {
     readonly markers: Marker[],
     readonly startX: number,
     readonly finishX: number,
+    readonly obstacles: Obstacle[] = [],
   ) {
     const sorted = [...surfaces].sort((a, b) => a.points[0].x - b.points[0].x);
     for (let i = 0; i + 1 < sorted.length; i++) {
@@ -152,6 +164,15 @@ export class Course {
   static railX1(r: Rail): number { return r.points[r.points.length - 1].x; }
 
   /** Mark a gap (by its takeoff edge) as requiring a rail or wall. */
+  /** Stand an obstacle on the ground at x. */
+  addObstacle(kind: Obstacle['kind'], x: number, halfWidth: number, height: number): Obstacle {
+    const g = this.groundBelow(x, 1e6);
+    if (!g) throw new Error(`no ground for ${kind} at ${x}`);
+    const o: Obstacle = { id: this.obstacles.length, kind, x, halfWidth, height, baseY: g.sample.y };
+    this.obstacles.push(o);
+    return o;
+  }
+
   markGap(x0: number, requires: Gap['requires']): void {
     const g = this.gaps.find((q) => Math.abs(q.x0 - x0) < 0.01);
     if (!g) throw new Error(`no gap at ${x0}`);

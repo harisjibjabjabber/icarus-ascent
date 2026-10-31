@@ -139,6 +139,21 @@ export const TUNING = {
     heelDecelMax: 6,
   },
 
+  /** Breakable obstacles (brief §8). */
+  obstacles: {
+    potHeight: 0.85,
+    potHalfWidth: 0.42,
+    pillarHeight: 3.6,
+    pillarHalfWidth: 0.55,
+    /** Speed kept through a break (flow: nearly all). */
+    potBreakRetention: 0.985,
+    pillarBreakRetention: 0.97,
+    /** A grab only earns a pillar break if held at least this long and released in the air. */
+    grabMinHold: 0.12,
+    /** After landing, an airborne trick still powers a pillar break for this much ground travel (m). */
+    pillarCreditDistance: 26,
+  },
+
   gesture: {
     /** Movement below this (vu) from the touch-down point is finger noise. */
     deadZone: 0.022,
@@ -219,6 +234,14 @@ export const TUNING = {
   },
 
   feedback: {
+    /** Break response: small camera jolt (m) decaying over breakShakeTime, plus an FOV punch (deg). */
+    breakShakePot: 0.08,
+    breakShakePillar: 0.18,
+    breakShakeTime: 0.22,
+    breakFovPunch: 1.6,
+    /** Fragments thrown per break. */
+    potFragments: 14,
+    pillarFragments: 26,
     pushSquash: 0.22,
     landSquash: 0.3,
     squashRecover: 10,

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Course, type Surface } from '../course/course';
+import { Course, type Obstacle, type Surface } from '../course/course';
 import { toScene, ROUTE_YAW } from './space';
 import { toon } from './materials';
 
@@ -16,11 +16,47 @@ export const COURSE_STYLE = {
   rail: '#b8864b', railPost: '#8f6a43', railRequired: '#ffb347',
   wall: '#d8cfe6', wallTrim: '#9a8fb6', wallRequired: '#bfe3d6',
   marker: '#5d4f6e',
+  pot: '#d27a4f', potBand: '#f3e0b5', pillar: '#e9dccf', pillarAlt: '#ddcdbf', pillarCap: '#c7b2c4',
 };
 
 /** Builds static meshes for a Course. Observes course data only. */
 export class CourseView {
   readonly group = new THREE.Group();
+  private obstacleMeshes: THREE.Group[] = [];
+
+  /** Hide a broken obstacle (debris takes over). */
+  setBroken(id: number, broken: boolean): void { const m = this.obstacleMeshes[id]; if (m) m.visible = !broken; }
+  resetObstacles(): void { for (const m of this.obstacleMeshes) m.visible = true; }
+
+  private obstacleMesh(o: Obstacle): THREE.Group {
+    const g = new THREE.Group();
+    if (o.kind === 'pot') {
+      // terracotta urn: lathe profile + painted band
+      const r = o.halfWidth, h = o.height;
+      const prof = [[0.0, 0], [r * 0.55, 0], [r * 0.95, h * 0.25], [r, h * 0.5], [r * 0.8, h * 0.78], [r * 0.5, h * 0.9], [r * 0.62, h], [r * 0.5, h]].map(([a, b]) => new THREE.Vector2(a, b));
+      const body = new THREE.Mesh(new THREE.LatheGeometry(prof, 14), toon(COURSE_STYLE.pot));
+      const band = new THREE.Mesh(new THREE.CylinderGeometry(r * 1.01, r * 0.99, h * 0.1, 14, 1, true), toon(COURSE_STYLE.potBand));
+      band.position.y = h * 0.5;
+      g.add(body, band);
+    } else {
+      // stacked drums + capital, slightly off-axis so it reads as breakable masonry
+      const r = o.halfWidth, h = o.height, n = 4;
+      for (let i = 0; i < n; i++) {
+        const d = new THREE.Mesh(new THREE.CylinderGeometry(r * (0.94 + (i % 2) * 0.04), r, h / n - 0.04, 10), toon(i % 2 ? COURSE_STYLE.pillarAlt : COURSE_STYLE.pillar));
+        d.position.set(Math.sin(i * 2.1) * 0.03, (h / n) * (i + 0.5), Math.cos(i * 1.7) * 0.03);
+        d.rotation.y = i * 0.5;
+        g.add(d);
+      }
+      const cap = new THREE.Mesh(new THREE.BoxGeometry(r * 2.5, 0.22, r * 2.5), toon(COURSE_STYLE.pillarCap));
+      cap.position.y = h + 0.06;
+      const base = new THREE.Mesh(new THREE.BoxGeometry(r * 2.4, 0.18, r * 2.4), toon(COURSE_STYLE.pillarCap));
+      base.position.y = 0.09;
+      g.add(cap, base);
+    }
+    g.traverse((q) => { if ((q as THREE.Mesh).isMesh) { q.castShadow = true; q.receiveShadow = true; } });
+    g.position.copy(toScene(o.x, o.baseY, 0));
+    return g;
+  }
 
   constructor(readonly course: Course) {
     for (const s of course.surfaces) this.group.add(this.surfaceMesh(s));
@@ -29,6 +65,7 @@ export class CourseView {
     for (const r of course.rails) this.group.add(this.railMesh(r.points, r.lateral, r.required));
     for (const w of course.walls) this.group.add(this.wallMesh(w));
     for (const m of course.markers) this.group.add(this.marker(m.x, m.label));
+    for (const o of course.obstacles) { const m = this.obstacleMesh(o); this.obstacleMeshes.push(m); this.group.add(m); }
   }
 
   dispose(): void {

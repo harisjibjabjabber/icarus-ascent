@@ -1,3 +1,5 @@
+import { Autopilot, type AutopilotOptions } from '../src/diag/autopilot';
+import type { SimEvent } from '../src/sim/types';
 import { Course, type Vec2 } from '../src/course/course';
 import { Simulation } from '../src/sim/simulation';
 import { TUNING } from '../src/tuning';
@@ -39,34 +41,19 @@ export const side = (s: 'left' | 'right', held: boolean, strokeId: number): Acti
 export const newId = () => ++sid;
 
 /**
- * Scripted "competent" lab rider: keeps speed in a band by pushing, jumps every
- * gap, swipes down for required rails and holds right for required walls.
+ * Scripted "competent" lab rider (the dev autopilot): keeps speed in a band, jumps
+ * gaps, catches required rails, wall-rides required walls, clears pots and tricks
+ * before pillars.
  */
-export function driveLab(sim: Simulation, opts: { minSpeed: number; pushEvery?: number; strength?: number; maxSeconds?: number; jumpEarly?: number }): void {
-  const course = sim.course;
-  const every = opts.pushEvery ?? 36;
-  let t = 0, prepDone = false, wallStroke = -1;
+export function driveLab(sim: Simulation, opts: AutopilotOptions & { maxSeconds?: number }): SimEvent[] {
+  const ap = new Autopilot(opts);
+  const ev: SimEvent[] = [];
   const maxTicks = Math.round((opts.maxSeconds ?? 150) / TUNING.sim.dt);
   for (let i = 0; i < maxTicks; i++) {
-    const st = sim.state;
-    if (st.mode === 'finished' || st.mode === 'failed') return;
-    t++;
-    if (st.mode === 'grounded') {
-      prepDone = false;
-      if (wallStroke !== -1) { sim.enqueue(side('right', false, wallStroke)); wallStroke = -1; }
-      if (t % every === 0 && st.speed < opts.minSpeed) sim.enqueue(push(opts.strength ?? 0.65));
-      for (const g of course.gaps) {
-        const early = g.requires === 'rail' ? 2.2 : (opts.jumpEarly ?? 0.8);
-        if (st.x > g.x0 - early && st.x < g.x0 - early + 0.6) sim.enqueue(up());
-      }
-    } else if (st.mode === 'airborne') {
-      const g = course.gaps.find((q) => st.x > q.x0 - 4 && st.x < q.x1);
-      if (g?.requires === 'rail' && !prepDone) { sim.enqueue(down()); prepDone = true; }
-      if (g?.requires === 'wall' && wallStroke === -1 && st.lastContact !== 'wall') {
-        const w = course.walls[0];
-        if (st.x >= w.x0) { wallStroke = newId(); sim.enqueue(side('right', true, wallStroke)); }
-      }
-    }
+    if (sim.state.mode === 'finished' || sim.state.mode === 'failed') break;
+    for (const a of ap.next(sim)) sim.enqueue(a);
     sim.step();
+    ev.push(...sim.drainEvents());
   }
+  return ev;
 }

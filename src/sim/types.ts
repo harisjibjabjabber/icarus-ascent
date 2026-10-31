@@ -14,7 +14,7 @@ export type AirTrick = 'none' | 'flip' | 'grabLeft' | 'grabRight';
 
 export type FailKind =
   | 'fell-in-gap' | 'hit-ledge-face' | 'unfinished-flip' | 'landed-grabbing'
-  | 'missed-rail' | 'missed-wall' | 'fell-off-wall' | 'stalled';
+  | 'missed-rail' | 'missed-wall' | 'fell-off-wall' | 'stalled' | 'hit-pot' | 'hit-pillar';
 
 export interface FailInfo {
   kind: FailKind;
@@ -81,6 +81,14 @@ export interface RiderState {
   prepTriedThisAir: boolean;
   sideTriedThisAir: boolean;
 
+  // --- obstacles ---
+  /** Ids of obstacles broken this run. */
+  broken: number[];
+  /** Airborne trick that can power a pillar break: earned in the air, spent on a break. */
+  trickCredit: 'none' | 'flip' | 'grab';
+  /** Ground distance travelled since landing with a credit (m). */
+  creditGround: number;
+
   /** Last takeoff point, for failure explanation. */
   takeoffX: number;
   takeoffY: number;
@@ -105,6 +113,8 @@ export type SimEvent =
   | { type: 'wall-end'; wallId: number; x: number; y: number; reason: 'end' | 'release' | 'slid-off' | 'too-slow' | 'jump' }
   | { type: 'skim-start'; x: number; y: number }
   | { type: 'skim-end'; x: number; y: number; reason: 'release' | 'push' | 'jump' | 'edge' | 'stopped' }
+  | { type: 'break'; obstacleId: number; kind: 'pot' | 'pillar'; by: 'heel' | 'flip' | 'grab'; x: number; y: number; vx: number; vy: number; speed: number }
+  | { type: 'credit'; credit: 'flip' | 'grab' }
   | { type: 'fail'; info: FailInfo }
   | { type: 'finish'; x: number }
   | { type: 'resolve'; action: string; result: string }

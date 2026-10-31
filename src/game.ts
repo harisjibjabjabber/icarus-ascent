@@ -10,6 +10,7 @@ import { DevOverlay } from './diag/overlay';
 import { GameView, snap, type Snapshot } from './render/view';
 import { newSeed } from './rng';
 import { Autopilot } from './diag/autopilot';
+import { Sfx } from './audio/sfx';
 
 /** Composition root: owns the loop and wires input -> sim -> presentation/diagnostics. */
 export class Game {
@@ -30,6 +31,7 @@ export class Game {
   private fps = 60;
   private hintDismissed = false;
   readonly gestures = new GestureRecognizer();
+  readonly sfx = new Sfx();
   readonly view: GameView;
   readonly overlay: DevOverlay;
   private ui: { hint: HTMLElement; fail: HTMLElement; failText: HTMLElement; speed: HTMLElement };
@@ -39,9 +41,9 @@ export class Game {
     const hud = document.createElement('div');
     hud.className = 'hud';
     hud.innerHTML = `
-      <div class="hint">Swipe <b>down</b> push · <b>up</b> jump<br>In the air: <b>up</b> backflip · <b>down</b> grind a rail · hold <b>right</b> by a wall to wall-ride (else grab)<br>Hold <b>down</b> into a landing to heel-skim (slows you)<br><span>Keys: ↓ push/grind/skim · ↑ / Space jump/flip · → / ← hold wall-ride/grab</span></div>
+      <div class="hint">Swipe <b>down</b> push · <b>up</b> jump<br>In the air: <b>up</b> backflip · <b>down</b> grind a rail · hold <b>right</b> by a wall to wall-ride (else grab)<br>Hold <b>down</b> into a landing to heel-skim (slows you)<br>Pots: jump them or heel-break them · Pillars: flip or grab (and let go) on the jump before<br><span>Keys: ↓ push/grind/skim · ↑ / Space jump/flip · → / ← hold wall-ride/grab · M sound</span></div>
       <div class="fail"><div class="fail-text"></div><div class="fail-sub">Tap / ↑ to retry · same course</div></div>
-      <div class="buttons"><button data-act="new">New run</button><button data-act="dev">Dev</button></div>
+      <div class="buttons"><button data-act="sound" class="sound"></button><button data-act="new">New run</button><button data-act="dev">Dev</button></div>
       <div class="speed"></div>`;
     root.appendChild(hud);
     this.overlay = new DevOverlay(root);
@@ -54,9 +56,11 @@ export class Game {
         const act = (b as HTMLElement).dataset.act;
         if (act === 'new') this.newRun();
         if (act === 'dev') this.toggleDev();
+        if (act === 'sound') this.toggleSound();
         (b as HTMLElement).blur();
       });
     }
+    this.updateSoundButton();
     const params = new URLSearchParams(location.search);
     this.seed = params.has('seed') ? Number(params.get('seed')) >>> 0 : newSeed();
     this.loadCourse();
@@ -75,10 +79,10 @@ export class Game {
       // dev: freeze the real-time loop and drive the sim deterministically (screenshots, debugging)
       pause: (on = true) => { this.paused = on; this.lastFrame = 0; },
       autopilot: (opts: ConstructorParameters<typeof Autopilot>[0]) => { this.autopilot = new Autopilot(opts); },
-      advance: (ticks: number, until?: (g: Game) => boolean) => {
+      advance: (ticks: number, until?: (g: Game) => boolean, renderEvery = 2) => {
         for (let i = 0; i < ticks; i++) {
           this.tick();
-          if (i % 2 === 1) this.view.render(TUNING.sim.dt * 2, this.prev, this.curr, 1);
+          if (i % renderEvery === renderEvery - 1) this.view.render(TUNING.sim.dt * renderEvery, this.prev, this.curr, 1);
           if (until && until(this)) break;
         }
         this.view.render(TUNING.sim.dt, this.prev, this.curr, 1);
@@ -87,12 +91,24 @@ export class Game {
     };
   }
 
+  private toggleSound(): void {
+    this.sfx.unlock();
+    this.sfx.setMuted(!this.sfx.muted);
+    this.updateSoundButton();
+  }
+
+  private updateSoundButton(): void {
+    const b = document.querySelector('button.sound');
+    if (b) b.textContent = this.sfx.muted ? 'Sound off' : 'Sound on';
+  }
+
   private toggleDev(): void { this.overlay.toggle(); this.view.showArc = this.overlay.visible; }
 
   private onMetaKey(code: string): boolean {
     switch (code) {
       case 'Backquote': case 'KeyO': this.toggleDev(); return true;
       case 'KeyR': this.retry(); return true;
+      case 'KeyM': this.toggleSound(); return true;
       case 'KeyN': this.newRun(); return true;
       case 'KeyL': this.startReplay(this.lastTrace ?? this.recorder.trace); return true;
       case 'Enter': if (this.sim.state.mode === 'failed' || this.sim.state.mode === 'finished') { this.retry(); return true; } return false;
@@ -132,6 +148,7 @@ export class Game {
   }
 
   private onAction(a: Action): void {
+    this.sfx.unlock(); // first gesture starts audio (autoplay rules)
     this.overlay.onAction(a);
     const st = this.sim.state;
     if (st.mode === 'failed' || st.mode === 'finished') {
@@ -154,6 +171,7 @@ export class Game {
     this.curr = snap(this.sim.state);
     for (const e of this.sim.drainEvents()) {
       this.view.onEvent(e, this.curr.speed);
+      this.sfx.onEvent(e);
       this.overlay.onEvent(e);
       if (e.type === 'fail' || e.type === 'finish') this.onRunEnd(e.type === 'fail' ? e.info.message : 'Lab complete — nice line.');
     }
@@ -177,6 +195,7 @@ export class Game {
     while (this.acc >= dt && steps < TUNING.sim.maxStepsPerFrame) { this.tick(); this.acc -= dt; steps++; }
     if (steps >= TUNING.sim.maxStepsPerFrame) this.acc = 0;
     this.view.render(dtReal, this.prev, this.curr, this.acc / dt);
+    this.sfx.update(this.sim.state);
     if (this.overlay.visible) this.view.setArc(predictJumpArc(this.sim));
     else this.view.setArc([]);
     this.overlay.update(this.sim.state, this.gestures, {

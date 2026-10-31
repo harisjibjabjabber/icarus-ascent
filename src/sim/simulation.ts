@@ -1,5 +1,5 @@
 import { TUNING, type Tuning } from '../tuning';
-import { Course, type Rail, type Surface, type Vec2, type Wall } from '../course/course';
+import { Course, type Obstacle, type Rail, type Surface, type Vec2, type Wall } from '../course/course';
 import { describeAction, type Action } from '../input/actions';
 import type { FailInfo, RiderState, SimEvent } from './types';
 
@@ -53,13 +53,14 @@ export class Simulation {
       air: 'none', flip: 0, flipsThisJump: 0, sideStrokeId: -1, prepStrokeId: -1, prepTimer: 0, prepHeld: false,
       railId: -1, wallId: -1, contactTime: 0, wallEntrySpeed: 0, lastContact: 'ground', lastContactId: g.surface.id,
       prepTriedThisAir: false, sideTriedThisAir: false,
+      broken: [], trickCredit: 'none', creditGround: 0,
       takeoffX: x, takeoffY: g.sample.y, takeoffSpeed: 0, leftBy: 'none', fail: null,
     };
   }
 
   /** Copy the private hold-tracking too (used by predictJumpArc and tests). */
   cloneFrom(other: Simulation): void {
-    this.state = { ...other.state };
+    this.state = { ...other.state, broken: [...other.state.broken] };
     this.sideHeld = other.sideHeld ? { ...other.sideHeld } : null;
   }
 
@@ -77,6 +78,7 @@ export class Simulation {
     this.queue = [];
     for (const a of q) this.handle(a);
     const s = this.state;
+    const px = s.x, py = s.y, pmode = s.mode, pGroundX = s.mode === 'grounded' || s.mode === 'heelSkim' ? s.x : NaN;
     switch (s.mode) {
       case 'grounded': case 'heelSkim': this.stepGrounded(); break;
       case 'airborne': this.stepAirborne(); break;
@@ -84,7 +86,73 @@ export class Simulation {
       case 'wallRiding': this.stepWall(); break;
       case 'failed': case 'finished': break;
     }
+    if (s.mode === 'grounded' || s.mode === 'heelSkim') {
+      if (s.trickCredit !== 'none') {
+        s.creditGround += s.x - (isNaN(pGroundX) ? s.x : pGroundX);
+        if (s.creditGround > this.T.obstacles.pillarCreditDistance) s.trickCredit = 'none';
+      }
+    }
+    if (pmode !== 'failed' && pmode !== 'finished' && s.mode !== 'failed') this.checkObstacles(px, py, pmode);
     s.tick++;
+  }
+
+  // ================================================================== obstacles
+
+  /** Swept test of the rider's path this step against every standing obstacle. */
+  private checkObstacles(px: number, py: number, pmode: RiderState['mode']): void {
+    const s = this.state;
+    if (s.mode === 'grinding' || s.mode === 'wallRiding') return; // rails/walls pass over/beside obstacles
+    for (const o of this.course.obstacles) {
+      if (s.broken.includes(o.id)) continue;
+      const x0 = o.x - o.halfWidth, x1 = o.x + o.halfWidth;
+      if (s.x < x0 || px > x1 || s.x <= px) continue;
+      // lowest point of the path while overlapping the obstacle's footprint
+      const yAt = (x: number) => py + ((s.y - py) * (x - px)) / (s.x - px);
+      const lo = Math.min(yAt(Math.max(px, x0)), yAt(Math.min(s.x, x1)));
+      const top = o.baseY + o.height;
+      if (lo >= top) continue; // cleared it
+      if (lo < o.baseY - 0.5 && pmode === 'airborne' && s.mode === 'airborne') continue; // passing below (in a gap)
+      this.resolveObstacle(o, Math.max(px, x0), Math.max(o.baseY, Math.min(top, lo)));
+      if (s.mode === 'failed') return;
+    }
+  }
+
+  private resolveObstacle(o: Obstacle, x: number, y: number): void {
+    const s = this.state, O = this.T.obstacles;
+    const airborne = s.mode === 'airborne';
+    if (o.kind === 'pot') {
+      const heel = s.mode === 'heelSkim' || (airborne && this.isPrepArmed() && s.vy <= 0);
+      if (!heel) {
+        const msg = airborne
+          ? `Clipped a pot in the air (${(o.baseY + o.height - y).toFixed(1)} m too low) — jump earlier, or hold down into the landing to heel-break it`
+          : 'Hit a pot — jump it, or jump and hold down into the landing to break it with your heel';
+        return this.fail({ kind: 'hit-pot', x, y, message: msg });
+      }
+      this.breakObstacle(o, 'heel', O.potBreakRetention, x, y);
+      return;
+    }
+    // pillar
+    if (airborne && s.air === 'flip') return this.fail({ kind: 'hit-pillar', x, y, message: `Hit the pillar mid-flip (${Math.round(s.flip * 100)}%) — finish the flip before you reach it` });
+    if (airborne && (s.air === 'grabLeft' || s.air === 'grabRight')) return this.fail({ kind: 'hit-pillar', x, y, message: 'Hit the pillar still holding the grab — release it before the pillar to break through' });
+    if (s.trickCredit === 'none') {
+      return this.fail({ kind: 'hit-pillar', x, y, message: 'Hit a pillar — break it with an airborne trick first: a completed backflip or a released grab off the jump before it' });
+    }
+    this.breakObstacle(o, s.trickCredit, O.pillarBreakRetention, x, y);
+    s.trickCredit = 'none';
+  }
+
+  private breakObstacle(o: Obstacle, by: 'heel' | 'flip' | 'grab', retention: number, x: number, y: number): void {
+    const s = this.state;
+    s.broken.push(o.id);
+    if (s.mode === 'airborne') { s.vx *= retention; s.vy *= retention; }
+    else { s.speed *= retention; this.syncContactVelocity(); }
+    this.emit({ type: 'break', obstacleId: o.id, kind: o.kind, by, x, y, vx: s.vx, vy: s.vy, speed: s.mode === 'airborne' ? Math.hypot(s.vx, s.vy) : s.speed });
+  }
+
+  private earnCredit(c: 'flip' | 'grab'): void {
+    const s = this.state;
+    s.trickCredit = c; s.creditGround = 0;
+    this.emit({ type: 'credit', credit: c });
   }
 
   // ================================================================== actions
@@ -189,6 +257,7 @@ export class Simulation {
       s.air = 'none';
       this.emit({ type: 'grab-end', side, held: s.contactTime });
       this.resolve(`${side} release`, 'grab released');
+      if (s.contactTime >= this.T.obstacles.grabMinHold) this.earnCredit('grab');
     } else if (s.mode === 'wallRiding' && s.sideStrokeId === strokeId) {
       this.leaveWall('release');
     }
@@ -228,6 +297,7 @@ export class Simulation {
     const s = this.state;
     s.air = 'none'; s.flip = 0; s.flipsThisJump = 0; s.airTime = 0;
     s.prepTriedThisAir = s.prepHeld; s.sideTriedThisAir = false;
+    s.trickCredit = 'none'; s.creditGround = 0; // a pillar needs a trick from the jump before it
   }
 
   private jump(kind: 'ground' | 'coyote' | 'buffered' | 'rail' | 'wall' | 'skim', strokeId: number): void {
@@ -351,7 +421,7 @@ export class Simulation {
     if (!s.prepHeld) s.prepTimer = Math.max(0, s.prepTimer - dt);
     if (s.air === 'flip') {
       s.flip = Math.min(1, s.flip + dt / K.flipDuration);
-      if (s.flip >= 1) { s.air = 'none'; s.flip = 0; this.emit({ type: 'flip-complete', x: s.x, y: s.y }); }
+      if (s.flip >= 1) { s.air = 'none'; s.flip = 0; this.emit({ type: 'flip-complete', x: s.x, y: s.y }); this.earnCredit('flip'); }
     } else if (s.air === 'grabLeft' || s.air === 'grabRight') s.contactTime += dt;
     s.vy -= M.airGravity * dt;
     s.vx -= Math.sign(s.vx) * M.airDrag * s.vx * s.vx * dt;
@@ -453,7 +523,7 @@ export class Simulation {
       return this.fail({ kind: 'landed-grabbing', x, y: sm.y, message: `Landed still holding the ${s.air === 'grabLeft' ? 'left' : 'right'} grab — let go before touchdown` });
     }
     const flipped = s.flipsThisJump > 0;
-    if (s.air === 'flip') this.emit({ type: 'flip-complete', x, y: sm.y }); // absorbed by the landing (within tolerance)
+    if (s.air === 'flip') { this.emit({ type: 'flip-complete', x, y: sm.y }); this.earnCredit('flip'); } // absorbed by the landing (within tolerance)
     const before = Math.hypot(s.vx, s.vy);
     const tangential = s.vx * Math.cos(th) + s.vy * Math.sin(th);
     const impact = Math.max(0, -(-s.vx * Math.sin(th) + s.vy * Math.cos(th)));

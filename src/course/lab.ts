@@ -1,6 +1,7 @@
 import { Course, type Rail, type Surface, type Wall, type Marker, type Vec2 } from './course';
 import { extend, kicker, smooth, easeOut, linear } from './shapes';
 import { mulberry32, randRange } from '../rng';
+import { TUNING } from '../tuning';
 
 /**
  * Movement laboratory (milestones 1-2). An authored route whose dimensions vary
@@ -118,5 +119,21 @@ export function buildLabCourse(seed: number): Course {
   const course = new Course(seed, surfaces, rails, walls, markers, 2, finishX);
   course.markGap(lip2x, 'rail');
   course.markGap(lip3.x, 'wall');
+
+  // --- breakables (brief §8) ---
+  // Pots sit on flat ground with a readable run-up: jump them or heel-break them.
+  // Pillars sit on the landing run of a jump that gives airtime for a trick
+  // (GAP1 off the ramp: room for a backflip; GAP4: a grab), within the credit distance.
+  const O = TUNING.obstacles;
+  const pot = (x: number) => course.addObstacle('pot', x, O.potHalfWidth, O.potHeight);
+  const pillar = (x: number) => course.addObstacle('pillar', x, O.pillarHalfWidth, O.pillarHeight);
+  pot(26 + randRange(rng, -2, 2));
+  markers.push({ x: 18, label: 'POT' });
+  pot(94);
+  pillar(bx + 22);
+  markers.push({ x: bx + 17, label: 'PILLAR · TRICK' });
+  pillar(ex + 22);
+  markers.push({ x: ex + 16, label: 'PILLAR' });
+  pot(ex + 38);
   return course;
 }

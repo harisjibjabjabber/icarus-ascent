@@ -22,6 +22,9 @@ node scripts/screenshot-tricks.mjs   # deterministic grind / wall / flip shots v
 | Wall ride | in the air, swipe right and hold beside a right-hand wall (needs about 7 m/s or more). Release or jump to leave | hold → |
 | Grab | in the air away from a wall, swipe left/right and hold. Release before landing or you fail | hold ← / → |
 | Heel skim | in the air on ordinary ground, swipe down and keep holding into the landing. The board goes onto its heel and you slow more the longer you hold. Release or push to end it | hold ↓ into landing |
+| Pots | low obstacles: jump over them, or break them with your heel (hold down into the landing, or skim into them). Rolling into one or clipping it fails | |
+| Pillars | tall obstacles: break through with a trick on the jump before them, either a completed backflip or a grab held at least 0.12 s and released in the air. The trick's credit lasts 26 m of ground after landing and is cleared by the next takeoff | |
+| Sound | "Sound" button (mute persists) | M |
 | Retry (same seed) | tap or swipe after a fail | R, Enter, ↑ |
 | New run (new seed) | "New run" button | N |
 | Dev overlay | "Dev" button | ` or O (`?dev` in URL) |
