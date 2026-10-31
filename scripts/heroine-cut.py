@@ -16,7 +16,7 @@ def first(m, states, pre=18, post=30, nth=0):
     if len(runs) <= nth: return None
     a, b = runs[nth]; return max(0, a - pre), min(len(m) - 1, b + post)
 clips = {}
-idle = meta('idle'); clips['idle'] = ('idle', 0, len(idle) - 1)
+idle = meta('idle'); clips['idle'] = ('idle', idle[0]['f'], idle[-1]['f'])
 run = meta('run')
 pm = meta('push'); w = first(pm, ['push'], pre=10, post=60)
 if w: clips['push'] = ('push', *w)
@@ -28,9 +28,11 @@ for name, states, kw in [('grab', ['grabL', 'grabR'], {'pre': 30, 'post': 40}),
     else: print('missing', name)
 crash = meta('crash')
 fails = [x['f'] for x in crash if x['mode'] == 'failed']
-if fails: clips['crash-recover'] = ('crash', max(0, fails[0] - 45), len(crash) - 1)
-clips['run-full'] = ('run', 0, len(run) - 1)
+if fails: clips['crash-recover'] = ('crash', max(crash[0]['f'], fails[0] - 45), crash[-1]['f'])
+clips['run-full'] = ('run', run[0]['f'], run[-1]['f'])
+only = sys.argv[2:]
 for name, (sc, a, b) in clips.items():
+    if only and name not in only: continue
     for cam in ('chase', 'side'):
         src = f'{root}/{sc}-{look}/{cam}-%05d.jpg'; base = f'{out}/{look}-{name}-{cam}'
         vf = 'scale=390:844:flags=lanczos'

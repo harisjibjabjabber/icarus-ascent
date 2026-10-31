@@ -1,1 +1,1 @@
-{"idle": ["idle", 0, 199], "push": ["run", 35, 86], "grab": ["run", 280, 355], "backflip": ["run", 228, 315], "grind": ["run", 313, 402], "wallride": ["run", 561, 670], "landing": ["run", 40, 115], "crash-recover": ["crash", 400, 599], "run-full": ["run", 0, 670]}
+{"idle": ["idle", 0, 199], "push": ["push", 49, 139], "grab": ["run", 280, 357], "backflip": ["run", 228, 315], "grind": ["run", 313, 402], "wallride": ["run", 561, 679], "landing": ["run", 40, 118], "crash-recover": ["crash", 400, 610], "run-full": ["run", 0, 679]}
