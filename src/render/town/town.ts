@@ -25,7 +25,18 @@ export const TOWN = {
 
 export interface GroundSample { y: number; gap: boolean }
 export type GroundFn = (x: number) => GroundSample;
-export interface ChunkOpts { harbourFrom?: number; finish?: number; clockTowers?: number[]; endless?: boolean }
+export interface ChunkOpts {
+  /** Opening course: quay from this route x on (chunk start >= this). */
+  harbourFrom?: number;
+  /**
+   * Endless: true where this route x is inside a harbour zone span. Supports the town → harbour →
+   * town loop. A chunk is one or the other (its midpoint), so the switch is a chunk edge.
+   */
+  harbourAt?: (x: number) => boolean;
+  finish?: number;
+  clockTowers?: number[];
+  endless?: boolean;
+}
 export interface TownChunk { near: THREE.BufferGeometry | null; far: THREE.BufferGeometry | null; y0: number; trisNear: number; trisFar: number }
 
 const lin = (h: string) => new THREE.Color(h);
@@ -210,7 +221,7 @@ function* townChunkSteps(kit: Kit, k: number, seed: number, ground: GroundFn, op
   const P = new Placer(x0, y0);
   const near = new MergeBuffer(), far = new MergeBuffer();
   const pick = <V>(a: V[]) => a[Math.floor(rng() * a.length)];
-  const harbour = opts.harbourFrom !== undefined && x0 >= opts.harbourFrom;
+  const harbour = opts.harbourAt ? opts.harbourAt(x0 + L / 2) : opts.harbourFrom !== undefined && x0 >= opts.harbourFrom;
   // pavement/canal ribbons (both LODs share: put in far, near copies)
   const ribs: [THREE.BufferGeometry, number][] = [];
   const pv = new THREE.Vector3();
@@ -285,32 +296,51 @@ function* townChunkSteps(kit: Kit, k: number, seed: number, ground: GroundFn, op
     if (s === 1 && harbour) continue;
     const g = ground(x); if (g.gap) continue;
     near.piece(kit, 'lantern', P.at(x, g.y - 0.14, s * (T.front - 0.5), 0).multiply(_m.makeScale(1.7, 1.7, 1.7)));
-    if (rng() < 0.35) near.piece(kit, rng() < 0.5 ? 'barrel' : 'crate', P.at(x + 1.6, g.y - 0.14, s * (T.front - 0.7), rng() * 6).multiply(_m.makeScale(0.6, 0.6, 0.6)));
+    // crates and barrels read as the breakable obstacles. Keep them off the harbour pavement;
+    // the quay's few boats are the decoration, and they sit out on the water.
+    const clutter = rng();
+    if (!harbour && clutter < 0.35) near.piece(kit, rng() < 0.5 ? 'barrel' : 'crate', P.at(x + 1.6, g.y - 0.14, s * (T.front - 0.7), rng() * 6).multiply(_m.makeScale(0.6, 0.6, 0.6)));
     yield;
   }
   if (!harbour && rng() < 0.75) { const x = x0 + 8 + rng() * (L - 16), g = level(ground, x); laundry(near, P, x, g + 6.4, rng); laundry(far, P, x, g + 6.4, rng); }
   if (!harbour && rng() < 0.3) { const x = x0 + 10 + rng() * 20, g = ground(x); if (!g.gap) near.piece(kit, rng() < 0.5 ? 'stallRed' : 'stallGreen', P.at(x, g.y - 0.14, -(T.front - 0.9), TO_RIGHT).multiply(_m.makeScale(1.6, 1.6, 1.6))); }
-  if (harbour) harbourChunk(kit, near, far, P, x0, x1, ground, rng);
+  if (harbour) yield* harbourChunk(kit, near, far, P, x0, x1, ground);
   const gn = yield* near.buildSteps();
   const gf = yield* far.buildSteps();
   return { near: gn, far: gf, y0, trisNear: near.triangles, trisFar: far.triangles };
 }
 
-/** Harbour (bottom of the hill, right side): stone quay, docks, rowing boats and a ship on the sea. */
-function harbourChunk(kit: Kit, near: MergeBuffer, far: MergeBuffer, P: Placer, x0: number, x1: number, ground: GroundFn, rng: () => number): void {
+/**
+ * Harbour quay, right side only. The stone face runs the whole chunk (the edge you read).
+ * Props are a fixed pattern on the chunk index, not a scatter: most chunks are open water,
+ * every 200 m a ship, and between those a single dock with one boat moored parallel to the quay.
+ * Gameplay pots and pillars stay on the street; nothing wooden sits on the pavement.
+ */
+function* harbourChunk(kit: Kit, near: MergeBuffer, far: MergeBuffer, P: Placer, x0: number, x1: number, ground: GroundFn): Generator<void, void> {
   const T = TOWN;
-  for (let x = x0; x < x1; x += 4) {
+  const k = Math.round(x0 / T.chunk);
+  for (let x = x0, n = 0; x < x1; x += 4, n++) {
     const g = level(ground, x + 2);
-    for (const mb of [near, far]) box(mb, P.at(x + 2, g, T.front + 1, ROUTE_YAW), 4.1, 9, 2, 0, -4.6, 0, T.stoneShade, T.stone, TEX.RUBBLE); // quay wall
+    for (const mb of [near, far]) box(mb, P.at(x + 2, g, T.front + 1, ROUTE_YAW), 4.1, 9, 2, 0, -4.6, 0, T.stoneShade, T.stone, TEX.RUBBLE);
+    if (n % 2 === 1) yield;
   }
-  const seaY = level(ground, x0) - 8.6;
-  for (let x = x0 + 3; x < x1; x += 9 + rng() * 6) {
-    const dm = P.at(x, seaY + 0.4, T.front + 5 + rng() * 3, TO_LEFT).multiply(_m.makeScale(1.6, 1.6, 1.6));
-    near.piece(kit, 'dock', dm); far.piece(kit, 'dock', dm);
-    const bm = P.at(x + 3, seaY - 0.1, T.front + 10 + rng() * 14, rng() * 6).multiply(_m.makeScale(1.4, 1.4, 1.4));
-    near.piece(kit, rng() < 0.5 ? 'boatSmall' : 'boatLarge', bm); far.piece(kit, 'boatSmall', bm);
+  const seaY = level(ground, x0 + T.chunk / 2) - 8.6;
+  const slot = ((k % 5) + 5) % 5;
+  const edge = T.front + 1;
+  if (slot === 0) {
+    // one sail out in the channel, bow along the route, so it reads as a silhouette rather than a pile
+    const sm = P.at(x0 + 22, seaY - 0.35, edge + 24, ROUTE_YAW).multiply(_m.makeScale(1.5, 1.5, 1.5));
+    near.piece(kit, 'ship', sm); far.piece(kit, 'ship', sm);
+    yield;
+  } else if (slot === 2 || slot === 4) {
+    const x = x0 + 18;
+    const dock = P.at(x, seaY + 0.35, edge + 5.2, TO_LEFT).multiply(_m.makeScale(1.25, 1.25, 1.25));
+    near.piece(kit, 'dock', dock); far.piece(kit, 'dock', dock);
+    const boat = slot === 4 ? 'boatLarge' : 'boatSmall';
+    const bm = P.at(x + 1.4, seaY - 0.05, edge + 10.5, ROUTE_YAW).multiply(_m.makeScale(1.1, 1.1, 1.1));
+    near.piece(kit, boat, bm); far.piece(kit, 'boatSmall', bm);
+    yield;
   }
-  if (rng() < 0.5) { const sm = P.at(x0 + 20, seaY - 0.5, T.front + 40, TO_LEFT + 0.6).multiply(_m.makeScale(1.8, 1.8, 1.8)); near.piece(kit, 'ship', sm); far.piece(kit, 'ship', sm); }
 }
 
 /** Clock tower: 4x4 plaster tower of six storeys, tower roof, a painted clock face toward the approaching rider. */

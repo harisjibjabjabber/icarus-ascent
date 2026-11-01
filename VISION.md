@@ -29,7 +29,7 @@ Each area runs 1.5 to 2 km and ends at a gate set piece where the next area cros
 | Area | Look | Movement features | Time of day | Status |
 |---|---|---|---|---|
 | Old town | Warm terracotta, cream plaster, teal shutters | Pots, signs, handrails, garden walls | Morning | Built |
-| Harbour and cliffs | Turquoise sea, sandstone quay, white sails | Canal wall runs, pier gaps, rope rails, cliff updrafts | Late morning | Part built |
+| Harbour and cliffs | Turquoise sea, sandstone quay, white sails | Canal wall runs, pier gaps, rope rails, cliff updrafts | Late morning | Quay stretch is the endless zone after the town (1.6 km, then it loops). Cliffs and updrafts are not started |
 | Ghibli hills | Lime grass, wildflowers, big cumulus, soft gold | Fence rails, hay bales, windmill-sail rail, rolling crests | Golden hour | Mocked |
 | Forest | Deep greens, moss, god-rays, fireflies | Log rails, fallen-trunk gaps, bounce mushrooms, tree-trunk wall runs | Dusk | Not started |
 | Castle | Slate and blue stone, banners, lanterns, moon | Battlement rails, bridge gaps, portcullis spell gates, wall-run zigzags | Night | Not started |

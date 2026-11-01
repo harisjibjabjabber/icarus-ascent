@@ -13,7 +13,7 @@ export interface Trace {
   seed: number;
   /** Checkpoint start (opening retries), if not the course start. */
   start?: { x: number; speed: number };
-  /** Endless zone order the run was generated with (absent in older traces: the default order). */
+  /** Endless zone order the run was generated with. Absent on older traces: those replay town-only, not today's default (town then harbour). */
   zones?: string[];
   entries: { tick: number; action: Action }[];
   endTick: number;

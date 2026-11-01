@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { Course, Vec2 } from '../course/course';
+import type { EndlessCourse } from '../course/endless';
 import type { RiderState, SimEvent } from '../sim/types';
 import { CameraRig } from './cameraRig';
 import { CourseView } from './courseView';
@@ -275,11 +276,17 @@ export class GameView {
       if (!streamed && x > course.finishX - 0.5) return { y: endY, gap: false };
       const g = course.groundBelow(x, 1e6); return g ? { y: g.sample.y, gap: false } : { y: heightAt(x), gap: true };
     };
-    // opening: the course says where its harbour begins (big-jump landing); one clock tower over the old town the
-    // tutorial rolls through, one marking the way down into the harbour
-    const harbourFrom = streamed ? undefined : course.harbourX ?? Math.floor((course.finishX - 220) / 40) * 40;
+    // opening: the course says where its harbour begins (big-jump landing). Endless: each harbour zone
+    // span (town, then harbour, looping) is a quay. Chunks are born as one or the other and stream in
+    // with the same slice budget; the floating origin shifts the chunk group, props included.
+    let harbourFrom: number | undefined;
+    let harbourAt: ((x: number) => boolean) | undefined;
+    if (streamed) {
+      const ec = course as EndlessCourse;
+      harbourAt = (x) => ec.zones.zoneAt(x - ec.originX).theme.scenery === 'harbour';
+    } else harbourFrom = course.harbourX ?? Math.floor((course.finishX - 220) / 40) * 40;
     const towers = streamed ? Array.from({ length: 200 }, (_, i) => 520 + i * 900) : [harbourFrom! * 0.45, harbourFrom! - 50];
-    this.env.buildScenery(course.seed, course.finishX, heightAt, minY, streamed, groundAt, { harbourFrom, clockTowers: towers, endless: streamed });
+    this.env.buildScenery(course.seed, course.finishX, heightAt, minY, streamed, groundAt, { harbourFrom, harbourAt, clockTowers: towers, endless: streamed });
     this.env.streamScenery(course.startX, streamed ? (course as unknown as { generatedTo: number }).generatedTo : Infinity);
   }
 

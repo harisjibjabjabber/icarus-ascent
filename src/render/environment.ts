@@ -521,8 +521,11 @@ export class Environment {
   }
   private dropTown(v: TownView): void { this.group.remove(v.group); v.near?.geometry.dispose(); v.far?.geometry.dispose(); v.nearMat.dispose(); v.farMat.dispose(); }
 
-  /** Opening course: open sea on the right from the harbour on (no hill/blocks standing in the water). */
-  private seaRight(x: number): boolean { return this.townOpts.harbourFrom !== undefined && x >= this.townOpts.harbourFrom - 30; }
+  /** Open sea on the right inside a harbour span (no hill blocks standing in the water). Opening starts 30 m early. */
+  private seaRight(x: number): boolean {
+    if (this.townOpts.harbourAt) return this.townOpts.harbourAt(x);
+    return this.townOpts.harbourFrom !== undefined && x >= this.townOpts.harbourFrom - 30;
+  }
 
   /** Distant hillside: impostor blocks (box + hip roof) on terraces rising to the left, a few dropping toward the sea on the right. */
   private buildSegment(k: number): THREE.Mesh | null {

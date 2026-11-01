@@ -1,11 +1,16 @@
 import type { Zone } from './zone';
 import { TOWN } from './town';
+import { HARBOUR } from './harbour';
 import { HILLS } from './hills';
 
-export const ZONES: Record<string, Zone> = { town: TOWN, hills: HILLS };
+export const ZONES: Record<string, Zone> = { town: TOWN, harbour: HARBOUR, hills: HILLS };
 
-/** Default endless zone order. Experimental zones join only by URL. */
-export const DEFAULT_ZONES = ['town'];
+/**
+ * Default endless zone order: old town, then the harbour, then it loops.
+ * Experimental zones (hills) join only by URL. Traces recorded before zones were
+ * stored replay town-only; see EndlessCourse / buildCourseFor.
+ */
+export const DEFAULT_ZONES = ['town', 'harbour'];
 
 /** `?zones=town,hills` sets the order (it loops); `?zone=hills` starts in the town and goes to that zone. */
 export function zonesFromSearch(search: string): string[] {

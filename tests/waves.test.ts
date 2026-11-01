@@ -105,14 +105,20 @@ describe('waves', () => {
 });
 
 describe('zone sequencing', () => {
-  it('the default run is the town only, with no gates; experimental zones join only by URL', () => {
-    expect(DEFAULT_ZONES).toEqual(['town']);
-    expect(zonesFromSearch('')).toEqual(['town']);
+  it('the shipped endless order is town then harbour; experimental zones join only by URL', () => {
+    expect(DEFAULT_ZONES).toEqual(['town', 'harbour']);
+    expect(zonesFromSearch('')).toEqual(['town', 'harbour']);
+    expect(zonesFromSearch('?zones=town')).toEqual(['town']);
+    expect(zonesFromSearch('?zone=harbour')).toEqual(['town', 'harbour']);
     expect(zonesFromSearch('?zone=hills')).toEqual(['town', 'hills']);
     expect(zonesFromSearch('?zones=hills,town')).toEqual(['hills', 'town']);
-    expect(zonesFromSearch('?zones=nope')).toEqual(['town']);
+    expect(zonesFromSearch('?zones=nope')).toEqual(['town', 'harbour']);
     for (const id of DEFAULT_ZONES) expect(ZONES[id].experimental).toBeFalsy();
+    // no zone list (old traces, the constructor default) stays the town-only route, so those replays do not move
     expect(generate(5, 6000).every((c) => c.zone === 'town' && !c.gate)).toBe(true);
+    const shipped = generate(5, 8000, DEFAULT_ZONES);
+    expect(shipped.some((c) => c.zone === 'harbour' && c.gate?.to === 'harbour')).toBe(true);
+    expect(shipped.some((c) => c.zone === 'town' && c.gate?.from === 'harbour')).toBe(true);
   });
 
   it("zones change only at wave ends, through one gate chunk each, and every chunk uses its zone's phrases", () => {
