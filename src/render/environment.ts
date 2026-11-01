@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { mulberry32 } from '../rng';
 import { toon, ART, ART_UNIFORMS } from './materials';
 import { TOD_UNIFORMS, type TimeOfDay } from './timeOfDay';
@@ -7,7 +8,7 @@ import { toScene, toSceneRaw, ORIGIN, ROUTE_DIR, ROUTE_RIGHT, ROUTE_YAW } from '
 import { GeoBuilder, blob } from './geo';
 import type { Quality } from './quality';
 import { Kit, townMaterial, TOWN_DETAIL, TOWN_TEX, TEX_WRAP, detailArray, type TownMaterial } from './town/kit';
-import { buildTownChunk, TOWN, TOWN_LOD as TOWN_GEO, type GroundFn, type ChunkOpts } from './town/town';
+import { startTownChunk, TOWN, TOWN_LOD as TOWN_GEO, type GroundFn, type ChunkOpts, type TownChunk, type TownChunkBuild } from './town/town';
 
 /**
  * Environment: the witch town (Kiki-style seaside town on a hill). Layers, back to front:
@@ -166,6 +167,12 @@ export function townFade(d: number, age: number): { near: [number, number]; far:
 
 /** The toon rim colour as shipped (time of day scales ART.rimColor, the uniform every toon material shares). */
 const RIM_BASE = ART.rimColor.clone();
+/**
+ * Mesh work per streamed frame (ms). A town chunk is ~40-65 ms and a hillside segment ~8 ms; sliced at this budget
+ * they finish while still in the haze (town streams 480 m ahead) instead of hitching the frame that needs them.
+ * `0` forces a single slice per call (tests).
+ */
+export const SCENERY_SLICE_MS = 2;
 
 export class Environment {
   readonly group = new THREE.Group();
@@ -189,6 +196,16 @@ export class Environment {
   private segs = new Map<number, THREE.Mesh>();
   private town = new Map<number, TownView>();
   private kit: Kit | null = null;
+  /** In-progress town chunk (new, or a roof-set rebuild that keeps its dissolve age). */
+  private townJob: { k: number; build: TownChunkBuild; born: number | null } | null = null;
+  /** In-progress distant hillside segment. */
+  private segJob: { k: number; gen: Generator<void, THREE.Mesh | null> } | null = null;
+  /** Per-frame budget for `townJob` / `segJob`. See `SCENERY_SLICE_MS`. */
+  sliceMs = SCENERY_SLICE_MS;
+  private readonly puffM = new THREE.Matrix4();
+  private readonly puffQ = new THREE.Quaternion();
+  private readonly puffS = new THREE.Vector3();
+  private readonly puffP = new THREE.Vector3();
   private sceneryMat = toon('#ffffff', { vertexColors: true, sway: true, rim: 0.6 });
   static readonly SEG = 200;
   /** Town streaming window: see TOWN_LOD. */
@@ -269,6 +286,8 @@ export class Environment {
     this.kit = k;
     for (const v of this.town.values()) this.dropTown(v);
     this.town.clear();
+    this.townJob = null;
+    this.segJob = null;
     this.lastX = NaN;
   }
   get kitReady(): boolean { return !!this.kit; }
@@ -333,6 +352,8 @@ export class Environment {
     this.seaBase = follow ? Infinity : minY - 9;
     this.seaY = follow ? heightAt(0) - 45 : this.seaBase;
     this.sea.position.y = this.seaY;
+    this.townJob = null;
+    this.segJob = null;
     this.lastX = NaN;
   }
 
@@ -374,31 +395,107 @@ export class Environment {
     const S = Environment.SEG;
     const lo = Math.floor((x - 300) / S), hi = Math.floor((Math.min(x + 1300, maxX) - S) / S);
     for (const [k, g] of this.segs) if (k < lo || k > hi) { this.group.remove(g); g.geometry.dispose(); this.segs.delete(k); }
-    for (let k = lo; k <= hi; k++) if (!this.segs.has(k)) { const g = this.buildSegment(k); if (g) { this.segs.set(k, g); this.group.add(g); } }
-    // town chunks: at most one new chunk per call (spreads the merge cost over frames)
+    if (this.segJob && (this.segJob.k < lo || this.segJob.k > hi)) this.segJob = null;
+    const first = Number.isNaN(this.lastX);
+    // the load veil is up: fill the whole window now so the start view doesn't pop
+    if (first) {
+      for (let k = lo; k <= hi; k++) if (!this.segs.has(k)) { const g = this.buildSegment(k); if (g) { this.segs.set(k, g); this.group.add(g); } }
+      this.fillTownSync(x, maxX);
+      this.lastX = x;
+      return;
+    }
+    if (this.kit) {
+      const L = TOWN.chunk, T = Environment.TOWN;
+      const tlo = Math.floor((x - T.behind) / L), thi = Math.floor((Math.min(x + T.ahead, maxX + 20)) / L);
+      for (const [k, v] of this.town) if (k < tlo || k > thi) { this.dropTown(v); this.town.delete(k); }
+      if (this.townJob && (this.townJob.k < tlo || this.townJob.k > thi)) this.townJob = null;
+      this.pumpTown(x, tlo, thi);
+    }
+    this.pumpSegments(x, lo, hi);
+    this.lastX = x;
+  }
+
+  /** First view: build every town chunk in the window synchronously (nothing is on screen yet). */
+  private fillTownSync(x: number, maxX: number): void {
     if (!this.kit) return;
     const L = TOWN.chunk, T = Environment.TOWN;
     const tlo = Math.floor((x - T.behind) / L), thi = Math.floor((Math.min(x + T.ahead, maxX + 20)) / L);
-    for (const [k, v] of this.town) if (k < tlo || k > thi) { this.dropTown(v); this.town.delete(k); }
-    let built = 0;
-    const order: number[] = [];
-    for (let k = tlo; k <= thi; k++) if (!this.town.has(k)) order.push(k);
-    order.sort((a, b) => Math.abs(a * L + L / 2 - x) - Math.abs(b * L + L / 2 - x));
-    const first = Number.isNaN(this.lastX);
-    for (const k of order) {
-      if (built >= (first ? 99 : 1)) break;
-      this.town.set(k, this.buildTown(k)); built++;
+    for (let k = tlo; k <= thi; k++) if (!this.town.has(k)) this.town.set(k, this.buildTown(k));
+  }
+
+  /** Continue the current town chunk, or start the nearest missing one (else one stale-roof rebuild). Bounded by `sliceMs`. */
+  private pumpTown(x: number, tlo: number, thi: number): void {
+    const t0 = performance.now();
+    let worked = false;
+    const over = () => worked && performance.now() - t0 >= this.sliceMs;
+    while (!over()) {
+      if (!this.townJob) {
+        const next = this.pickTownJob(x, tlo, thi);
+        if (!next) return;
+        this.townJob = { k: next.k, born: next.born, build: startTownChunk(this.kit!, next.k, this.seed, this.groundAt, this.townOpts) };
+      }
+      worked = true;
+      const left = Math.max(0, this.sliceMs - (performance.now() - t0));
+      const chunk = this.townJob.build.pump(left);
+      if (!chunk) return;
+      this.commitTown(chunk);
     }
-    if (built === 0) {
-      // roof set changed (tier switch): swap one stale chunk per call, nearest first, keeping its age (no re-dissolve)
-      let stale: number | null = null, best = Infinity;
-      for (const [k, v] of this.town) { const d = Math.abs(k * L + L / 2 - x); if (v.gen !== this.roofGen && d < best) { best = d; stale = k; } }
-      if (stale !== null) {
-        const old = this.town.get(stale)!, v = this.buildTown(stale);
-        v.born = old.born; this.dropTown(old); this.town.set(stale, v);
+  }
+
+  private pickTownJob(x: number, tlo: number, thi: number): { k: number; born: number | null } | null {
+    const L = TOWN.chunk;
+    let best: number | null = null, bd = Infinity;
+    for (let k = tlo; k <= thi; k++) if (!this.town.has(k)) {
+      const d = Math.abs(k * L + L / 2 - x);
+      if (d < bd) { bd = d; best = k; }
+    }
+    if (best !== null) return { k: best, born: null };
+    // roof set changed (tier switch): rebuild one stale chunk, nearest first, keeping its dissolve age
+    let stale: number | null = null, sb = Infinity;
+    for (const [k, v] of this.town) {
+      const d = Math.abs(k * L + L / 2 - x);
+      if (v.gen !== this.roofGen && d < sb) { sb = d; stale = k; }
+    }
+    return stale === null ? null : { k: stale, born: this.town.get(stale)!.born };
+  }
+
+  private commitTown(chunk: TownChunk): void {
+    const job = this.townJob!;
+    this.townJob = null;
+    const old = this.town.get(job.k);
+    const v = this.makeTownView(job.k, chunk);
+    if (old) { v.born = job.born ?? old.born; this.dropTown(old); }
+    this.town.set(job.k, v);
+  }
+
+  /** One hillside segment at a time, same frame budget as the town (shared: town goes first). */
+  private pumpSegments(x: number, lo: number, hi: number): void {
+    const t0 = performance.now();
+    let worked = false;
+    const over = () => worked && performance.now() - t0 >= this.sliceMs;
+    while (!over()) {
+      if (!this.segJob) {
+        let best: number | null = null, bd = Infinity;
+        for (let k = lo; k <= hi; k++) if (!this.segs.has(k)) {
+          const d = Math.abs((k + 0.5) * Environment.SEG - x);
+          if (d < bd) { bd = d; best = k; }
+        }
+        if (best === null) return;
+        this.segJob = { k: best, gen: this.segmentSteps(best) };
+      }
+      worked = true;
+      const left = Math.max(0, this.sliceMs - (performance.now() - t0));
+      const t1 = performance.now();
+      for (;;) {
+        const n = this.segJob.gen.next();
+        if (n.done) {
+          if (n.value) { this.segs.set(this.segJob.k, n.value); this.group.add(n.value); }
+          this.segJob = null;
+          break;
+        }
+        if (performance.now() - t1 >= left) return;
       }
     }
-    this.lastX = x;
   }
 
   get segmentCount(): number { return this.segs.size; }
@@ -407,7 +504,10 @@ export class Environment {
   townTris(): number { let t = 0; for (const v of this.town.values()) t += (v.near?.visible ? v.tris[0] : 0) + (v.far?.visible ? v.tris[1] : 0); return t; }
 
   private buildTown(k: number): TownView {
-    const c = buildTownChunk(this.kit!, k, this.seed, this.groundAt, this.townOpts);
+    const c = startTownChunk(this.kit!, k, this.seed, this.groundAt, this.townOpts).pump(1e9)!;
+    return this.makeTownView(k, c);
+  }
+  private makeTownView(k: number, c: TownChunk): TownView {
     const group = new THREE.Group();
     const nearMat = townMaterial(), farMat = townMaterial();
     const mk = (g: THREE.BufferGeometry | null, mat: TownMaterial) => { if (!g) return null; const m = new THREE.Mesh(g, mat); m.receiveShadow = true; m.castShadow = this.townShadows; m.visible = false; group.add(m); return m; };
@@ -426,8 +526,15 @@ export class Environment {
 
   /** Distant hillside: impostor blocks (box + hip roof) on terraces rising to the left, a few dropping toward the sea on the right. */
   private buildSegment(k: number): THREE.Mesh | null {
+    const gen = this.segmentSteps(k);
+    for (;;) { const n = gen.next(); if (n.done) return n.value; }
+  }
+  private *segmentSteps(k: number): Generator<void, THREE.Mesh | null> {
     const S = Environment.SEG, E = ENV_STYLE;
     const b = new GeoBuilder();
+    const acc: THREE.BufferGeometry[] = [];
+    // merge a handful of boxes at a time: one mergeGeometries of the whole segment was an ~8 ms hitch
+    const take = () => { if (b.size >= 16) { const g = b.build(); if (g) acc.push(g); } };
     const rng = mulberry32((this.seed ^ 0x5eed ^ Math.imul(k + 1000003, 0x2545f491)) >>> 0);
     const x0 = k * S, x1 = x0 + S;
     // hill ground (left: rises; right: a short slope down to the shore)
@@ -435,6 +542,8 @@ export class Environment {
       const y = this.heightAt(x + 10);
       for (let r = 0; r < 4; r++) b.add(new THREE.BoxGeometry(20.5, 4, 24), toScene(x + 10, y + r * 6.5 - 0.6, -(32 + r * 22 + 8)), E.hill, { top: E.hillTop, rot: [0, ROUTE_YAW, 0] });
       if (!this.seaRight(x + 10)) b.add(new THREE.BoxGeometry(20.5, 4, 40), toScene(x + 10, y - 5, 46), E.hill, { top: E.hillTop, rot: [0, ROUTE_YAW, 0] });
+      take();
+      yield;
     }
     for (let x = x0 + rng() * 6; x < x1; x += 5 + rng() * 5) {
       for (let row = 0; row < 5; row++) {
@@ -449,9 +558,15 @@ export class Environment {
         b.add(new THREE.ConeGeometry(Math.max(w, d) * 0.72, 2.2, 4, 1), [p.x, p.y + h / 2 + 1.1, p.z], E.blockRoof, { top: E.blockRoofTop, rot: [0, Math.PI / 4, 0], scale: [w / Math.max(w, d), 1, d / Math.max(w, d)] });
         if (rng() < 0.18) { const th = 6 + rng() * 5; b.add(new THREE.ConeGeometry(0.9, th, 6, 1), [p.x + w * 0.7, ground + th / 2, p.z], E.cypress, { top: E.cypressTop, sway: 0.6 }); }
       }
+      take();
+      yield;
     }
-    const g = b.build();
+    const tail = b.build(); if (tail) acc.push(tail);
+    yield;
+    if (!acc.length) return null;
+    const g = acc.length === 1 ? acc[0] : mergeGeometries(acc, false);
     if (!g) return null;
+    if (acc.length > 1) for (const p of acc) p.dispose();
     const m = new THREE.Mesh(g, this.sceneryMat);
     m.frustumCulled = true;
     return m;
@@ -492,7 +607,7 @@ export class Environment {
     const arr = TOWN_TEX.tex.value, arrReady = !!(arr && TOWN_TEX.enabled && this.renderer && this.renderer.properties.get(arr) && (this.renderer.properties.get(arr) as { __webglTexture?: unknown }).__webglTexture);
     TOWN_TEX.on.value = arrReady ? Math.min(1, TOWN_TEX.on.value + 0.05) : 0;
     const seaRoute = this.sea.position.y + ORIGIN.y;
-    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3();
+    const m = this.puffM, q = this.puffQ, s = this.puffS, p = this.puffP;
     const t = ART_UNIFORMS.uTime.value;
     for (let i = 0; i < this.puffs.count; i++) {
       const d = this.puffData[i];

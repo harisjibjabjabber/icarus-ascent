@@ -126,17 +126,30 @@ export class MergeBuffer {
     for (let i = 0; i < ni; i++) this.idx[this.ni + i] = (I ? I.getX(i) : i) + base;
     this.nv += P.count; this.ni += ni;
   }
-  build(): THREE.BufferGeometry | null {
+  /** One attribute copy (or the bounds pass) per step, so a chunk's final merge doesn't land in a single frame. */
+  *buildSteps(): Generator<void, THREE.BufferGeometry | null> {
     if (!this.ni) return null;
     const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.BufferAttribute(this.pos.slice(0, this.nv * 3), 3));
-    g.setAttribute('normal', new THREE.BufferAttribute(this.nrm.slice(0, this.nv * 3), 3));
-    g.setAttribute('color', new THREE.BufferAttribute(this.col.slice(0, this.nv * 3), 3));
-    g.setAttribute('tuv', new THREE.BufferAttribute(this.uv.slice(0, this.nv * 2), 2));
-    g.setAttribute('tl', new THREE.BufferAttribute(this.tl.slice(0, this.nv), 1));
-    g.setIndex(new THREE.BufferAttribute(this.nv > 65535 ? this.idx.slice(0, this.ni) : new Uint16Array(this.idx.subarray(0, this.ni)), 1));
+    const attr = (src: Float32Array, n: number, size: number) => new THREE.BufferAttribute(src.slice(0, n), size);
+    g.setAttribute('position', attr(this.pos, this.nv * 3, 3));
+    yield;
+    g.setAttribute('normal', attr(this.nrm, this.nv * 3, 3));
+    yield;
+    g.setAttribute('color', attr(this.col, this.nv * 3, 3));
+    yield;
+    g.setAttribute('tuv', attr(this.uv, this.nv * 2, 2));
+    yield;
+    g.setAttribute('tl', attr(this.tl, this.nv, 1));
+    yield;
+    const index = this.nv > 65535 ? this.idx.slice(0, this.ni) : new Uint16Array(this.idx.subarray(0, this.ni));
+    g.setIndex(new THREE.BufferAttribute(index, 1));
+    yield;
     g.computeBoundingSphere();
     return g;
+  }
+  build(): THREE.BufferGeometry | null {
+    const gen = this.buildSteps();
+    for (;;) { const n = gen.next(); if (n.done) return n.value; }
   }
 }
 

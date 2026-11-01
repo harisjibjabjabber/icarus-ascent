@@ -24,6 +24,16 @@ import type { SimEvent } from './sim/types';
 import { MAX_LIVES, newRunState, loseLife, retryCostsLife, updateBest, endRun, buildResume, parseResume, applyRunResume, type Checkpoint } from './score/run';
 import { waveAt } from './course/waves';
 
+/**
+ * Real frame delta in seconds. A hitch is clamped so the sim can't spiral, and a backwards
+ * timestamp (a duplicate or reordered rAF time) contributes nothing: a negative delta used to
+ * drive the interpolation accumulator backwards and yank the rider.
+ */
+export function frameDt(now: number, last: number): number {
+  if (!last) return 1 / 60;
+  return Math.min(0.1, Math.max(0, (now - last) / 1000));
+}
+
 type Mode = 'opening' | 'endless' | 'lab';
 const NEXT_MODE: Record<Mode, Mode> = { opening: 'endless', endless: 'lab', lab: 'opening' };
 const MODE_LABEL: Record<Mode, string> = { opening: 'Course', endless: 'Endless', lab: 'Lab' };
@@ -505,7 +515,7 @@ export class Game {
 
   frame(now: number): void {
     if (this.paused) return;
-    const dtReal = this.lastFrame ? Math.min(0.1, (now - this.lastFrame) / 1000) : 1 / 60;
+    const dtReal = frameDt(now, this.lastFrame);
     this.lastFrame = now;
     this.fps += (1 / Math.max(dtReal, 1e-3) - this.fps) * 0.05;
     const dt = TUNING.sim.dt;

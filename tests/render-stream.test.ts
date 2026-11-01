@@ -72,4 +72,18 @@ describe('render streaming (headless three.js objects)', () => {
     for (let x = 0; x < 20000; x += 25) { env.streamScenery(x); max = Math.max(max, env.segmentCount); }
     expect(max).toBeLessThanOrEqual(10);
   });
+
+  it('spreads a new hillside segment across calls instead of building it in one', () => {
+    const env = new Environment(new THREE.Scene());
+    env.buildScenery(3, Infinity, () => 0, 0, true);
+    env.streamScenery(0);
+    const n0 = env.segmentCount;
+    env.sliceMs = 0;
+    env.streamScenery(200); // drops the segment behind and starts the next one
+    expect(env.segmentCount).toBeLessThan(n0);
+    let calls = 0;
+    while (env.segmentCount < n0 && calls++ < 80) env.streamScenery(200);
+    expect(env.segmentCount).toBe(n0);
+    expect(calls).toBeGreaterThan(3);
+  });
 });

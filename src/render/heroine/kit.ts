@@ -161,7 +161,8 @@ export function upperBodyOnly(clip: THREE.AnimationClip, rig: RigInfo): THREE.An
 // ---- analytic two-bone IK (world space), from the proven spike ----
 const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _c = new THREE.Vector3(), _t = new THREE.Vector3();
 const _ac = new THREE.Vector3(), _ab = new THREE.Vector3(), _ba = new THREE.Vector3(), _bc = new THREE.Vector3(), _at = new THREE.Vector3();
-const _ax0 = new THREE.Vector3(), _ax1 = new THREE.Vector3();
+const _ax0 = new THREE.Vector3(), _ax1 = new THREE.Vector3(), _u = new THREE.Vector3(), _wn = new THREE.Vector3();
+const _nSpare = new THREE.Quaternion();
 const _qa = new THREE.Quaternion(), _qb = new THREE.Quaternion(), _qp = new THREE.Quaternion();
 const _r0 = new THREE.Quaternion(), _r1 = new THREE.Quaternion(), _r2 = new THREE.Quaternion(), _n1 = new THREE.Quaternion(), _n2 = new THREE.Quaternion();
 const clampDot = (u: THREE.Vector3, v: THREE.Vector3) => Math.acos(THREE.MathUtils.clamp(u.dot(v), -1, 1));
@@ -179,9 +180,9 @@ export function solveTwoBone(upper: THREE.Object3D, lower: THREE.Object3D, end: 
   _at.copy(_t).sub(_a);
   const lat = THREE.MathUtils.clamp(_at.length(), 0.01, lab + lcb - 0.001);
   _ac.copy(_c).sub(_a); _ab.copy(_b).sub(_a); _ba.copy(_a).sub(_b); _bc.copy(_c).sub(_b);
-  const acab0 = clampDot(_ac.clone().normalize(), _ab.clone().normalize());
-  const babc0 = clampDot(_ba.clone().normalize(), _bc.clone().normalize());
-  const acat0 = clampDot(_ac.clone().normalize(), _at.clone().normalize());
+  const acab0 = clampDot(_u.copy(_ac).normalize(), _wn.copy(_ab).normalize());
+  const babc0 = clampDot(_u.copy(_ba).normalize(), _wn.copy(_bc).normalize());
+  const acat0 = clampDot(_u.copy(_ac).normalize(), _wn.copy(_at).normalize());
   const acab1 = Math.acos(THREE.MathUtils.clamp((lcb * lcb - lab * lab - lat * lat) / (-2 * lab * lat), -1, 1));
   const babc1 = Math.acos(THREE.MathUtils.clamp((lat * lat - lab * lab - lcb * lcb) / (-2 * lab * lcb), -1, 1));
   _ax0.crossVectors(_ac, _ab); if (_ax0.lengthSq() < 1e-8) _ax0.copy(hint); _ax0.normalize();
@@ -193,7 +194,7 @@ export function solveTwoBone(upper: THREE.Object3D, lower: THREE.Object3D, end: 
   _n1.copy(_r2).multiply(_r0).multiply(_qa);
   _n2.copy(_r2).multiply(_r0).multiply(_r1).multiply(_qb);
   upper.quaternion.copy(_qp.invert().multiply(_n1));
-  lower.quaternion.copy(_n1.clone().invert().multiply(_n2));
-  if (endWorld) end.quaternion.copy(_n2.clone().invert().multiply(endWorld));
+  lower.quaternion.copy(_nSpare.copy(_n1).invert().multiply(_n2));
+  if (endWorld) end.quaternion.copy(_nSpare.copy(_n2).invert().multiply(endWorld));
   upper.updateMatrixWorld(true);
 }

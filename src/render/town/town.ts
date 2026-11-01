@@ -171,7 +171,39 @@ function level(ground: GroundFn, x: number): number {
   return any ? best : ground(x).y;
 }
 
+/**
+ * A town chunk is tens of milliseconds of mesh work. Streaming pumps it in slices (see `pump`) so one chunk
+ * never occupies a whole frame; the chunk is still deep in the haze when it finishes.
+ */
+export interface TownChunkBuild {
+  /** Do more work, at least one slice. Returns the finished chunk, or null if the budget ran out. */
+  pump(budgetMs: number): TownChunk | null;
+}
+
+/** Resumable chunk build. `pump(0)` does exactly one slice; `buildTownChunk` drains it in one go. */
+export function startTownChunk(kit: Kit, k: number, seed: number, ground: GroundFn, opts: ChunkOpts = {}): TownChunkBuild {
+  const gen = townChunkSteps(kit, k, seed, ground, opts);
+  let done = false;
+  return {
+    pump(budgetMs: number) {
+      if (done) return null;
+      const t0 = performance.now();
+      for (;;) {
+        const n = gen.next();
+        if (n.done) { done = true; return n.value; }
+        if (performance.now() - t0 >= budgetMs) return null;
+      }
+    },
+  };
+}
+
 export function buildTownChunk(kit: Kit, k: number, seed: number, ground: GroundFn, opts: ChunkOpts = {}): TownChunk {
+  const c = startTownChunk(kit, k, seed, ground, opts).pump(1e9);
+  if (!c) throw new Error('town chunk build produced nothing');
+  return c;
+}
+
+function* townChunkSteps(kit: Kit, k: number, seed: number, ground: GroundFn, opts: ChunkOpts = {}): Generator<void, TownChunk> {
   const T = TOWN, L = T.chunk, x0 = k * L, x1 = x0 + L;
   const rng = mulberry((seed ^ Math.imul(k + 7919, 0x9e3779b1)) >>> 0);
   const y0 = level(ground, x0);
@@ -211,6 +243,7 @@ export function buildTownChunk(kit: Kit, k: number, seed: number, ground: Ground
   ribbon(-26, -T.front, (x) => level(ground, x) - 0.2, T.pavementAlt, T.pavementAlt);
   if (!harbour) ribbon(T.front, 26, (x) => level(ground, x) - 0.2, T.pavementAlt, T.pavementAlt);
   for (const [rg, tex] of ribs) { near.geometry(rg, undefined, tex); far.geometry(rg, undefined, tex); rg.dispose(); }
+  yield;
 
   for (const side of [1, -1] as const) {
     if (side === 1 && harbour) continue;
@@ -218,7 +251,7 @@ export function buildTownChunk(kit: Kit, k: number, seed: number, ground: Ground
       let x = x0 + (row ? rng() * 3 : 0);
       while (x < x1 - 2) {
         const w: 4 | 6 = rng() < 0.6 ? 4 : 6;
-        if (x + w > x1 + 0.01 && row === 0) { x += w; continue; }
+        if (x + w > x1 + 0.01 && row === 0) { x += w; yield; continue; }
         if (rng() < (row ? 0.12 : 0.08)) {
           // alley: a cypress or an olive tree, plus a lamp in front on row 0
           const cx = x + 1.2, gy = level(ground, cx);
@@ -226,14 +259,14 @@ export function buildTownChunk(kit: Kit, k: number, seed: number, ground: Ground
           const tm = P.at(cx, gy + (row ? (side < 0 ? 4 : -4) : 0), lat, 0);
           if (rng() < 0.6) far.piece(kit, 'treeHigh', local(tm, 0, 0, 0, rng() * 6, [1.6, 2.8, 1.6])), near.piece(kit, 'treeHigh', local(tm, 0, 0, 0, rng() * 6, [1.6, 2.8, 1.6]));
           else far.piece(kit, 'treeRound', local(tm, 0, 0, 0, rng() * 6, 2)), near.piece(kit, 'treeRound', local(tm, 0, 0, 0, rng() * 6, 2));
-          x += 2.4; continue;
+          x += 2.4; yield; continue;
         }
         const cx = x + w / 2;
         const gy = level(ground, cx) + (row ? (side < 0 ? 3.5 + rng() * 2 : -4 - rng() * 2) : 0);
         const lat = side * (T.front + T.depth / 2 + (row ? 9 + rng() * 2 : rng() * 0.5));
         const base = P.at(cx, gy, lat, side > 0 ? TO_LEFT : TO_RIGHT);
         const tower = opts.clockTowers?.some((tx) => row === 1 && side < 0 && tx >= x && tx < x + w);
-        if (tower) { clockTower(kit, near, far, base); x += w; continue; }
+        if (tower) { clockTower(kit, near, far, base); x += w; yield; continue; }
         const floors = row ? 2 + Math.floor(rng() * 3) : 2 + (rng() < 0.45 ? 1 : 0);
         const spec: HouseSpec = {
           w, floors, plaster: lin(pick(T.plaster)), shutter: lin(pick(T.shutter)), roof: 0.85 + rng() * 0.25,
@@ -242,6 +275,7 @@ export function buildTownChunk(kit: Kit, k: number, seed: number, ground: Ground
         };
         house(kit, near, far, base, spec, rng, row === 0);
         x += w;
+        yield;
       }
     }
   }
@@ -252,11 +286,13 @@ export function buildTownChunk(kit: Kit, k: number, seed: number, ground: Ground
     const g = ground(x); if (g.gap) continue;
     near.piece(kit, 'lantern', P.at(x, g.y - 0.14, s * (T.front - 0.5), 0).multiply(_m.makeScale(1.7, 1.7, 1.7)));
     if (rng() < 0.35) near.piece(kit, rng() < 0.5 ? 'barrel' : 'crate', P.at(x + 1.6, g.y - 0.14, s * (T.front - 0.7), rng() * 6).multiply(_m.makeScale(0.6, 0.6, 0.6)));
+    yield;
   }
   if (!harbour && rng() < 0.75) { const x = x0 + 8 + rng() * (L - 16), g = level(ground, x); laundry(near, P, x, g + 6.4, rng); laundry(far, P, x, g + 6.4, rng); }
   if (!harbour && rng() < 0.3) { const x = x0 + 10 + rng() * 20, g = ground(x); if (!g.gap) near.piece(kit, rng() < 0.5 ? 'stallRed' : 'stallGreen', P.at(x, g.y - 0.14, -(T.front - 0.9), TO_RIGHT).multiply(_m.makeScale(1.6, 1.6, 1.6))); }
   if (harbour) harbourChunk(kit, near, far, P, x0, x1, ground, rng);
-  const gn = near.build(), gf = far.build();
+  const gn = yield* near.buildSteps();
+  const gf = yield* far.buildSteps();
   return { near: gn, far: gf, y0, trisNear: near.triangles, trisFar: far.triangles };
 }
 

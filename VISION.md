@@ -41,12 +41,12 @@ Each phase lands on its own branch, passes the autopilot fairness tests, and Har
 | # | Phase | Status |
 |---|---|---|
 | 0 | Hi-fi render pass: painted textures, shadows, bloom/AO, quality tiers | Merged to main |
-| 1 | Endless feels like a game: score, combo, near-miss, sawtooth waves, set pieces, 3 lives | Built on branch `game/endless-v2`, under review |
-| 2 | Day and night v1 on hifi: lanterns, window fix, time advancing with distance | Presets prototyped on `spike/vision`, which needs rebasing onto main |
-| 3 | Hills area | Planned |
-| 4 | Forest area: updrafts, bounce mushrooms, log rails | Planned |
-| 5 | Castle area: zigzag wall runs, spell gates, chase set piece | Planned |
-| 6 | One hand-built course level per area, each with 3 star goals | Planned |
+| 1 | Endless feels like a game: score, combo, near-miss, sawtooth waves, set pieces, 3 lives | Merged to main |
+| 2 | Day and night v1 on hifi: lanterns, window glow, time advancing with distance | Day/night presets (`?tod=`) merged to main. Time-of-day progression with distance, and street lanterns, are not done |
+| 3 | Hills area | Rough stub |
+| 4 | Forest area: updrafts, bounce mushrooms, log rails | Not started |
+| 5 | Castle area: zigzag wall runs, spell gates, chase set piece | Not started |
+| 6 | One hand-built course level per area, each with 3 star goals | Not started |
 
 ## Unproven risks
 

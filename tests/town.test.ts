@@ -1,6 +1,9 @@
 import { describe, it, expect, beforeAll } from 'vitest';
+import * as THREE from 'three';
 import { Kit } from '../src/render/town/kit';
-import { buildTownChunk } from '../src/render/town/town';
+import { buildTownChunk, startTownChunk } from '../src/render/town/town';
+import { Environment } from '../src/render/environment';
+import { frameDt } from '../src/game';
 
 const loadKit = async () => {
   const nodeFs = 'node:fs'; const fs = await import(/* @vite-ignore */ nodeFs) as { readFileSync(p: string, enc?: string): Uint8Array & string };
@@ -20,12 +23,54 @@ describe('witch town chunks', () => {
     const a = buildTownChunk(kit, 4, 12345, slope), b = buildTownChunk(kit, 4, 12345, slope);
     expect(a.trisNear).toBe(b.trisNear); expect(a.trisFar).toBe(b.trisFar);
   });
+  it('slices a chunk across many pumps and still matches a one-shot build', () => {
+    const once = buildTownChunk(kit, 9, 12345, slope, { harbourFrom: 200, clockTowers: [360] });
+    const job = startTownChunk(kit, 9, 12345, slope, { harbourFrom: 200, clockTowers: [360] });
+    let sliced = null, pumps = 0;
+    while (!sliced && pumps++ < 500) sliced = job.pump(0);
+    expect(pumps).toBeGreaterThan(12); // one house (or thinner) per slice, not the whole chunk
+    expect(sliced!.trisNear).toBe(once.trisNear);
+    expect(sliced!.trisFar).toBe(once.trisFar);
+    const sum = (g: THREE.BufferGeometry | null) => {
+      const p = g?.getAttribute('position')?.array as ArrayLike<number> | undefined;
+      if (!p) return 0;
+      let s = 0; for (let i = 0; i < p.length; i += 7) s += p[i];
+      return s;
+    };
+    expect(sum(sliced!.near)).toBeCloseTo(sum(once.near), 3);
+    expect(sum(sliced!.far)).toBeCloseTo(sum(once.far), 3);
+    expect(job.pump(0)).toBeNull();
+  });
   it('stays inside the phone triangle budget (near <= 60k, far <= 6k per 40 m chunk)', () => {
     for (let k = 0; k < 30; k++) {
       const c = buildTownChunk(kit, k, 777, slope, { harbourFrom: 880, clockTowers: [300] });
       expect(c.trisNear, `near ${k}`).toBeLessThanOrEqual(60000);
       expect(c.trisFar, `far ${k}`).toBeLessThanOrEqual(6000);
     }
+  });
+  it('streams a new town chunk across frames instead of building it inside one', () => {
+    const env = new Environment(new THREE.Scene());
+    env.buildScenery(3, Infinity, () => 0, 0, true, () => ({ y: 0, gap: false }));
+    env.setKit(kit);
+    env.streamScenery(0); // load-veil fill: the whole window, synchronously
+    const n0 = env.townChunkCount;
+    expect(n0).toBeGreaterThan(8);
+    env.sliceMs = 0; // one slice per call
+    env.streamScenery(40); // drops the chunk behind; the new one has only had a single slice
+    expect(env.townChunkCount).toBe(n0 - 1);
+    let calls = 0;
+    while (env.townChunkCount < n0 && calls++ < 400) env.streamScenery(40);
+    expect(env.townChunkCount).toBe(n0);
+    expect(calls).toBeGreaterThan(8);
+  });
+});
+
+describe('frame clock', () => {
+  it('clamps hitches and ignores a backwards timestamp', () => {
+    expect(frameDt(1000, 0)).toBeCloseTo(1 / 60);
+    expect(frameDt(1016, 1000)).toBeCloseTo(0.016);
+    expect(frameDt(900, 1000)).toBe(0);
+    expect(frameDt(2000, 1000)).toBeCloseTo(0.1);
   });
 });
 

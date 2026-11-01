@@ -56,6 +56,7 @@ export class GameView {
   private contactFx = 0;
   showArc = false;
   private failCam: { x: number; y: number } | null = null;
+  private readonly focus = new THREE.Vector3();
 
   constructor(container: HTMLElement) {
     const qs0 = new URLSearchParams(location.search);
@@ -453,7 +454,7 @@ export class GameView {
       this.rig.update(dt, x, y, curr.speed, false, ahead);
     }
     ART_UNIFORMS.uTime.value += dt;
-    this.env.follow(toScene(x + 18, y), this.rig.camera.position, x, y);
+    this.env.follow(toScene(x + 18, y, 0, this.focus), this.rig.camera.position, x, y);
     this.petals.update(dt, x, y);
     // restrained air-cutting streaks scale with actual speed
     this.speedLines.update(dt, x, y, failed ? 0 : curr.speed);

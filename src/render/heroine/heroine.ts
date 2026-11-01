@@ -81,7 +81,8 @@ const MOOD: Record<string, Face> = {
   cheer: { happy: 0.9, mouthGrin: 0.5 },
 };
 
-const _v = new THREE.Vector3(), _w = new THREE.Vector3(), _q = new THREE.Quaternion(), _q2 = new THREE.Quaternion();
+const _v = new THREE.Vector3(), _w = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3();
+const _q = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _q3 = new THREE.Quaternion(), _q4 = new THREE.Quaternion(), _q5 = new THREE.Quaternion();
 const _e = new THREE.Euler(), _ax = new THREE.Vector3();
 const smooth = (x: number) => x * x * (3 - 2 * x);
 const sstep = (a: number, b: number, x: number) => smooth(THREE.MathUtils.clamp((x - a) / (b - a), 0, 1));
@@ -146,6 +147,9 @@ export class Heroine {
   private deck: THREE.Object3D | null = null;
   private center: THREE.Object3D | null = null;
   private compK = 0; private lastDt = 1 / 60; private postureLim: { forward: number; travel: number } | null = null;
+  /** Reused every frame (a fresh Map/Set here was a steady source of GC hitches). */
+  private aw = new Map<string, number>();
+  private faceScratch = new Set<string>();
   /** 0..1 blend weight of the grab poses (the broom rises to her hand with it). */
   get grabWeight(): number {
     if (this.debugFreeze) return this.debugFreeze.clip.startsWith('grab') ? 1 : 0; // review stills: frozen grab poses lift the broom too
@@ -426,7 +430,7 @@ export class Heroine {
     this.stateW.clear();
     for (const [s, w] of this.fadeFrom) if (s !== this.state) this.stateW.set(s, w * (1 - k));
     this.stateW.set(this.state, (this.fadeFrom.get(this.state) ?? 0) * (1 - k) + k);
-    const aw = new Map<string, number>();
+    const aw = this.aw; aw.clear();
     for (const [s, w] of this.stateW) {
       if (w < 1e-4) continue;
       for (const [n, inner] of STATES[s].acts) { const name = n === 'fidget' ? this.fidgetClip : n; aw.set(name, (aw.get(name) ?? 0) + w * inner(this)); }
@@ -514,31 +518,35 @@ export class Heroine {
   private applyPosture(f: HeroineFrame): void {
     const H = this.vrm.humanoid;
     const hips = H.getNormalizedBoneNode('hips')!, neck = H.getNormalizedBoneNode('neck')!;
-    const rootQ = (this.center ?? this.object).getWorldQuaternion(new THREE.Quaternion());
-    const invRoot = rootQ.clone().invert();
+    const rootQ = (this.center ?? this.object).getWorldQuaternion(_q3);
+    const invRoot = _q4.copy(rootQ).invert();
     // (eased: a mode switch, e.g. the skim exit, must not step the hips)
     const kTarget = f.mode === 'heelSkim' ? 0.35 : f.mode === 'grounded' ? 0.5 : 0;
     this.compK += (kTarget - this.compK) * (1 - Math.exp(-this.lastDt * 10));
-    const rel = invRoot.clone().multiply(this.object.getWorldQuaternion(_q));
+    const rel = invRoot.multiply(this.object.getWorldQuaternion(_q));
     const pitch = f.mode === 'grounded' || f.mode === 'heelSkim' || this.compK > 0.01 ? _e.setFromQuaternion(rel, 'XYZ').z : 0;
     const comp = Math.abs(pitch) < 1.2 ? -pitch * this.compK : 0; // never while the pivot is mid-flip
     // the limits are body-relative (figure frame = the board's frame), so flips, wall rides and boardslides are unaffected
-    const figQ = this.object.getWorldQuaternion(new THREE.Quaternion());
-    const t = neck.getWorldPosition(new THREE.Vector3()).sub(hips.getWorldPosition(_v)).applyQuaternion(figQ.clone().invert());
+    const figQ = this.object.getWorldQuaternion(_q5);
+    const t = neck.getWorldPosition(_v2).sub(hips.getWorldPosition(_v)).applyQuaternion(_q3.copy(figQ).invert());
     t.applyAxisAngle(_ax.set(0, 0, 1), comp);
-    let lim = limitsFor(this.state === 'fidget' ? 'loco' : this.state, f.mode);
-    if (lim) { // blend the limits with the state crossfade so leaving a skim/trick never snaps the clamp
-      const prev = this.postureLim ?? lim; const k = 1 - Math.exp(-this.lastDt * 8);
-      lim = { forward: prev.forward + (lim.forward - prev.forward) * k, travel: prev.travel + (lim.travel - prev.travel) * k };
-    }
-    this.postureLim = lim;
+    const src = limitsFor(this.state === 'fidget' ? 'loco' : this.state, f.mode);
+    let lim = src;
+    if (src) { // blend the limits with the state crossfade so leaving a skim/trick never snaps the clamp
+      const prevF = this.postureLim?.forward ?? src.forward, prevT = this.postureLim?.travel ?? src.travel;
+      const k = 1 - Math.exp(-this.lastDt * 8);
+      if (!this.postureLim) this.postureLim = { forward: 0, travel: 0 };
+      this.postureLim.forward = prevF + (src.forward - prevF) * k;
+      this.postureLim.travel = prevT + (src.travel - prevT) * k;
+      lim = this.postureLim;
+    } else this.postureLim = null;
     const c = lim ? postureCorrection(t, lim) : { aboutX: 0, aboutZ: 0 };
     this.stats.posture = [torsoPitch(t).pF / DEG, torsoPitch(t).pT / DEG, c.aboutX / DEG, (comp + c.aboutZ) / DEG];
     const aZ = comp + c.aboutZ, aX = c.aboutX;
     if (Math.abs(aZ) < 1e-5 && Math.abs(aX) < 1e-5) return;
-    const rw = new THREE.Quaternion().setFromAxisAngle(_ax.set(1, 0, 0).applyQuaternion(figQ), aX)
+    const rw = _q3.setFromAxisAngle(_ax.set(1, 0, 0).applyQuaternion(figQ), aX)
       .multiply(_q2.setFromAxisAngle(_ax.set(0, 0, 1).applyQuaternion(figQ), aZ));
-    const pw = hips.parent!.getWorldQuaternion(new THREE.Quaternion()).invert();
+    const pw = hips.parent!.getWorldQuaternion(_q4).invert();
     hips.quaternion.copy(pw.multiply(rw.multiply(hips.getWorldQuaternion(_q))));
     this.object.updateMatrixWorld(true);
   }
@@ -565,20 +573,18 @@ export class Heroine {
     head.getWorldPosition(_v);
     this.lookTarget.getWorldPosition(_w).sub(_v).normalize();
     head.getWorldQuaternion(_q);
-    const fwd = new THREE.Vector3(0, 0, this.v0 ? -1 : 1).applyQuaternion(_q);
+    const fwd = _v2.set(0, 0, this.v0 ? -1 : 1).applyQuaternion(_q);
     const ang = fwd.angleTo(_w);
     const lim = THREE.MathUtils.degToRad(40);
     _q2.setFromUnitVectors(fwd, _w);
     const amt = (ang > lim ? lim / ang : 1) * w;
-    const part = new THREE.Quaternion().slerp(_q2, amt * 0.4);
     for (const [node, share] of [[neck, 0.4], [head, 0.6]] as const) {
-      const p = new THREE.Quaternion().slerp(_q2, amt * share);
-      const pw = node.parent!.getWorldQuaternion(new THREE.Quaternion());
-      const nw = node.getWorldQuaternion(new THREE.Quaternion());
+      const p = _q3.identity().slerp(_q2, amt * share);
+      const pw = node.parent!.getWorldQuaternion(_q4);
+      const nw = node.getWorldQuaternion(_q5);
       node.quaternion.copy(pw.invert().multiply(p.multiply(nw)));
       node.updateMatrixWorld(true);
     }
-    void part;
   }
 
   private solveLegs(): void {
@@ -589,17 +595,17 @@ export class Heroine {
       if (deck) { out.y -= DECK_Y; return deck.localToWorld(out); }
       return this.object.localToWorld(out);
     };
-    const deckQ = deck ? deck.getWorldQuaternion(new THREE.Quaternion()) : this.object.getWorldQuaternion(new THREE.Quaternion());
-    const hint = new THREE.Vector3(1, 0, 0).applyQuaternion(this.object.getWorldQuaternion(new THREE.Quaternion()));
+    const deckQ = deck ? deck.getWorldQuaternion(_q3) : this.object.getWorldQuaternion(_q3);
+    const hint = _v2.set(1, 0, 0).applyQuaternion(this.object.getWorldQuaternion(_q4));
     for (const side of ['L', 'R'] as const) {
       const s = side === 'L' ? 'left' : 'right';
-      const tgt = toWorld(ik[side].position, new THREE.Vector3());
+      const tgt = toWorld(ik[side].position, _v3);
       const fe = ik[side === 'L' ? 'fL' : 'fR'].position;
       // foot world = deck * yaw/pitch/roll (deck space) * foot rest (relative to the figure)
       const rest = side === 'L' ? this.rig.footRestL : this.rig.footRestR;
-      const fw = deckQ.clone().multiply(_q.setFromEuler(_e.set(fe.y, fe.x, fe.z, 'YXZ'))).multiply(rest);
+      const fw = _q5.copy(deckQ).multiply(_q.setFromEuler(_e.set(fe.y, fe.x, fe.z, 'YXZ'))).multiply(rest);
       solveTwoBone(H.getNormalizedBoneNode(`${s}UpperLeg` as never)!, H.getNormalizedBoneNode(`${s}LowerLeg` as never)!, H.getNormalizedBoneNode(`${s}Foot` as never)!, tgt, hint, fw);
-      const foot = H.getNormalizedBoneNode(`${s}Foot` as never)!.getWorldPosition(new THREE.Vector3());
+      const foot = H.getNormalizedBoneNode(`${s}Foot` as never)!.getWorldPosition(_w);
       this.stats.ik[side === 'L' ? 0 : 1] = foot.distanceTo(tgt);
     }
   }
@@ -608,14 +614,14 @@ export class Heroine {
     this.stats.hand[0] = this.stats.hand[1] = 0;
     if (!this.deck || (gl < 0.01 && gr < 0.01)) return;
     const H = this.vrm.humanoid;
-    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(this.object.getWorldQuaternion(new THREE.Quaternion()));
+    const up = _v2.set(0, 1, 0).applyQuaternion(this.object.getWorldQuaternion(_q3));
     if (gl > 0.01) { // toe edge (+Z), just ahead of the front foot
-      const t = this.deck.localToWorld(this.grabTargets.L.clone());
+      const t = this.deck.localToWorld(_v3.copy(this.grabTargets.L));
       solveTwoBone(H.getNormalizedBoneNode('leftUpperArm')!, H.getNormalizedBoneNode('leftLowerArm')!, H.getNormalizedBoneNode('leftHand')!, t, up, null, gl);
       this.stats.hand[0] = H.getNormalizedBoneNode('leftHand')!.getWorldPosition(_w).distanceTo(t);
     }
     if (gr > 0.01) { // heel edge (-Z), behind the back foot
-      const t = this.deck.localToWorld(this.grabTargets.R.clone());
+      const t = this.deck.localToWorld(_v3.copy(this.grabTargets.R));
       solveTwoBone(H.getNormalizedBoneNode('rightUpperArm')!, H.getNormalizedBoneNode('rightLowerArm')!, H.getNormalizedBoneNode('rightHand')!, t, up, null, gr);
       this.stats.hand[1] = H.getNormalizedBoneNode('rightHand')!.getWorldPosition(_w).distanceTo(t);
     }
@@ -626,7 +632,9 @@ export class Heroine {
     if (this.moodOverAfter && this.t >= this.moodOverAfter.at) { this.moodOver = { name: this.moodOverAfter.name, until: this.t + this.moodOverAfter.hold }; this.moodOverAfter = null; }
     if (this.moodOver && this.t > this.moodOver.until) this.moodOver = null;
     const target = MOOD[this.moodOver?.name ?? this.moodBase] ?? {};
-    const names = new Set([...this.faceVals.keys(), ...Object.keys(target)]);
+    const names = this.faceScratch; names.clear();
+    for (const n of this.faceVals.keys()) names.add(n);
+    for (const n of Object.keys(target)) names.add(n);
     for (const n of names) {
       const en = this.alias.get(n) ?? n;
       if (!this.exprNames.has(en)) continue;
@@ -653,7 +661,7 @@ export class Heroine {
   private updateSprings(f: HeroineFrame): void {
     if (!this.joints.length || !this.center) return;
     // wind blows back along the route (world), more with speed; in the air falling lifts hair and skirt
-    const travel = new THREE.Vector3(1, 0, 0).transformDirection(this.center.matrixWorld);
+    const travel = _v2.set(1, 0, 0).transformDirection(this.center.matrixWorld);
     const w = Math.min(1, this.sp / 25);
     const fall = f.mode === 'airborne' ? THREE.MathUtils.clamp(-f.vy / 12, -0.3, 0.6) : 0;
     const tuck = (this.stateW.get('flip') ?? 0) + (this.stateW.get('crash') ?? 0) * 0.5 + this.inner.tuck * (this.stateW.get('loco') ?? 0);
