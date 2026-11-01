@@ -81,7 +81,14 @@ function house(kit: Kit, near: MergeBuffer, far: MergeBuffer, base: THREE.Matrix
       mb.piece(kit, piece, local(base, px, y, 2 - 0.09), tints);
       if (piece === 'wallWin') mb.piece(kit, 'shutWide', local(base, px, y, 2 - 0.09), tints);
       if (piece === 'wallWinThin') mb.piece(kit, 'shutThin', local(base, px, y, 2 - 0.09), tints);
-      if (full && piece === 'wallDoor') mb.piece(kit, 'door', local(base, px, y, 2 - 0.12), { shutter: h.shutter, trim: h.shutter });
+      if (full && piece === 'wallDoor') {
+        // painted plank door set into the arched opening (the wall hides its corners); 36 tris vs 470 for the kit leaf
+        const db = new GeoBuilder();
+        db.add(new THREE.BoxGeometry(1.25, 2.6, 0.06), [px, y + 1.3, 1.86], h.shutter.clone().multiplyScalar(0.8), { top: h.shutter });
+        db.add(new THREE.BoxGeometry(0.46, 0.4, 0.04), [px, y + 1.72, 1.9], T.interior);
+        db.add(new THREE.BoxGeometry(0.08, 0.08, 0.06), [px + 0.36, y + 1.05, 1.91], T.gold);
+        mb.geometry(db.build()!, base);
+      }
       if (full && f > 0 && h.flowers && piece === 'wallWin') flowerBox(mb, base, px, y + 1.02, 2.28, rng);
       if (full && f === 1 && h.balcony && i === 0) mb.piece(kit, 'balcony', local(base, px, y, 2 - 0.09 - 0.9), tints);
     }
@@ -102,9 +109,10 @@ function house(kit: Kit, near: MergeBuffer, far: MergeBuffer, base: THREE.Matrix
 function cheapHouse(mb: MergeBuffer, base: THREE.Matrix4, h: HouseSpec): void {
   const T = TOWN, n = h.w / 2, H = h.floors * T.storey, half = h.w / 2, b = new GeoBuilder();
   b.add(new THREE.BoxGeometry(h.w + 0.1, 7, T.depth + 0.1), [0, -3.5, 0], T.stoneShade, { top: T.stone });
-  b.add(new THREE.BoxGeometry(h.w, H, T.depth - 0.2), [0, H / 2, -0.1], h.plaster.clone().multiply(lin('#f7efe6')), { top: h.plaster });
+  // body front face sits exactly where the near LOD's facade plaster is (z = depth/2), so the LOD crossfade has no depth step
+  b.add(new THREE.BoxGeometry(h.w, H, T.depth), [0, H / 2, 0], h.plaster.clone().multiply(lin('#f7efe6')), { top: h.plaster });
   b.add(new THREE.BoxGeometry(h.w + 0.04, 0.22, T.depth - 0.1), [0, H - 0.11, -0.1], T.trimCream);
-  const zf = T.depth / 2 - 0.3 + 0.02;
+  const zf = T.depth / 2 + 0.012;
   for (let f = 0; f < h.floors; f++) for (let i = 0; i < n; i++) {
     const px = -half + 1 + i * 2, y = f * T.storey;
     if (f === 0) {

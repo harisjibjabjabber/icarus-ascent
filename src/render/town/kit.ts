@@ -142,7 +142,10 @@ export function townMaterial(): TownMaterial {
           vec2 uv = an.y > max(an.x, an.z) ? vWPos.xz : (an.x > an.z ? vWPos.zy : vWPos.xy);
           float d = texture2D(uDetail, uv * 0.23).r;
           diffuseColor.rgb *= mix(1.0, 0.82 + d * 0.36, 0.55 * uDetailStrength);
-        }`);
+        }`)
+      // tag dissolving pixels (alpha 0.5 in the HDR target) so the outline pass doesn't ink the dither pattern
+      .replace('#include <dithering_fragment>', `#include <dithering_fragment>
+        if (uFade.x > 0.001 || uFade.y < 0.999) gl_FragColor.a = 0.5;`);
   };
   m.customProgramCacheKey = () => 'town-detail-fade';
   return m;
