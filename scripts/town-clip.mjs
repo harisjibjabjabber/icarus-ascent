@@ -20,6 +20,8 @@ await page.evaluate((mode) => { const ic = window.icarus; ic.pause(true); docume
   if (mode !== 'opening') ic.setMode(mode); ic.game.retry();
   ic.autopilot(mode === 'endless' ? { minSpeed: 13, strength: 1, optionalRail: true, styleGrabs: true, styleFlips: true } : { minSpeed: 13, strength: 1, optionalRail: true, styleGrabs: true }); }, mode);
 await page.waitForTimeout(3000);
+// optional: fast-forward (rendering every 30 ticks so the town streams) to route x = SKIP_TO before capturing
+if (process.env.SKIP_TO) await page.evaluate((x) => window.icarus.advance(40000, (g) => g.sim.state.x > x || g.sim.state.mode === 'failed', 30), Number(process.env.SKIP_TO));
 const per = Number(tpf), total = Number(maxTicks), side = Number(process.env.SIDE ?? -4.2);
 let n = 0, done = false; const meta = [];
 for (let t = 0; t < total && !done; t += per) {

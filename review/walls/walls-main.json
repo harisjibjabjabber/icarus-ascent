@@ -1,0 +1,13 @@
+[
+ {
+  "id": 0,
+  "x0": 863.5,
+  "x1": 906.5,
+  "lateral": 2.4,
+  "required": true,
+  "ticks": 45,
+  "shotAt": 874,
+  "x": 874,
+  "mode": "wallRiding"
+ }
+]
