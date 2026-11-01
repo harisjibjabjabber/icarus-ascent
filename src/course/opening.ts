@@ -113,8 +113,8 @@ export function buildOpeningCourse(): Course {
   const a7 = cur().x;
   flat(18);
   const y7 = cur().y;
-  const lip7 = gap(20, -0.8, 'stone');
-  rails.push({ id: rails.length, points: [{ x: lip7.x, y: y7 + 1.0 }, { x: lip7.x + 10, y: y7 + 0.7 }, { x: lip7.x + 25, y: y7 - 0.1 }], lateral: 0, required: true });
+  const lip7 = gap(26, -0.5, 'stone');
+  rails.push({ id: rails.length, points: [{ x: lip7.x - 3, y: y7 + 1.0 }, { x: lip7.x + 12, y: y7 + 0.65 }, { x: lip7.x + 32, y: y7 }], lateral: 0, required: true });
   requiredGaps.push([lip7.x, 'rail']);
   lesson({ title: 'Rail', cpX: r6 + 24, cpSpeed: 15, prompt: 'Rail over the gap — jump, then swipe down to catch it', keys: '↑ then ↓', promptX0: r6 + 8, promptX1: lip7.x, featureX: lip7.x - 2.2, required: true });
   flat(26);

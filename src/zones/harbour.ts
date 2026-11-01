@@ -3,6 +3,7 @@ import type { Zone } from './zone';
 /**
  * Zone #2: the harbour the town drops into (VISION: one day's journey, old town then harbour).
  * Same phrase vocabulary as the town, weighted toward canal walls, pier gaps and rails.
+ * The death gaps here are the water between quays and piers: the rail or the wall is the crossing.
  * Updrafts here are steam vents; swings hang off the crane and bounces are the moored boats.
  * Scenery is the town builder's quay stretch
  * (src/render/town/town.ts), streamed on the same 40 m chunks.
@@ -16,8 +17,8 @@ export const HARBOUR: Zone = {
   tagline: 'The quay, the turquoise water and a few sails',
   phrases: [
     'crest-pop', 'rollers', 'valley-launch', 'pop-chain', 'big-kicker', 'double-pop', 'high-line',
-    'hop', 'pot', 'skim-pair', 'pot-pillar', 'stepdowns', 'ramp-flip', 'rail-launch', 'rail-gap',
-    'wall-gap', 'wall-tap', 'wall-long', 'wall-transfer', 'wall-line',
+    'hop', 'pot', 'skim-pair', 'pot-pillar', 'stepdowns', 'ramp-flip', 'rail-launch', 'rail-gap', 'rail-gap-early',
+    'wall-over', 'wall-gap', 'death-gauntlet', 'wall-tap', 'wall-long', 'wall-transfer', 'wall-line',
     'wash-line', 'swing-hook', 'updraft', 'bounce',
     'ramp-pillar', 'crest-pillar', 'gap-pillar',
   ],
@@ -28,12 +29,14 @@ export const HARBOUR: Zone = {
     'wall-transfer': 2.4,
     'wall-line': 2.2,
     'wall-gap': 3.0,
+    'wall-over': 2.6,
+    'death-gauntlet': 1.8,
     'wash-line': 1.8,
     'swing-hook': 2.2,
     updraft: 2.1,
     bounce: 2.4,
     'high-line': 1.3,
-    'rail-gap': 1.4,
+    'rail-gap': 1.8,
     'rail-launch': 1.3,
     'gap-pillar': 1.25,
     stepdowns: 1.2,

@@ -72,7 +72,7 @@ describe('wall-ride frequency', () => {
       const specs = new Set([...town, ...harbour].map((w) => w.spec));
       const styles = ['wall-tap', 'wall-long', 'wall-transfer', 'wall-line'].filter((id) => specs.has(id));
       expect(styles.length, `seed ${seed} wall variety`).toBeGreaterThanOrEqual(3);
-      expect(['wall-gap', 'sp-rail-wall', 'sp-canal', 'sp-crest-wall'].some((id) => specs.has(id)), `seed ${seed} wall over a gap`).toBe(true);
+      expect(['wall-gap', 'wall-over', 'death-gauntlet', 'sp-rail-wall', 'sp-canal', 'sp-crest-wall'].some((id) => specs.has(id)), `seed ${seed} wall over a gap`).toBe(true);
     }
     const kinds = new Set(rows.flatMap((r) => [...r.town.specs, ...r.harbour.specs]));
     for (const id of ['wall-tap', 'wall-long', 'wall-transfer', 'wall-line']) expect(kinds.has(id), id).toBe(true);

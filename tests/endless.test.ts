@@ -19,9 +19,9 @@ function generate(seed: number, dist: number, step = 50): Chunk[] {
 }
 
 describe('phrase library', () => {
-  it('has 15-28 authored phrases (plus connectors), each declaring entry/exit speed, airtime, receiver and tier', () => {
+  it('has 15-34 authored phrases (plus connectors), each declaring entry/exit speed, airtime, receiver and tier', () => {
     expect(LIBRARY.length).toBeGreaterThanOrEqual(15);
-    expect(LIBRARY.length).toBeLessThanOrEqual(28);
+    expect(LIBRARY.length).toBeLessThanOrEqual(34);
     for (const p of PHRASES) {
       expect(p.entry[0]).toBeLessThanOrEqual(p.entry[1]);
       expect(p.exit[0]).toBeLessThanOrEqual(p.exit[1]);
@@ -199,7 +199,8 @@ describe('streaming, recycling and memory', () => {
     const r = rideEndless(5, { minSpeed: 15, pots: 'heel', optionalRail: true, styleFlips: true }, 20000, { maxSeconds: 20000 / 7 });
     expect(r.sim.state.mode, describeFail(5, {minSpeed: 15}, r)).not.toBe('failed');
     expect(r.sim.state.x).toBeGreaterThan(20000);
-    expect(r.maxChunks).toBeLessThan(16);
+    // A wall tap queued in front of a set piece adds one chunk to the live window.
+    expect(r.maxChunks).toBeLessThan(17);
     expect(r.maxBroken).toBeLessThan(12);
     expect(r.maxSurfaces).toBeLessThan(28);
   });
