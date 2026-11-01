@@ -145,7 +145,7 @@ interface TownView { group: THREE.Group; near: THREE.Mesh | null; far: THREE.Mes
  * dissolve in over the last `spawnFade` metres (deep in the haze) or `spawnTime` seconds (whichever is later), so
  * nothing swaps or appears in one frame. Behind the camera (< `nearBehind`) the switch back to far is hard: unseen.
  */
-export const TOWN_LOD = { behind: 60, ahead: 480, spawnFade: 110, nearFull: 55, nearFadeEnd: 100, nearBehind: -25, spawnTime: 0.7 };
+export const TOWN_LOD = { behind: 60, ahead: 480, spawnFade: 110, nearFull: 50, nearFadeEnd: 92, nearBehind: -25, spawnTime: 0.7 };
 
 /** Dither ranges for a chunk's near and far meshes. `d`: chunk centre minus rider x; `age`: seconds since built. */
 export function townFade(d: number, age: number): { near: [number, number]; far: [number, number] } {
