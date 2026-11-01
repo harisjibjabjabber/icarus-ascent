@@ -1,0 +1,95 @@
+{
+ "opening": {
+  "finishX": 1124,
+  "finishTimeS": 69.5,
+  "harbourX": 880,
+  "timeToHarbourS": 53.2,
+  "firstWallRunX": 864,
+  "timeToFirstWallRunS": 52.4,
+  "firstGapTimeS": 12.6,
+  "whole": {
+   "from": 0,
+   "to": 1124,
+   "elements": 17,
+   "per100m": 1.51,
+   "longestEmptyM": 216,
+   "longestEmptyS": 12.6,
+   "longestEmptyAt": 0
+  },
+  "afterTutorial": {
+   "from": 222,
+   "to": 1124,
+   "elements": 16,
+   "per100m": 1.77,
+   "longestEmptyM": 106,
+   "longestEmptyS": 6.1,
+   "longestEmptyAt": 758
+  },
+  "elements": [
+   "gap 216-222 @12.6s",
+   "pot 308-312 @18.5s",
+   "pot 396-400 @24.1s",
+   "pot 400-404 @24.4s",
+   "rail(opt) 502-526 @30.7s",
+   "gap 614-634 @37.5s",
+   "rail 614-639 @37.5s",
+   "gap 726-734 @44.4s",
+   "pillar 754-758 @46.1s",
+   "wall 864-907 @52.4s",
+   "gap 868-904 @52.6s",
+   "wall(opt) 946-970 @57.1s",
+   "pot 980-984 @59.4s",
+   "wall 1000-1031 @60.9s",
+   "gap 1004-1028 @61.2s",
+   "pillar 1052-1056 @64.9s",
+   "wall(opt) 1086-1112 @67s"
+  ]
+ },
+ "endless": [
+  {
+   "seed": 1,
+   "range": "300-3000",
+   "per100m": 0.74,
+   "styleHillsPer100m": 1.07,
+   "longestEmptyM": 301,
+   "longestEmptyS": 16.8,
+   "longestEmptyInclHillsM": 107
+  },
+  {
+   "seed": 2,
+   "range": "300-3000",
+   "per100m": 0.78,
+   "styleHillsPer100m": 1.11,
+   "longestEmptyM": 611,
+   "longestEmptyS": 32.9,
+   "longestEmptyInclHillsM": 99
+  },
+  {
+   "seed": 3,
+   "range": "300-3000",
+   "per100m": 0.74,
+   "styleHillsPer100m": 1,
+   "longestEmptyM": 299,
+   "longestEmptyS": 16.8,
+   "longestEmptyInclHillsM": 107
+  },
+  {
+   "seed": 7,
+   "range": "300-3000",
+   "per100m": 0.67,
+   "styleHillsPer100m": 1.04,
+   "longestEmptyM": 341,
+   "longestEmptyS": 19.7,
+   "longestEmptyInclHillsM": 108
+  },
+  {
+   "seed": 42,
+   "range": "300-3000",
+   "per100m": 0.63,
+   "styleHillsPer100m": 1.15,
+   "longestEmptyM": 389,
+   "longestEmptyS": 22.4,
+   "longestEmptyInclHillsM": 94
+  }
+ ]
+}

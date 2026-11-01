@@ -1,0 +1,101 @@
+{
+ "opening": {
+  "finishX": 806,
+  "finishTimeS": 50,
+  "harbourX": 440,
+  "timeToHarbourS": 26.4,
+  "firstWallRunX": 564,
+  "timeToFirstWallRunS": 34,
+  "firstGapTimeS": 10,
+  "whole": {
+   "from": 0,
+   "to": 806,
+   "elements": 23,
+   "per100m": 2.86,
+   "longestEmptyM": 174,
+   "longestEmptyS": 10,
+   "longestEmptyAt": 0
+  },
+  "afterTutorial": {
+   "from": 180,
+   "to": 806,
+   "elements": 22,
+   "per100m": 3.52,
+   "longestEmptyM": 45,
+   "longestEmptyS": 3,
+   "longestEmptyAt": 223
+  },
+  "elements": [
+   "gap 174-180 @10s",
+   "pot 219-223 @12.7s",
+   "pot 268-272 @15.9s",
+   "pot 272-276 @16.2s",
+   "rail(opt) 310-332 @18.7s",
+   "gap 372-392 @22.3s",
+   "rail 372-397 @22.3s",
+   "pot 410-414 @24.6s",
+   "rail(opt) 421-443 @25.2s",
+   "gap 462-470 @27.7s",
+   "pillar 490-494 @29.6s",
+   "rail(opt) 514-542 @31.1s",
+   "wall 564-607 @34s",
+   "gap 568-604 @34.3s",
+   "wall(opt) 620-638 @37.4s",
+   "pot 646-650 @39.2s",
+   "wall 664-695 @40.5s",
+   "gap 668-692 @40.8s",
+   "pillar 708-712 @44s",
+   "rail(opt) 726-746 @45.1s",
+   "pot 760-764 @47.2s",
+   "pot 764-768 @47.4s",
+   "wall(opt) 776-798 @48.2s"
+  ]
+ },
+ "endless": [
+  {
+   "seed": 1,
+   "range": "300-3000",
+   "per100m": 1.22,
+   "styleHillsPer100m": 0.93,
+   "longestEmptyM": 165,
+   "longestEmptyS": 8.8,
+   "longestEmptyInclHillsM": 86
+  },
+  {
+   "seed": 2,
+   "range": "300-3000",
+   "per100m": 1.33,
+   "styleHillsPer100m": 0.96,
+   "longestEmptyM": 165,
+   "longestEmptyS": 8.8,
+   "longestEmptyInclHillsM": 88
+  },
+  {
+   "seed": 3,
+   "range": "300-3000",
+   "per100m": 1.41,
+   "styleHillsPer100m": 1.15,
+   "longestEmptyM": 156,
+   "longestEmptyS": 9.4,
+   "longestEmptyInclHillsM": 88
+  },
+  {
+   "seed": 7,
+   "range": "300-3000",
+   "per100m": 1.15,
+   "styleHillsPer100m": 1.15,
+   "longestEmptyM": 147,
+   "longestEmptyS": 7.6,
+   "longestEmptyInclHillsM": 94
+  },
+  {
+   "seed": 42,
+   "range": "300-3000",
+   "per100m": 1.19,
+   "styleHillsPer100m": 0.96,
+   "longestEmptyM": 156,
+   "longestEmptyS": 9.9,
+   "longestEmptyInclHillsM": 94
+  }
+ ]
+}

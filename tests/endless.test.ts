@@ -6,6 +6,7 @@ import { Autopilot } from '../src/diag/autopilot';
 import { Recorder, replayHeadless } from '../src/diag/recorder';
 import { TUNING } from '../src/tuning';
 import { PROFILES, rideEndless, describeFail } from './endlessHelpers';
+import { densityOf, featureElements } from '../src/course/stats';
 
 const HC = TUNING.movement.hardCap;
 
@@ -114,6 +115,20 @@ describe('assembly', () => {
       for (let i = 1; i < xs.length; i++) if (xs[i] - xs[i - 1] >= 120) long.push(`seed ${s}: ${xs[i - 1].toFixed(0)}..${xs[i].toFixed(0)}`);
       expect(xs[0]).toBeLessThan(120);
     }
+    expect(long).toEqual([]);
+  });
+
+  it('dense: something to do (gap, rail, wall, pot or pillar) >= 1 per 100 m on average, hills fill the rest (< 100 m empty)', () => {
+    let n = 0, len = 0;
+    const long: string[] = [];
+    for (let s = 1; s <= 50; s++) {
+      const feats = generate(s, 3000, 100).flatMap((c) => c.features);
+      const d = densityOf(featureElements(feats), 300, 3000);
+      n += d.elements; len += 2700;
+      const xs = feats.map((f) => f.x).sort((a, b) => a - b);
+      for (let i = 1; i < xs.length; i++) if (xs[i] - xs[i - 1] >= 100 && xs[i] < 3000) long.push(`seed ${s}: ${xs[i - 1].toFixed(0)}..${xs[i].toFixed(0)}`);
+    }
+    expect((n / len) * 100).toBeGreaterThanOrEqual(1.0);
     expect(long).toEqual([]);
   });
 

@@ -103,6 +103,19 @@ export class PhraseBuilder {
     this.rails.push({ points, lateral, required });
     if (!required) this.features.push({ x, kind: 'rail-optional', required: false });
   }
+  /** Optional handrail (right of the route) following the ground just built from x0 to x1: something to grind on descents. */
+  handrail(x0: number, x1: number, h = 0.95): this {
+    const yAt = (x: number) => {
+      for (let i = 1; i < this.pts.length; i++) if (this.pts[i].x >= x) { const a = this.pts[i - 1], b = this.pts[i]; return a.y + ((b.y - a.y) * (x - a.x)) / Math.max(1e-6, b.x - a.x); }
+      return this.cur().y;
+    };
+    const n = Math.max(2, Math.ceil((x1 - x0) / 3) + 1);
+    this.rails.push({ points: Array.from({ length: n }, (_, i) => { const x = x0 + ((x1 - x0) * i) / (n - 1); return { x, y: yAt(x) + h }; }), lateral: 1.2, required: false });
+    this.features.push({ x: x0, kind: 'rail-optional', required: false });
+    return this;
+  }
+  /** Descent with an optional handrail along most of it. */
+  railSlope(len: number, dy: number): this { const a = this.cur().x; this.slope(len, dy); return this.handrail(a + 3, a + len - 4); }
   wall(w: Omit<Wall, 'id'>): void { this.walls.push(w); }
   /** `cluster`: a second pot right behind the first, cleared or skimmed together with it. */
   pot(x: number, cluster = false): void {
@@ -132,7 +145,7 @@ export const PHRASES: PhraseSpec[] = [
   },
   {
     id: 'boost', title: 'Boost descent', tier: 0, style: true, required: false, entry: [6, HC], exit: [14, HC], airtime: 0.2, receiving: 'flat', cpSpeed: 10,
-    build: (b) => { b.flat(4).slope(40, -9).flat(4).rollers(2, 0.9, 20).flat(8); },
+    build: (b) => { b.flat(4).railSlope(40, -9).flat(4).rollers(2, 0.9, 20).flat(8); },
   },
   {
     id: 'bleed', title: 'Easy climb', tier: 0, style: false, required: false, entry: [8, HC], exit: [8, 22], airtime: 0, receiving: 'flat', cpSpeed: 13,
@@ -149,44 +162,44 @@ export const PHRASES: PhraseSpec[] = [
   // ------------------------------------------------------------------ style air (no gaps)
   {
     id: 'crest-pop', title: 'Descent → crest pop', tier: 1, style: true, required: false, entry: [6, HC], exit: [14, HC], airtime: 0.8, receiving: 'downslope', cpSpeed: 11,
-    build: (b, d) => { b.flat(4).slope(40, -(9 + 3 * d)).flat(6).crest(2.0 + 0.6 * d, 10, 2.2, 18).flat(14); },
+    build: (b, d) => { b.flat(4).railSlope(40, -(9 + 3 * d)).flat(6).crest(2.0 + 0.6 * d, 10, 2.2, 18).flat(14); },
   },
   {
     id: 'rollers', title: 'Rolling hills', tier: 1, style: true, required: false, entry: [6, HC], exit: [11, HC], airtime: 0.4, receiving: 'downslope', cpSpeed: 14,
-    build: (b) => { b.flat(4).slope(24, -4).flat(4).rollers(3, 1.3, 20).flat(12); },
+    build: (b) => { b.flat(4).railSlope(24, -4).flat(4).rollers(3, 1.3, 20).flat(12); },
   },
   {
     id: 'valley-launch', title: 'Valley launch', tier: 1, style: true, required: false, entry: [6, HC], exit: [16, HC], airtime: 0.9, receiving: 'downslope', cpSpeed: 11,
-    build: (b, d) => { b.flat(4).slope(36, -(10 + 2 * d)).flat(4).crest(3.2, 18, 4.5, 24).flat(12); },
+    build: (b, d) => { b.flat(4).railSlope(36, -(10 + 2 * d)).flat(4).crest(3.2, 18, 4.5, 24).flat(12); },
   },
   {
     id: 'pop-chain', title: 'Rolling hills pop chain', tier: 2, style: true, required: false, entry: [6, HC], exit: [14, HC], airtime: 0.6, receiving: 'downslope', cpSpeed: 12,
-    build: (b, d) => { b.flat(4).slope(34, -(8 + 2 * d)).flat(4).rollers(4, 1.6, 18).flat(12); },
+    build: (b, d) => { b.flat(4).railSlope(34, -(8 + 2 * d)).flat(4).rollers(4, 1.6, 18).flat(12); },
   },
   {
     id: 'big-kicker', title: 'Big kicker', tier: 2, style: true, required: false, entry: [6, HC], exit: [15, HC], airtime: 1.2, receiving: 'downslope', cpSpeed: 11,
-    build: (b, d) => { b.flat(4).slope(44, -(13 + 3 * d)).flat(8).crest(3.0, 12, 3.6, 24).flat(16); },
+    build: (b, d) => { b.flat(4).railSlope(44, -(13 + 3 * d)).flat(8).crest(3.0, 12, 3.6, 24).flat(16); },
   },
   {
     id: 'double-pop', title: 'Double crest', tier: 2, style: true, required: false, entry: [6, HC], exit: [12, HC], airtime: 0.7, receiving: 'downslope', cpSpeed: 11,
-    build: (b) => { b.flat(4).slope(36, -9).flat(4).crest(1.8, 9, 1.6, 14).flat(12).crest(2.0, 10, 2.2, 16).flat(12); },
+    build: (b) => { b.flat(4).railSlope(36, -9).flat(4).crest(1.8, 9, 1.6, 14).flat(12).crest(2.0, 10, 2.2, 16).flat(12); },
   },
   // ------------------------------------------------------------------ compulsory actions
   {
     id: 'hop', title: 'Hop the gap', tier: 1, style: false, required: true, entry: [8, HC], exit: [10, HC], airtime: 0.5, receiving: 'broad', cpSpeed: 12,
-    build: (b, d) => { b.flat(4).runIn().slope(46, 2, linear); b.gap(5 + 1.2 * d, -0.4); b.slope(12, -0.8, easeOut).flat(26); },
+    build: (b, d) => { b.flat(4).runIn().slope(46, 2, linear); b.gap(5 + 1.2 * d, -0.4); b.slope(12, -0.8, easeOut).flat(16); },
   },
   {
     id: 'pot', title: 'Pot', tier: 1, style: false, required: true, entry: [8, HC], exit: [8, HC], airtime: 0.4, receiving: 'flat', cpSpeed: 13,
-    build: (b) => { b.flat(4).runIn().slope(46, 2, linear); b.pot(b.cur().x); b.flat(26); },
+    build: (b) => { b.flat(4).runIn().slope(46, 2, linear); b.pot(b.cur().x); b.flat(16); },
   },
   {
     id: 'skim-pair', title: 'Heel-skim pair', tier: 2, style: false, required: true, entry: [8, HC], exit: [12, HC], airtime: 0.4, receiving: 'downslope', cpSpeed: 14,
-    build: (b) => { b.flat(4).runIn().slope(46, 2, linear); const x = b.cur().x; b.flat(8); b.pot(x); b.pot(x + 4, true); b.slope(30, -5).flat(10); },
+    build: (b) => { b.flat(4).runIn().slope(46, 2, linear); const x = b.cur().x; b.flat(8); b.pot(x); b.pot(x + 4, true); b.railSlope(30, -5).flat(10); },
   },
   {
     id: 'pot-pillar', title: 'Pot → pillar', tier: 2, style: false, required: true, entry: [8, HC], exit: [8, HC], airtime: 0.5, receiving: 'flat', cpSpeed: 14,
-    build: (b, d) => { b.flat(4).runIn().slope(46, 2, linear); const x = b.cur().x; b.flat(lerp(36, 31, d)); b.pot(x); b.pillar(b.cur().x); b.flat(22); },
+    build: (b, d) => { b.flat(4).runIn().slope(46, 2, linear); const x = b.cur().x; b.flat(lerp(36, 31, d)); b.pot(x); b.pillar(b.cur().x); b.flat(14); },
   },
   {
     id: 'stepdowns', title: 'Step-down gaps', tier: 2, style: false, required: true, entry: [8, HC], exit: [9, HC], airtime: 0.6, receiving: 'broad', cpSpeed: 13,
@@ -198,7 +211,7 @@ export const PHRASES: PhraseSpec[] = [
   },
   {
     id: 'ramp-flip', title: 'Ramp → flip → broad landing', tier: 2, style: false, required: true, entry: [8, HC], exit: [13, HC], airtime: 1.0, receiving: 'broad', cpSpeed: 13,
-    build: (b, d) => { b.flat(4).runIn().slope(36, -8).flat(8).kicker(10, 2.4); b.gap(7 + 2 * d, -1.8); b.slope(16, -2.2, easeOut).flat(24); },
+    build: (b, d) => { b.flat(4).runIn().railSlope(36, -8).flat(8).kicker(10, 2.4); b.gap(7 + 2 * d, -1.8); b.slope(16, -2.2, easeOut).flat(24); },
   },
   {
     id: 'rail-launch', title: 'Jump → optional rail → launch', tier: 2, style: true, required: true, entry: [8, HC], exit: [8, HC], airtime: 0.6, receiving: 'downslope', cpSpeed: 13,
@@ -222,7 +235,7 @@ export const PHRASES: PhraseSpec[] = [
   {
     id: 'wall-gap', title: 'Compression → wall ride → receiving climb', tier: 3, style: false, required: true, entry: [10, HC], exit: [10, HC], airtime: 0, receiving: 'climb', cpSpeed: 12,
     build: (b, d) => {
-      b.flat(4).runIn().slope(44, -12).flat(8).kicker(10, 1.2);
+      b.flat(4).runIn().railSlope(44, -12).flat(8).kicker(10, 1.2);
       const len = 30 + 6 * d;
       const lip = b.gap(len, -1.4, 'wall');
       b.wall({ x0: lip.x - 4, x1: lip.x + len + 3, yBottom: lip.y - 4.5, yTop: lip.y + 4.5, side: 'right', lateral: 2.4, required: true });
@@ -232,7 +245,7 @@ export const PHRASES: PhraseSpec[] = [
   {
     id: 'ramp-pillar', title: 'Big jump → pillar', tier: 3, style: false, required: true, entry: [8, HC], exit: [12, HC], airtime: 1.0, receiving: 'broad', cpSpeed: 13,
     build: (b) => {
-      b.flat(4).runIn().slope(36, -8).flat(8).kicker(10, 2.4);
+      b.flat(4).runIn().railSlope(36, -8).flat(8).kicker(10, 2.4);
       const lip = b.gap(8, -1.8); b.slope(16, -2.2, easeOut).flat(46);
       b.pillar(lip.x + 8 + 30); b.flat(10);
     },
@@ -240,7 +253,7 @@ export const PHRASES: PhraseSpec[] = [
   {
     id: 'crest-pillar', title: 'Crest flip → pillar', tier: 3, style: true, required: true, entry: [6, HC], exit: [12, HC], airtime: 0.9, receiving: 'flat', cpSpeed: 12,
     build: (b) => {
-      b.flat(4).slope(40, -10).flat(6).crest(2.2, 10, 2.2, 18).runIn().flat(44);
+      b.flat(4).railSlope(40, -10).flat(6).crest(2.2, 10, 2.2, 18).runIn().flat(46);
       b.pillar(b.cur().x); b.flat(20);
     },
   },
@@ -271,7 +284,7 @@ export function difficultyAt(dist: number): number { return Math.min(1, Math.max
 /** Highest tier allowed at difficulty d. */
 export function maxTier(d: number): Tier { return d >= 0.35 ? 3 : d >= 0.1 ? 2 : 1; }
 /** Longest run of consecutive compulsory phrases allowed at difficulty d (longer combinations later). */
-export function maxRequiredRun(d: number): number { return d >= 0.7 ? 3 : d >= 0.4 ? 2 : 1; }
+export function maxRequiredRun(d: number): number { return d >= 0.6 ? 3 : d >= 0.15 ? 2 : 1; }
 
 /**
  * Neighbour validation: can `b` follow `a` directly, or which connector is needed?
@@ -315,7 +328,7 @@ export class Assembler {
     const tier = maxTier(d);
     const cands = LIBRARY.filter((p) => p.tier <= tier && !recent.includes(p.id));
     const w = cands.map((p) => {
-      let k = p.style ? 1.6 : 1; // the user wants lots of hills/kickers to trick off
+      let k = p.style ? 1.3 : 1; // the user wants lots of hills/kickers to trick off (but also things to do: dense course)
       if (p.tier === tier) k *= 1.6;
       if (p.required && this.requiredRun >= maxRequiredRun(d)) k *= 0.5;
       if (y < y0 - 100 && netDrop(p) < -6) k *= 0.6; // deep below the start: fewer big descents
