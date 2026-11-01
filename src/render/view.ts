@@ -75,7 +75,18 @@ export class GameView {
     this.scene.add(this.rider.root, this.effects.group, this.speedLines.group, this.petals.mesh);
     this.quality.onChange = (q) => this.applyQuality(q);
     this.applyQuality(this.quality.level);
-    void this.rider.setLook(this.rider.look);
+    const look = this.rider.setLook(this.rider.look);
+    this.env.prepare(this.renderer);
+    // load veil: the first view waits (max ~9 s) for Ao, the town kit and the painted textures, all pre-uploaded, so
+    // nothing pops in on the start screen. Purely visual: input and the sim are never blocked.
+    const veil = document.createElement('div');
+    veil.className = 'veil';
+    container.appendChild(veil);
+    void Promise.race([Promise.all([this.env.ready, Promise.resolve(look).catch(() => {})]), new Promise((r) => setTimeout(r, 9000))]).then(() => {
+      try { this.renderer.compile(this.scene, this.rig.camera); } catch { /* precompile is best-effort */ }
+      requestAnimationFrame(() => veil.classList.add('gone'));
+      setTimeout(() => veil.remove(), 1500);
+    });
 
     this.trailLine = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineDashedMaterial({ color: '#c8553d', dashSize: 0.5, gapSize: 0.35, fog: false }));
     this.trailLine.visible = false;
@@ -296,7 +307,7 @@ export class GameView {
       this.rig.update(dt, x, y, curr.speed, false, ahead);
     }
     ART_UNIFORMS.uTime.value += dt;
-    this.env.follow(toScene(x + 10, y), this.rig.camera.position, x, y);
+    this.env.follow(toScene(x + 18, y), this.rig.camera.position, x, y);
     this.petals.update(dt, x, y);
     // restrained air-cutting streaks scale with actual speed
     this.speedLines.update(dt, x, y, failed ? 0 : curr.speed);

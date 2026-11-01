@@ -108,33 +108,42 @@ export class MergeBuffer {
 }
 
 /**
- * The one town material: our toon ramp + rim (same as Ao and the broom), vertex colours from the kit bake, and a
- * painted brush-texture detail projected in world space (planar by dominant normal) so flat plaster reads painted.
+ * Town material: our toon ramp + rim (same as Ao and the broom), vertex colours from the kit bake, and a painted
+ * brush-texture detail projected in world space (planar by dominant normal) so flat plaster reads painted.
+ *
+ * Anti pop-in: every chunk LOD gets its own material instance (all share one GL program via the cache key) with a
+ * `uFade` range: a fragment survives only when its screen-space dither value lies in [uFade.x, uFade.y). The near and
+ * far LOD of a chunk get complementary ranges, so a LOD switch is a dithered crossfade over distance rather than a
+ * swap, and new chunks dissolve in. The detail texture's strength ramps in (`TOWN_DETAIL.strength`) once it has loaded.
  */
-let townMat: THREE.MeshToonMaterial | null = null;
-export const TOWN_DETAIL: { tex: THREE.Texture | null } = { tex: null };
-export function townMaterial(): THREE.MeshToonMaterial {
-  if (townMat) return townMat;
-  const m = toon('#ffffff', { vertexColors: true, rim: 0.7 });
+export const TOWN_DETAIL: { tex: THREE.Texture | null; strength: { value: number } } = { tex: null, strength: { value: 0 } };
+export type TownMaterial = THREE.MeshToonMaterial & { fade: THREE.Vector2 };
+export function townMaterial(): TownMaterial {
+  const m = toon('#ffffff', { vertexColors: true, rim: 0.7 }) as TownMaterial;
   const prev = m.onBeforeCompile;
   const uDetail = { value: TOWN_DETAIL.tex };
-  const uHas = { value: TOWN_DETAIL.tex ? 1 : 0 };
+  m.fade = new THREE.Vector2(0, 1);
+  const uFade = { value: m.fade };
   m.onBeforeCompile = (sh, r) => {
     prev.call(m, sh, r);
-    uDetail.value = TOWN_DETAIL.tex; uHas.value = TOWN_DETAIL.tex ? 1 : 0;
-    sh.uniforms.uDetail = uDetail; sh.uniforms.uHasDetail = uHas;
+    uDetail.value = TOWN_DETAIL.tex;
+    sh.uniforms.uDetail = uDetail; sh.uniforms.uDetailStrength = TOWN_DETAIL.strength; sh.uniforms.uFade = uFade;
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vWPos; varying vec3 vWNrm;')
       .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvWPos = (modelMatrix * vec4(transformed, 1.0)).xyz; vWNrm = normalize(mat3(modelMatrix) * objectNormal);');
-    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vWPos; varying vec3 vWNrm; uniform sampler2D uDetail; uniform float uHasDetail;')
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
+        varying vec3 vWPos; varying vec3 vWNrm; uniform sampler2D uDetail; uniform float uDetailStrength; uniform vec2 uFade;
+        float townDither(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }`)
+      .replace('void main() {', `void main() {
+        float tdh = townDither(floor(gl_FragCoord.xy));
+        if (tdh < uFade.x || tdh >= uFade.y) discard;`)
       .replace('#include <color_fragment>', `#include <color_fragment>
-        if (uHasDetail > 0.5) {
+        if (uDetailStrength > 0.0) {
           vec3 an = abs(vWNrm);
           vec2 uv = an.y > max(an.x, an.z) ? vWPos.xz : (an.x > an.z ? vWPos.zy : vWPos.xy);
           float d = texture2D(uDetail, uv * 0.23).r;
-          diffuseColor.rgb *= mix(1.0, 0.82 + d * 0.36, 0.55);
+          diffuseColor.rgb *= mix(1.0, 0.82 + d * 0.36, 0.55 * uDetailStrength);
         }`);
   };
-  m.customProgramCacheKey = () => 'town-detail';
-  townMat = m;
+  m.customProgramCacheKey = () => 'town-detail-fade';
   return m;
 }

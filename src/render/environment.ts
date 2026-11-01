@@ -4,7 +4,7 @@ import { toon, ART_UNIFORMS } from './materials';
 import { toScene, ORIGIN, ROUTE_DIR, ROUTE_RIGHT, ROUTE_YAW } from './space';
 import { GeoBuilder, blob } from './geo';
 import type { Quality } from './quality';
-import { Kit, townMaterial, TOWN_DETAIL } from './town/kit';
+import { Kit, townMaterial, TOWN_DETAIL, type TownMaterial } from './town/kit';
 import { buildTownChunk, TOWN, type GroundFn, type ChunkOpts } from './town/town';
 
 /**
@@ -41,9 +41,13 @@ export const ENV_STYLE = {
   panoArc: 74, panoHorizon: 0.565,
 };
 
+/** Texture loads in flight (Environment.ready waits for them; each loaded texture is pre-uploaded to the GPU). */
+const PENDING: Promise<THREE.Texture | null>[] = [];
 const loadTex = (url: string, cb?: (t: THREE.Texture) => void): THREE.Texture | null => {
   if (typeof document === 'undefined') return null;
-  const t = new THREE.TextureLoader().load(url, cb);
+  let done: (t: THREE.Texture | null) => void = () => {};
+  PENDING.push(new Promise((r) => { done = r; }));
+  const t = new THREE.TextureLoader().load(url, (tx) => { cb?.(tx); done(tx); }, undefined, () => done(null));
   t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
   return t;
 };
@@ -133,7 +137,24 @@ function seaPlane(): THREE.Mesh {
   return m;
 }
 
-interface TownView { group: THREE.Group; near: THREE.Mesh | null; far: THREE.Mesh | null; x0: number; tris: [number, number] }
+interface TownView { group: THREE.Group; near: THREE.Mesh | null; far: THREE.Mesh | null; nearMat: TownMaterial; farMat: TownMaterial; x0: number; tris: [number, number]; born: number }
+
+/**
+ * Town LOD/streaming distances (route metres, measured from the rider to a chunk's centre) and fade times.
+ * Near detail dithers in between `nearFadeEnd` and `nearFull` ahead; new chunks are built `ahead` metres out and
+ * dissolve in over the last `spawnFade` metres (deep in the haze) or `spawnTime` seconds (whichever is later), so
+ * nothing swaps or appears in one frame. Behind the camera (< `nearBehind`) the switch back to far is hard: unseen.
+ */
+export const TOWN_LOD = { behind: 60, ahead: 480, spawnFade: 110, nearFull: 55, nearFadeEnd: 100, nearBehind: -40, spawnTime: 0.7 };
+
+/** Dither ranges for a chunk's near and far meshes. `d`: chunk centre minus rider x; `age`: seconds since built. */
+export function townFade(d: number, age: number): { near: [number, number]; far: [number, number] } {
+  const L = TOWN_LOD, ss = (a: number, b: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+  const present = Math.min(1 - ss(L.ahead - L.spawnFade, L.ahead - 20, d), Math.min(1, Math.max(0, age / L.spawnTime)));
+  const share = d < L.nearBehind ? 0 : 1 - ss(L.nearFull, L.nearFadeEnd, d);
+  const cut = present * share;
+  return { near: [0, cut], far: [cut, present] };
+}
 
 export class Environment {
   readonly group = new THREE.Group();
@@ -157,8 +178,11 @@ export class Environment {
   private kit: Kit | null = null;
   private sceneryMat = toon('#ffffff', { vertexColors: true, sway: true, rim: 0.6 });
   static readonly SEG = 200;
-  /** Town streaming window (route m behind / ahead of the rider) and the near-LOD radius. */
-  static readonly TOWN = { behind: 60, ahead: 300, near: 50 };
+  /** Town streaming window: see TOWN_LOD. */
+  static readonly TOWN = TOWN_LOD;
+  private renderer: THREE.WebGLRenderer | null = null;
+  /** Resolves once the kit and every painted texture have loaded (or failed); see View's load veil. */
+  ready: Promise<void> = Promise.resolve();
 
   constructor(scene: THREE.Scene) {
     scene.fog = new THREE.Fog(ENV_STYLE.fog, ENV_STYLE.fogNear, ENV_STYLE.fogFar);
@@ -175,7 +199,7 @@ export class Environment {
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(1024, 1024);
     const sc = this.sun.shadow.camera;
-    sc.left = -20; sc.right = 20; sc.top = 20; sc.bottom = -20; sc.near = 1; sc.far = 140;
+    sc.left = -28; sc.right = 28; sc.top = 28; sc.bottom = -28; sc.near = 1; sc.far = 160; // reaches ~45 m ahead: prop shadows appear in the haze, not beside Ao
     this.sun.shadow.bias = -0.0006;
     this.sun.shadow.normalBias = 0.04;
     this.sun.shadow.radius = 3;
@@ -193,9 +217,13 @@ export class Environment {
     if (typeof document !== 'undefined' && typeof fetch !== 'undefined') {
       TOWN_DETAIL.tex = loadTex(`${BASE}town/detail.jpg`, (t) => { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.needsUpdate = true; });
       if (TOWN_DETAIL.tex) { TOWN_DETAIL.tex.colorSpace = THREE.NoColorSpace; TOWN_DETAIL.tex.wrapS = TOWN_DETAIL.tex.wrapT = THREE.RepeatWrapping; }
-      Kit.load(`${BASE}town/`).then((k) => this.setKit(k)).catch((e) => console.warn('town kit failed to load', e));
+      const kit = Kit.load(`${BASE}town/`).then((k) => this.setKit(k)).catch((e) => console.warn('town kit failed to load', e));
+      this.ready = Promise.all([kit, ...PENDING.map((p) => p.then((t) => { if (t && this.renderer) this.renderer.initTexture(t); }))]).then(() => {});
     }
   }
+
+  /** Renderer for pre-uploading textures as they arrive (no first-view upload hitch / late texture). */
+  prepare(renderer: THREE.WebGLRenderer): void { this.renderer = renderer; }
 
   /** Use a loaded kit (tests can inject one); rebuilds the town chunks. */
   setKit(k: Kit): void {
@@ -263,20 +291,19 @@ export class Environment {
   get segmentCount(): number { return this.segs.size; }
   get townChunkCount(): number { return this.town.size; }
   /** Triangles in the visible town LODs (diagnostics). */
-  townTris(): number { let t = 0; for (const v of this.town.values()) t += v.near?.visible ? v.tris[0] : v.far?.visible ? v.tris[1] : 0; return t; }
+  townTris(): number { let t = 0; for (const v of this.town.values()) t += (v.near?.visible ? v.tris[0] : 0) + (v.far?.visible ? v.tris[1] : 0); return t; }
 
   private buildTown(k: number): TownView {
     const c = buildTownChunk(this.kit!, k, this.seed, this.groundAt, this.townOpts);
     const group = new THREE.Group();
-    const mat = townMaterial();
-    const mk = (g: THREE.BufferGeometry | null) => { if (!g) return null; const m = new THREE.Mesh(g, mat); m.receiveShadow = true; group.add(m); return m; };
-    const near = mk(c.near), far = mk(c.far);
-    if (far) far.visible = false;
+    const nearMat = townMaterial(), farMat = townMaterial();
+    const mk = (g: THREE.BufferGeometry | null, mat: TownMaterial) => { if (!g) return null; const m = new THREE.Mesh(g, mat); m.receiveShadow = true; m.visible = false; group.add(m); return m; };
+    const near = mk(c.near, nearMat), far = mk(c.far, farMat);
     group.position.copy(toScene(k * TOWN.chunk, c.y0));
     this.group.add(group);
-    return { group, near, far, x0: k * TOWN.chunk, tris: [c.trisNear, c.trisFar] };
+    return { group, near, far, nearMat, farMat, x0: k * TOWN.chunk, tris: [c.trisNear, c.trisFar], born: ART_UNIFORMS.uTime.value };
   }
-  private dropTown(v: TownView): void { this.group.remove(v.group); v.near?.geometry.dispose(); v.far?.geometry.dispose(); }
+  private dropTown(v: TownView): void { this.group.remove(v.group); v.near?.geometry.dispose(); v.far?.geometry.dispose(); v.nearMat.dispose(); v.farMat.dispose(); }
 
   /** Opening course: open sea on the right from the harbour on (no hill/blocks standing in the water). */
   private seaRight(x: number): boolean { return this.townOpts.harbourFrom !== undefined && x >= this.townOpts.harbourFrom - 30; }
@@ -332,12 +359,17 @@ export class Environment {
     this.farTown.position.set(cameraPos.x, cameraPos.y - 40, cameraPos.z);
     if (this.seaFollow) this.seaY += (focus.y - 45 - this.seaY) * 0.02;
     this.sea.position.set(cameraPos.x, this.seaFollow ? this.seaY : this.seaBase - ORIGIN.y, cameraPos.z);
-    const N = Environment.TOWN.near;
+    const now = ART_UNIFORMS.uTime.value;
     for (const v of this.town.values()) {
-      const c = v.x0 + TOWN.chunk / 2, near = c > routeX - 30 && c < routeX + N;
-      if (v.near) v.near.visible = near || !v.far;
-      if (v.far) v.far.visible = !near;
+      const f = townFade(v.x0 + TOWN.chunk / 2 - routeX, now - v.born);
+      if (!v.far) f.near[1] = f.far[1]; // no far LOD: near covers it all
+      v.nearMat.fade.set(f.near[0], f.near[1]); v.farMat.fade.set(f.far[0], f.far[1]);
+      if (v.near) v.near.visible = f.near[1] - f.near[0] > 0.002;
+      if (v.far) v.far.visible = f.far[1] - f.far[0] > 0.002;
     }
+    // painted detail on the plaster eases in once its texture is on the GPU (never snaps)
+    const tex = TOWN_DETAIL.tex, loaded = !!(tex && (tex.image as { width?: number } | undefined)?.width);
+    TOWN_DETAIL.strength.value = loaded ? Math.min(1, TOWN_DETAIL.strength.value + 0.04) : 0;
     const seaRoute = this.sea.position.y + ORIGIN.y;
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3();
     const t = ART_UNIFORMS.uTime.value;
