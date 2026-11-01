@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GeoBuilder, blob } from '../geo';
 import { toSceneRaw, ROUTE_RIGHT, ROUTE_YAW } from '../space';
-import { Kit, MergeBuffer, type Tints } from './kit';
+import { Kit, MergeBuffer, TEX, type Tints } from './kit';
 
 /**
  * Witch-town layout (Kiki-style Mediterranean seaside town). Places premade kit pieces along the route in 40 m
@@ -51,9 +51,9 @@ const local = (base: THREE.Matrix4, x: number, y: number, z: number, ry = 0, s: 
 };
 
 /** A box (helper geometry, vertex-coloured) in a placed frame. */
-function box(mb: MergeBuffer, base: THREE.Matrix4, w: number, h: number, d: number, x: number, y: number, z: number, color: string | THREE.Color, top?: string | THREE.Color): void {
+function box(mb: MergeBuffer, base: THREE.Matrix4, w: number, h: number, d: number, x: number, y: number, z: number, color: string | THREE.Color, top?: string | THREE.Color, tex: number = TEX.NONE): void {
   const g = new GeoBuilder().add(new THREE.BoxGeometry(w, h, d), [x, y, z], color, { top: top ?? color }).build();
-  if (g) mb.geometry(g, base);
+  if (g) mb.geometry(g, base, tex);
 }
 
 /** Presentation knobs (perf vs looks). */
@@ -69,9 +69,9 @@ function house(kit: Kit, near: MergeBuffer, far: MergeBuffer, base: THREE.Matrix
   for (const [mb, full] of [[near, nearDetail], [far, false]] as const) {
     if (!full) { cheapHouse(mb, base, h); continue; }
     // foundation (the hill drops away): stone block under the house
-    box(mb, base, h.w + 0.1, 7, T.depth + 0.1, 0, -3.5, 0, T.stoneShade, T.stone);
+    box(mb, base, h.w + 0.1, 7, T.depth + 0.1, 0, -3.5, 0, T.stoneShade, T.stone, TEX.RUBBLE);
     if (full) box(mb, base, h.w - 0.5, H - 0.3, T.depth - 0.7, 0, (H - 0.3) / 2, -0.1, T.interior); // dark interiors behind the windows
-    else box(mb, base, h.w - 0.1, H - 0.05, T.depth - 0.3, 0, H / 2, -0.15, h.plaster.clone().multiply(lin('#f4ece2')));
+    else box(mb, base, h.w - 0.1, H - 0.05, T.depth - 0.3, 0, H / 2, -0.15, h.plaster.clone().multiply(lin('#f4ece2')), undefined, TEX.PLASTER);
     // street facade: door + shop/plain on the ground floor, windows with painted shutters above
     for (let f = 0; f < h.floors; f++) for (let i = 0; i < n; i++) {
       const px = -half + 1 + i * 2, y = f * T.storey;
@@ -87,14 +87,14 @@ function house(kit: Kit, near: MergeBuffer, far: MergeBuffer, base: THREE.Matrix
         db.add(new THREE.BoxGeometry(1.25, 2.6, 0.06), [px, y + 1.3, 1.86], h.shutter.clone().multiplyScalar(0.8), { top: h.shutter });
         db.add(new THREE.BoxGeometry(0.46, 0.4, 0.04), [px, y + 1.72, 1.9], T.interior);
         db.add(new THREE.BoxGeometry(0.08, 0.08, 0.06), [px + 0.36, y + 1.05, 1.91], T.gold);
-        mb.geometry(db.build()!, base);
+        mb.geometry(db.build()!, base, TEX.PLANKS);
       }
       if (full && f > 0 && h.flowers && piece === 'wallWin') flowerBox(mb, base, px, y + 1.02, 2.28, rng);
       if (full && f === 1 && h.balcony && i === 0) mb.piece(kit, 'balcony', local(base, px, y, 2 - 0.09 - 0.9), tints);
     }
     if (full) {
       // end walls (row houses touch, but heights step so the sides show)
-      for (const sx of [-1, 1]) box(mb, base, 0.18, H, T.depth - 0.2, sx * (half - 0.09), H / 2, -0.1, h.plaster.clone().multiply(lin('#efe6dc')), h.plaster); // plain plaster end walls
+      for (const sx of [-1, 1]) box(mb, base, 0.18, H, T.depth - 0.2, sx * (half - 0.09), H / 2, -0.1, h.plaster.clone().multiply(lin('#efe6dc')), h.plaster, TEX.PLASTER); // plain plaster end walls
       if (h.sign >= 0 && h.sign < T.sign.length) hangingSign(mb, base, -half + 0.4, 2.7, 2.15, T.sign[h.sign]);
     }
     mb.piece(kit, roof + (TOWN_LOD.fullRoofs ? '' : 'lite'), local(base, 0, H, 0, roofRot), tints);
@@ -108,9 +108,10 @@ function house(kit: Kit, near: MergeBuffer, far: MergeBuffer, base: THREE.Matrix
  */
 function cheapHouse(mb: MergeBuffer, base: THREE.Matrix4, h: HouseSpec): void {
   const T = TOWN, n = h.w / 2, H = h.floors * T.storey, half = h.w / 2, b = new GeoBuilder();
-  b.add(new THREE.BoxGeometry(h.w + 0.1, 7, T.depth + 0.1), [0, -3.5, 0], T.stoneShade, { top: T.stone });
+  const fb = new GeoBuilder(), pb = new GeoBuilder(), rb = new GeoBuilder();
+  fb.add(new THREE.BoxGeometry(h.w + 0.1, 7, T.depth + 0.1), [0, -3.5, 0], T.stoneShade, { top: T.stone });
   // body front face sits exactly where the near LOD's facade plaster is (z = depth/2), so the LOD crossfade has no depth step
-  b.add(new THREE.BoxGeometry(h.w, H, T.depth), [0, H / 2, 0], h.plaster.clone().multiply(lin('#f7efe6')), { top: h.plaster });
+  pb.add(new THREE.BoxGeometry(h.w, H, T.depth), [0, H / 2, 0], h.plaster.clone().multiply(lin('#f7efe6')), { top: h.plaster });
   b.add(new THREE.BoxGeometry(h.w + 0.04, 0.22, T.depth - 0.1), [0, H - 0.11, -0.1], T.trimCream);
   const zf = T.depth / 2 + 0.012;
   for (let f = 0; f < h.floors; f++) for (let i = 0; i < n; i++) {
@@ -125,7 +126,10 @@ function cheapHouse(mb: MergeBuffer, base: THREE.Matrix4, h: HouseSpec): void {
     b.add(new THREE.PlaneGeometry(0.36, 1.36), [px + 0.56, y + 1.55, zf + 0.005], h.shutter);
   }
   const roof = new THREE.Color(T.terracotta).multiplyScalar(h.roof);
-  b.add(new THREE.ConeGeometry(Math.SQRT1_2, 1, 4, 1).rotateY(Math.PI / 4), [0, H + 0.75, -0.1], roof, { scale: [h.w + 0.7, 1.5, T.depth + 0.5], top: roof });
+  rb.add(new THREE.ConeGeometry(Math.SQRT1_2, 1, 4, 1).rotateY(Math.PI / 4), [0, H + 0.75, -0.1], roof, { scale: [h.w + 0.7, 1.5, T.depth + 0.5], top: roof });
+  mb.geometry(fb.build()!, base, TEX.RUBBLE);
+  mb.geometry(pb.build()!, base, TEX.PLASTER);
+  mb.geometry(rb.build()!, base, TEX.TILES);
   mb.geometry(b.build()!, base);
 }
 
@@ -176,14 +180,15 @@ export function buildTownChunk(kit: Kit, k: number, seed: number, ground: Ground
   const pick = <V>(a: V[]) => a[Math.floor(rng() * a.length)];
   const harbour = opts.harbourFrom !== undefined && x0 >= opts.harbourFrom;
   // pavement/canal ribbons (both LODs share: put in far, near copies)
-  const ribs: THREE.BufferGeometry[] = [];
+  const ribs: [THREE.BufferGeometry, number][] = [];
   const pv = new THREE.Vector3();
-  const ribbon = (latA: number, latB: number, yAt: (x: number) => number, ca: string, cb: string) => {
+  const ribbon = (latA: number, latB: number, yAt: (x: number) => number, ca: string, cb: string, tex: number = TEX.COBBLES) => {
     const pos: number[] = [], col: number[] = [], cA = lin(ca), cB = lin(cb);
     for (let x = x0; x < x1 - 1e-6; x += 2) {
       const xa = x, xb = Math.min(x1, x + 2);
       const q = [[xa, latA], [xb, latA], [xa, latB], [xb, latB]].map(([xx, ll]) => { toSceneRaw(xx - x0, yAt(xx) - y0, ll, pv); return [pv.x, pv.y, pv.z]; });
-      const c = (Math.floor(x / 2) % 2 ? cA : cB);
+      // hi-fi: no 2 m checker any more (the painted cobbles carry the detail); a gentle drift along the street instead
+      const c = cA.clone().lerp(cB, 0.5 + 0.5 * Math.sin(x * 0.13) * Math.sin(x * 0.047 + 1.3));
       for (const i of [0, 2, 1, 1, 2, 3]) { pos.push(...q[i]); col.push(c.r, c.g, c.b); }
     }
     // wind every triangle so it faces up (visible from above with front-face culling)
@@ -194,7 +199,7 @@ export function buildTownChunk(kit: Kit, k: number, seed: number, ground: Ground
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
     g.computeVertexNormals();
-    ribs.push(g);
+    ribs.push([g, tex]);
   };
   const streetY = (x: number) => { const g = ground(x); return g.gap ? level(ground, x) - 7 : g.y - 0.14; };
   const canalY = (x: number) => level(ground, x) - 6.5;
@@ -202,10 +207,10 @@ export function buildTownChunk(kit: Kit, k: number, seed: number, ground: Ground
   // right pavement always (in the harbour it runs out to the quay edge): no tall plain quay face beside the track
   // that reads like a wall you could ride; only the turquoise course walls are rideable
   ribbon(T.streetEdge, harbour ? T.front + 2 : T.front, streetY, T.pavement, T.pavementAlt);
-  ribbon(-T.front - 0.2, T.front + 0.2, canalY, T.water, T.water);
+  ribbon(-T.front - 0.2, T.front + 0.2, canalY, T.water, T.water, TEX.NONE);
   ribbon(-26, -T.front, (x) => level(ground, x) - 0.2, T.pavementAlt, T.pavementAlt);
   if (!harbour) ribbon(T.front, 26, (x) => level(ground, x) - 0.2, T.pavementAlt, T.pavementAlt);
-  for (const rg of ribs) { near.geometry(rg); far.geometry(rg); rg.dispose(); }
+  for (const [rg, tex] of ribs) { near.geometry(rg, undefined, tex); far.geometry(rg, undefined, tex); rg.dispose(); }
 
   for (const side of [1, -1] as const) {
     if (side === 1 && harbour) continue;
@@ -260,7 +265,7 @@ function harbourChunk(kit: Kit, near: MergeBuffer, far: MergeBuffer, P: Placer, 
   const T = TOWN;
   for (let x = x0; x < x1; x += 4) {
     const g = level(ground, x + 2);
-    for (const mb of [near, far]) box(mb, P.at(x + 2, g, T.front + 1, ROUTE_YAW), 4.1, 9, 2, 0, -4.6, 0, T.stoneShade, T.stone); // quay wall
+    for (const mb of [near, far]) box(mb, P.at(x + 2, g, T.front + 1, ROUTE_YAW), 4.1, 9, 2, 0, -4.6, 0, T.stoneShade, T.stone, TEX.RUBBLE); // quay wall
   }
   const seaY = level(ground, x0) - 8.6;
   for (let x = x0 + 3; x < x1; x += 9 + rng() * 6) {
@@ -276,19 +281,20 @@ function harbourChunk(kit: Kit, near: MergeBuffer, far: MergeBuffer, P: Placer, 
 function clockTower(kit: Kit, near: MergeBuffer, far: MergeBuffer, base: THREE.Matrix4): void {
   const T = TOWN, floors = 6, H = floors * T.storey, t: Tints = { plaster: lin('#f3e6cf'), shutter: lin('#3c6fa8') };
   for (const mb of [near, far]) {
-    box(mb, base, 4.1, 8, 4.1, 0, -4, 0, T.stoneShade, T.stone);
+    box(mb, base, 4.1, 8, 4.1, 0, -4, 0, T.stoneShade, T.stone, TEX.RUBBLE);
     if (mb === far) {
       // far LOD: plaster shaft + pyramid cap; the clock faces below still read at distance
       const fb = new GeoBuilder();
       fb.add(new THREE.BoxGeometry(4, H, 4), [0, H / 2, 0], lin('#e9dcc4'), { top: lin('#f3e6cf') });
-      fb.add(new THREE.ConeGeometry(Math.SQRT1_2, 1, 4, 1).rotateY(Math.PI / 4), [0, H + 2.2, 0], new THREE.Color(T.terracotta), { scale: [4.6, 4.4, 4.6] });
-      mb.geometry(fb.build()!, base);
+      mb.geometry(fb.build()!, base, TEX.PLASTER);
+      const cb = new GeoBuilder().add(new THREE.ConeGeometry(Math.SQRT1_2, 1, 4, 1).rotateY(Math.PI / 4), [0, H + 2.2, 0], new THREE.Color(T.terracotta), { scale: [4.6, 4.4, 4.6] });
+      mb.geometry(cb.build()!, base, TEX.TILES);
     } else {
       // near: same plain plaster shaft as the far LOD for the lower floors (cheaper, and no change at the LOD blend);
       // kit window pieces only on the top two floors, under the clock and the tiled cap
       const lowH = (floors - 2) * T.storey, nb = new GeoBuilder();
       nb.add(new THREE.BoxGeometry(4, lowH, 4), [0, lowH / 2, 0], lin('#e9dcc4'), { top: lin('#f3e6cf') });
-      mb.geometry(nb.build()!, base);
+      mb.geometry(nb.build()!, base, TEX.PLASTER);
       box(mb, base, 3.6, H - lowH, 3.6, 0, lowH + (H - lowH) / 2, 0, T.interior);
     }
     if (mb !== far) {

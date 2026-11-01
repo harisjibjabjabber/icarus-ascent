@@ -18,7 +18,7 @@ export interface HeroineFrame {
   /** Presentation lateral velocity (m/s, + = toward the rider's right). */
   lateralVel: number;
 }
-export type HeroineTier = 'low' | 'medium' | 'high';
+export type HeroineTier = 'low' | 'medium' | 'high' | 'ultra';
 
 /** Minimum visual hold of a grab pose (s), so a quick tap-grab still reads. Presentation only. */
 const GRAB_MIN_HOLD = 0.45; // broom polish: a grab holds for a satisfying beat (presentation only; the sim's trick timing is untouched)
@@ -258,10 +258,23 @@ export class Heroine {
     this.vrm.springBoneManager?.setInitState();
   }
 
-  setTier(t: HeroineTier): void {
+  setTier(t: HeroineTier, anisotropy = 1): void {
     this.tier = t;
     for (const m of this.outlineMats) m.visible = t !== 'low';
-    this.vrm.scene.traverse((o) => { if ((o as THREE.Mesh).isMesh) o.castShadow = t !== 'low'; });
+    const hi = t === 'high' || t === 'ultra';
+    this.vrm.scene.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      mesh.castShadow = t !== 'low';
+      // high/ultra: crisp clothes/hair textures at glancing angles (VRM textures load with anisotropy 1)
+      for (const m of (Array.isArray(mesh.material) ? mesh.material : [mesh.material]) as (THREE.Material & Record<string, unknown>)[]) {
+        for (const k of ['map', 'shadeMultiplyTexture', 'normalMap', 'matcapTexture', 'rimMultiplyTexture']) {
+          const tx = m[k] as THREE.Texture | null | undefined;
+          const a = hi ? anisotropy : 1;
+          if (tx && tx.isTexture && tx.anisotropy !== a) { tx.anisotropy = a; tx.needsUpdate = true; }
+        }
+      }
+    });
   }
 
   // ---------------- state machine ----------------

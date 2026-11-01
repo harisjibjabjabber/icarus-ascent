@@ -211,6 +211,7 @@ export class RiderView {
   private figure: Heroine | null = null;
   private loading: Look | null = null;
   private tier: HeroineTier = 'high';
+  private aniso = 1;
   private latPrev = 0;
   look: Look = initialLook();
   /** Fired when a look has loaded and is riding (or failed: null). */
@@ -226,7 +227,7 @@ export class RiderView {
       const vrm = await loadVrm(lookUrl(l));
       if (this.look !== l) { (await import('@pixiv/three-vrm')).VRMUtils.deepDispose(vrm.scene); return; }
       const h = new Heroine(vrm);
-      h.setTier(this.tier);
+      h.setTier(this.tier, this.aniso);
       this.figure?.dispose();
       h.grabTargets.L.copy(BROOM.grabL); h.grabTargets.R.copy(BROOM.grabR);
       h.attach(this.stance, this.board, this.root);
@@ -243,7 +244,7 @@ export class RiderView {
   event(e: SimEvent): void { this.figure?.event(e); }
   /** Run restarted (checkpoint): she hops back on. */
   reset(): void { this.figure?.reset(); }
-  setQuality(tier: HeroineTier): void { this.tier = tier; this.figure?.setTier(tier); }
+  setQuality(tier: HeroineTier, anisotropy = 1): void { this.tier = tier; this.aniso = anisotropy; this.figure?.setTier(tier, anisotropy); }
   /** Diagnostics: character CPU time and state. */
   get figureStats(): { cpuMs: number; state: string; ik: number[] } | null { return this.figure?.stats ?? null; }
   get figureObject(): THREE.Object3D | null { return this.figure?.object ?? null; }
