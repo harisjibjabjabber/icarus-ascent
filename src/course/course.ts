@@ -116,6 +116,11 @@ export interface Chunk {
   tier?: number;
   difficulty?: number;
   connector?: boolean;
+  /** Endless: zone this chunk belongs to, zone gate / set piece flags and the wave it was assembled in. */
+  zone?: string;
+  gate?: { from: string; to: string };
+  setPiece?: boolean;
+  wave?: { index: number; phase: 'warmup' | 'build' | 'peak' | 'breather' };
   /** Checkpoint: a retry from this chunk starts here, rolling at cpSpeed. */
   cpX: number;
   cpSpeed: number;
