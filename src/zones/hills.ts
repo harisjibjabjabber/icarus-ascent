@@ -9,7 +9,7 @@ export const HILLS: Zone = {
   id: 'hills',
   name: 'Rolling Hills',
   tagline: 'Wildflowers, big skies and long crests (rough stub)',
-  phrases: ['crest-pop', 'rollers', 'valley-launch', 'pop-chain', 'big-kicker', 'double-pop', 'hop', 'pot', 'skim-pair', 'stepdowns', 'ramp-flip', 'rail-launch', 'crest-pillar'],
+  phrases: ['crest-pop', 'rollers', 'valley-launch', 'pop-chain', 'big-kicker', 'double-pop', 'high-line', 'hop', 'pot', 'skim-pair', 'stepdowns', 'ramp-flip', 'rail-launch', 'crest-pillar'],
   setPieces: ['sp-pot-gauntlet', 'sp-stepdown-flip', 'sp-quay'],
   weights: { rollers: 1.6, 'pop-chain': 1.4, 'double-pop': 1.3 },
   waves: 2,

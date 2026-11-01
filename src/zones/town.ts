@@ -6,7 +6,7 @@ export const TOWN: Zone = {
   name: 'Seaside Town',
   tagline: 'Terracotta roofs, cobbles and the harbour below',
   phrases: [
-    'crest-pop', 'rollers', 'valley-launch', 'pop-chain', 'big-kicker', 'double-pop',
+    'crest-pop', 'rollers', 'valley-launch', 'pop-chain', 'big-kicker', 'double-pop', 'high-line',
     'hop', 'pot', 'skim-pair', 'pot-pillar', 'stepdowns', 'ramp-flip', 'rail-launch', 'rail-gap',
     'wall-gap', 'ramp-pillar', 'crest-pillar', 'gap-pillar',
   ],

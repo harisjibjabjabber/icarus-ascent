@@ -23,7 +23,7 @@ export function density(c: Course, from: number, to: number): Density { return d
 /** Endless chunks only carry point features: count gaps / rails / walls / pots / pillars (±2 m) the same way. */
 export function featureElements(features: Feature[]): Element[] {
   return features.filter((f) => f.kind !== 'crest' && f.kind !== 'rollers')
-    .map((f) => ({ kind: f.kind === 'rail-optional' ? 'rail' : f.kind, x0: f.x - 2, x1: f.x + 2, required: f.required }) as Element)
+    .map((f) => ({ kind: f.kind === 'rail-optional' || f.kind === 'rail-risky' ? 'rail' : f.kind, x0: f.x - 2, x1: f.x + 2, required: f.required }) as Element)
     .sort((a, b) => a.x0 - b.x0);
 }
 

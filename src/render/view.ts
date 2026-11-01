@@ -56,6 +56,8 @@ export class GameView {
   readonly post: PostPass;
   private streakTimer = 0;
   private contactFx = 0;
+  /** Presentation clock. Hitstop passes dt 0, so lanterns and the town hold still with the rider. */
+  private presentTime = 0;
   showArc = false;
   private failCam: { x: number; y: number } | null = null;
   private readonly focus = new THREE.Vector3();
@@ -430,6 +432,8 @@ export class GameView {
     const y = failed ? curr.y : lerp(prev.y, curr.y);
     this.rebaseIfNeeded(x, y);
     this.courseView?.sync();
+    this.presentTime += Math.max(0, dt);
+    this.courseView?.animate(this.presentTime);
     this.env.streamScenery(x, this.courseView?.course.kind === 'endless' ? (this.courseView.course as unknown as { generatedTo: number }).generatedTo : Infinity);
     const airborne = curr.mode === 'airborne';
     if (airborne && (this.trail.length === 0 || Math.abs(this.trail[this.trail.length - 1].x - x) > 0.4)) this.trail.push({ x, y });

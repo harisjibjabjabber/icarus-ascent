@@ -69,6 +69,16 @@ Content rule kept: Ao is an adult-presenting character; animations are playful b
 
 No new third-party downloads, accounts or purchases.
 
+## Course props (high line + collectible lanterns, 2026-11-01)
+
+| Asset | Where | Licence | Evidence | Ships? |
+|---|---|---|---|---|
+| `art/props/kenney/lantern-hanging.glb`, `cabin-fence.glb`, `colormap.png` | Kenney Holiday Kit 2.0. Source mirror: https://community.rokojori.com/Rokojori/winter-tales (commit `96840efcffe0879d933f32353dcb0dbad000f67d`, `assets/kenney_holiday-kit/`). Pack page: https://kenney.nl/assets/holiday-kit | **CC0 1.0** | `art/props/kenney/License.txt` (Kenney, www.kenney.nl, "CC0 1.0 Universal", creation date 11-12-2024) | source only |
+| `public/props/props.bin` pieces `lantern` and `rail` | Those two meshes, recoloured by `art/pipeline/bake_props.py` into the witch-town palette and multiplied by the painted detail array (rock layer for the lantern, wood layer for the fence). The hanging lantern is the collectible; the fence panel is the risky high line. Flame and the gold top rail are untextured warm colours. | CC0 source, our recolour | baker + this table | **yes** |
+| `public/props/props.bin` piece `beacon` | The `lantern` piece already in `public/town/kit.bin` (Kenney Fantasy Town Kit 2.0, CC0, recorded above), recoloured warm by the same baker and used as the pair of post lanterns that frame a high line | CC0 source, our recolour | `art/pipeline/bake_props.py` `beacon()` | **yes** |
+
+No new accounts or purchases. Poly Pizza and kenney.nl direct downloads were blocked; the Gitea mirror above served the same CC0 pack.
+
 ## Vision presets (time of day + hills biome mock, ported from `spike/vision`, 2026-11-01)
 
 | Asset | Where | Licence | Evidence | Ships? |

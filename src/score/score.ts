@@ -22,6 +22,10 @@ import type { Charm, Course } from '../course/course';
 export const SCORE = {
   perMetre: 1,
   flip: 500,
+  /** A second rotation in one jump. Distinct from a flip, so variety treats it as its own kind. */
+  double: 1100,
+  /** Clean clear of a risky high line (on top of the grind link). */
+  line: 900,
   grab: 150, grabPerSec: 400, grabMin: 0.2,
   grind: 100, grindPerSec: 250,
   wall: 150, wallPerSec: 350,
@@ -66,6 +70,7 @@ export const SCORE = {
   /** Optional lanterns. Rail is the detour; crest is the launch. */
   charmPop: 450,
   charmRail: 700,
+  charmRisk: 1200,
   /** A step longer than this (m) is a teleport, not a pickup. */
   charmStepMax: 4,
   /** Feet may be this far below / above a crest lantern (m). */
@@ -78,7 +83,7 @@ export const SCORE = {
 export type PopupKind = 'near' | 'bank' | 'bail' | 'bonus';
 export interface Popup { text: string; pts: number; kind: PopupKind }
 export type Cue = 'near' | 'rank' | 'charm' | 'bank';
-const TRICK_KINDS = ['flip', 'grab', 'grind', 'wall', 'skim', 'pot', 'pillar', 'near'] as const;
+const TRICK_KINDS = ['flip', 'double', 'grab', 'grind', 'line', 'wall', 'skim', 'pot', 'pillar', 'near'] as const;
 export type TrickKind = typeof TRICK_KINDS[number];
 export interface BailInfo { mult: number; chain: number; points: number }
 
@@ -91,7 +96,7 @@ function isKind(v: unknown): v is TrickKind { return typeof v === 'string' && (T
 export function charmTouched(c: Charm, prevX: number, st: RiderState): boolean {
   if (!(st.x > prevX) || st.x - prevX > SCORE.charmStepMax) return false;
   if (c.x <= prevX - 0.05 || c.x > st.x + 0.2) return false;
-  if (c.line === 'rail') return st.mode === 'grinding' && Math.abs(st.y - c.y) <= SCORE.railBand;
+  if (c.line === 'rail' || c.line === 'risk') return st.mode === 'grinding' && Math.abs(st.y - c.y) <= SCORE.railBand;
   return st.mode === 'airborne' && st.y >= c.y - SCORE.popBelow && st.y <= c.y + SCORE.popAbove;
 }
 
@@ -114,6 +119,7 @@ export interface ScoreSnapshot {
   charmIds?: number[];
   charmPop?: number;
   charmRail?: number;
+  charmRisk?: number;
   lastBail?: BailInfo | null;
 }
 
@@ -155,6 +161,7 @@ export class ScoreKeeper {
   private charmIds: number[] = [];
   charmPop = 0;
   charmRail = 0;
+  charmRisk = 0;
   lastBail: BailInfo | null = null;
 
   /** Chain length only, before variety. */
@@ -179,7 +186,7 @@ export class ScoreKeeper {
   get flowPay(): number { return 1 + SCORE.flowBank * this.flow; }
   /** Banked + what the current combo would bank now (the HUD's score). */
   get total(): number { return this.banked + Math.round(this.comboPoints * this.mult * this.flowPay); }
-  get charmCount(): number { return this.charmPop + this.charmRail; }
+  get charmCount(): number { return this.charmPop + this.charmRail + this.charmRisk; }
   tookCharm(id: number): boolean { return this.charmIds.includes(id); }
   /** Furthest x reached this run (-Infinity before the first update). */
   get furthestX(): number { return this.maxX; }
@@ -195,7 +202,7 @@ export class ScoreKeeper {
     this.tricks = 0; this.nearMisses = 0; this.comboTricks = 0; this.comboNear = 0; this.idle = 0;
     this.maxX = -Infinity; this.bonusKeys = []; this.popups = []; this.cues = [];
     this.comboKinds.clear(); this.runKinds.clear(); this.lastKind = null; this.rankShown = 0;
-    this.flow = 0; this.flowPeak = 0; this.charmIds = []; this.charmPop = 0; this.charmRail = 0; this.lastBail = null;
+    this.flow = 0; this.flowPeak = 0; this.charmIds = []; this.charmPop = 0; this.charmRail = 0; this.charmRisk = 0; this.lastBail = null;
     this.respawn();
   }
 
@@ -234,7 +241,16 @@ export class ScoreKeeper {
     for (const e of events) {
       switch (e.type) {
         case 'jump': case 'leave-edge': this.flipsThisAir = 0; break;
-        case 'flip-complete': this.flipsThisAir++; if (fresh) this.addLink('flip', SCORE.flip * this.flipsThisAir); break;
+        case 'flip-complete': {
+          const rotation = e.rotation ?? 1;
+          if (rotation >= 2) { if (fresh) this.addLink('double', SCORE.double); }
+          else { this.flipsThisAir++; if (fresh) this.addLink('flip', SCORE.flip * this.flipsThisAir); }
+          break;
+        }
+        case 'grind-end': {
+          if (fresh && e.reason === 'end' && course.rails.some((q) => q.id === e.railId && q.risky)) this.addLink('line', SCORE.line);
+          break;
+        }
         case 'grab-end': if (fresh && e.held >= SCORE.grabMin) this.addLink('grab', Math.round(SCORE.grab + SCORE.grabPerSec * Math.min(e.held, 1.5))); break;
         // contact starts end the flight: time on a rail / wall / heel is not air
         case 'grind-start': this.endFlight(); if (fresh) this.addLink('grind', SCORE.grind); break;
@@ -336,10 +352,10 @@ export class ScoreKeeper {
   collectCharm(c: Charm): boolean {
     if (this.charmIds.includes(c.id)) return false;
     this.charmIds.push(c.id);
-    const pts = c.line === 'rail' ? SCORE.charmRail : SCORE.charmPop;
-    if (c.line === 'rail') this.charmRail++; else this.charmPop++;
+    const pts = c.line === 'risk' ? SCORE.charmRisk : c.line === 'rail' ? SCORE.charmRail : SCORE.charmPop;
+    if (c.line === 'risk') this.charmRisk++; else if (c.line === 'rail') this.charmRail++; else this.charmPop++;
     this.banked += pts;
-    this.popups.push({ text: c.line === 'rail' ? 'Rail lantern' : 'Crest lantern', pts, kind: 'bonus' });
+    this.popups.push({ text: c.line === 'risk' ? 'High line' : c.line === 'rail' ? 'Rail lantern' : 'Crest lantern', pts, kind: 'bonus' });
     this.cues.push('charm');
     return true;
   }
@@ -365,7 +381,7 @@ export class ScoreKeeper {
       tricks: this.tricks, nearMisses: this.nearMisses, comboTricks: this.comboTricks, comboNear: this.comboNear,
       maxX: Number.isFinite(this.maxX) ? this.maxX : null, bonusKeys: [...this.bonusKeys],
       flow: this.flow, flowPeak: this.flowPeak, lastKind: this.lastKind, comboKinds: [...this.comboKinds], runKinds: [...this.runKinds],
-      charmIds: [...this.charmIds], charmPop: this.charmPop, charmRail: this.charmRail, lastBail: this.lastBail ? { ...this.lastBail } : null,
+      charmIds: [...this.charmIds], charmPop: this.charmPop, charmRail: this.charmRail, charmRisk: this.charmRisk, lastBail: this.lastBail ? { ...this.lastBail } : null,
     };
   }
 
@@ -391,6 +407,7 @@ export class ScoreKeeper {
     this.charmIds = Array.isArray(q.charmIds) ? q.charmIds.filter(num) : [];
     if (num(q.charmPop)) this.charmPop = q.charmPop;
     if (num(q.charmRail)) this.charmRail = q.charmRail;
+    if (num(q.charmRisk)) this.charmRisk = q.charmRisk;
     const bail = q.lastBail;
     if (bail && num(bail.mult) && num(bail.chain) && num(bail.points)) this.lastBail = { mult: bail.mult, chain: bail.chain, points: bail.points };
     this.rankShown = this.mult;

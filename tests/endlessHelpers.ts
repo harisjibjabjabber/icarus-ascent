@@ -6,7 +6,11 @@ import type { SimEvent } from '../src/sim/types';
 import type { Recorder } from '../src/diag/recorder';
 import type { Chunk } from '../src/course/course';
 
-/** Rider profiles the endless suite cycles through (lazy .. flat-out, all tactics). */
+/**
+ * Rider profiles the endless suite cycles through (lazy .. flat-out, all tactics).
+ * These are safe-line riders: none of them set riskyLine, so a high line's street always carries them.
+ * A stylish rider who goes for the high line is a separate autopilot (tests/highline.test.ts).
+ */
 export const PROFILES: AutopilotOptions[] = [
   { minSpeed: 10 },
   { minSpeed: 12, styleFlips: true },

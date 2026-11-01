@@ -102,8 +102,10 @@ export const TUNING = {
     /** Landing with at least this much of the rotation done counts as complete
      *  (last ~36 deg is absorbed by the landing). Less = "landed mid-flip" failure. */
     flipLandTolerance: 0.9,
-    /** One committed flip per jump (brief: add multiple rotations later). */
-    maxFlipsPerJump: 1,
+    /** Two committed flips per jump. The second starts only once the first is readable and can finish. */
+    maxFlipsPerJump: 2,
+    /** A second Up during a flip is ignored until the rotation has gone this far (0..1), so the first flip reads. */
+    flipReadable: 0.4,
 
     /** An airborne Up that could not complete a flip before the (predicted) touchdown is taken as
      *  a buffered jump on landing instead of a doomed flip. */
@@ -124,6 +126,8 @@ export const TUNING = {
     railCatchBelow: 0.55,
     /** Catching from below the rail is only plausible while not still rising fast (m/s). */
     railCatchMaxRise: 2.5,
+    /** Airborne this far below the street inside a risky high-line void is a miss (m). The street itself stays rideable. */
+    riskyFailDrop: 0.85,
     /** Catch area starts this far before the rail's first point (m). */
     railCatchBefore: 0.6,
     /** Along-rail friction (m/s^2), much lower than rolling: grinds carry speed. */
@@ -294,6 +298,10 @@ export const TUNING = {
     challengeShake: 0.06,
     bankShake: 0.05,
     flipLandShake: 0.05,
+    /** Frozen presentation after a smash or a close call (s). The sim does not bank the skipped time. */
+    hitstopPot: 0.045,
+    hitstopPillar: 0.072,
+    hitstopNear: 0.032,
     /** Fragments thrown per break. */
     potFragments: 14,
     pillarFragments: 26,

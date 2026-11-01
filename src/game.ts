@@ -36,6 +36,19 @@ export function frameDt(now: number, last: number): number {
   return Math.min(0.1, Math.max(0, (now - last) / 1000));
 }
 
+/**
+ * How many sim steps a frame may take. While hitstop is up the accumulator does not move, so the
+ * frame after the freeze steps once instead of dumping every skipped millisecond.
+ */
+export function applyFrameTime(acc: number, dtReal: number, hitstop: number, dt: number, maxSteps: number): { acc: number; hitstop: number; steps: number } {
+  if (hitstop > 0) return { acc, hitstop: Math.max(0, hitstop - dtReal), steps: 0 };
+  acc += dtReal;
+  let steps = 0;
+  while (acc >= dt && steps < maxSteps) { acc -= dt; steps++; }
+  if (steps >= maxSteps) acc = 0;
+  return { acc, hitstop: 0, steps };
+}
+
 type Mode = 'opening' | 'endless' | 'lab';
 const NEXT_MODE: Record<Mode, Mode> = { opening: 'endless', endless: 'lab', lab: 'opening' };
 const MODE_LABEL: Record<Mode, string> = { opening: 'Course', endless: 'Endless', lab: 'Lab' };
@@ -88,6 +101,10 @@ export class Game {
   private lastTrace: Trace | null = null;
   private pending: Action[] = [];
   private acc = 0;
+  /** Seconds of frozen presentation left. The sim does not advance, and the skipped time is not banked. */
+  private hitstop = 0;
+  /** Interpolation held across the freeze so the rider doesn't pop when it ends. */
+  private holdAlpha = 0;
   private prev!: Snapshot;
   private curr!: Snapshot;
   private failTime = 0;
@@ -495,6 +512,7 @@ export class Game {
         this.sfx.cue(cue);
         const shake = cue === 'near' ? TUNING.feedback.nearShake : cue === 'rank' ? TUNING.feedback.rankShake : cue === 'bank' ? TUNING.feedback.bankShake : 0;
         if (shake) this.view.punch(shake);
+        if (cue === 'near') this.hitstop = Math.max(this.hitstop, TUNING.feedback.hitstopNear);
       }
       this.view.styleFlow = this.score.flow;
       this.onChunk();
@@ -503,6 +521,7 @@ export class Game {
       this.view.onEvent(e, this.curr.speed);
       this.sfx.onEvent(e);
       this.overlay.onEvent(e);
+      if (e.type === 'break') this.hitstop = Math.max(this.hitstop, e.kind === 'pillar' ? TUNING.feedback.hitstopPillar : TUNING.feedback.hitstopPot);
       if (e.type === 'fail' || e.type === 'finish') this.onRunEnd(e.type === 'fail' ? e.info.message : 'Lab complete — nice line.', e.type === 'finish');
     }
   }
@@ -557,11 +576,13 @@ export class Game {
     this.lastFrame = now;
     this.fps += (1 / Math.max(dtReal, 1e-3) - this.fps) * 0.05;
     const dt = TUNING.sim.dt;
-    this.acc += dtReal;
-    let steps = 0;
-    while (this.acc >= dt && steps < TUNING.sim.maxStepsPerFrame) { this.tick(); this.acc -= dt; steps++; }
-    if (steps >= TUNING.sim.maxStepsPerFrame) this.acc = 0;
-    this.view.render(dtReal, this.prev, this.curr, this.acc / dt);
+    const frozen = this.hitstop > 0;
+    const stepped = applyFrameTime(this.acc, dtReal, this.hitstop, dt, TUNING.sim.maxStepsPerFrame);
+    this.acc = stepped.acc;
+    this.hitstop = stepped.hitstop;
+    for (let i = 0; i < stepped.steps; i++) this.tick();
+    if (!frozen || stepped.steps > 0) this.holdAlpha = this.acc / dt;
+    this.view.render(frozen ? 0 : dtReal, this.prev, this.curr, this.holdAlpha);
     this.view.quality.sample(dtReal, this.paused);
     this.sfx.update(this.sim.state);
     this.updateLessons();
