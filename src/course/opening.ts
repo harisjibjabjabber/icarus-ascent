@@ -27,7 +27,8 @@ import { TUNING } from '../tuning';
  *  (recovery, then long descent: wall needs ~12 m/s+)
  *  9 Wall ride     kicker -> wall bridging a long gap -> broad receiver
  *  (recovery)
- * 10 Combo         pot -> gap -> pillar
+ * 10 Combo         optional garden wall -> pot -> canal crossed by wall run -> pillar
+ *  finish run-in   optional harbour wall
  *  finish          long calm run-out
  */
 export function buildOpeningCourse(): Course {
@@ -141,19 +142,28 @@ export function buildOpeningCourse(): Course {
   flat(36); // broad receiver + recovery
 
   // ---------------------------------------------------------------- 10 combo
+  // pot -> canal cut you can only cross by wall-running the quay wall beside it -> pillar. An optional garden
+  // wall on the run-in lets the player warm up (jump + hold right) before the wall they must ride.
   const a10 = cur().x;
   flat(64);
+  walls.push({ id: walls.length, x0: a10 + 6, x1: a10 + 30, yBottom: cur().y - 1.5, yTop: cur().y + 3.6, side: 'right', lateral: 2.4, required: false });
   const pot10 = a10 + 42;
   pots.push(pot10);
-  const lip10 = gap(6, -0.5, 'cloud');
+  const gap10 = 24;
+  const lip10 = gap(gap10, -1.6, 'cloud');
+  walls.push({ id: walls.length, x0: lip10.x - 4, x1: lip10.x + gap10 + 3, yBottom: lip10.y - 4.5, yTop: lip10.y + 4.5, side: 'right', lateral: 2.4, required: true });
+  requiredGaps.push([lip10.x, 'wall']);
   slope(10, -0.8, easeOut);
   flat(46);
-  const pil10 = lip10.x + 6 + 26;
+  const pil10 = lip10.x + gap10 + 26;
   pillars.push(pil10);
-  lesson({ title: 'Put it together', cpX: a10 + 2, cpSpeed: 14, prompt: 'Put it together: pot, gap, pillar', promptX0: a10, promptX1: pil10, featureX: pot10 - 5, required: true });
+  lesson({ title: 'Put it together', cpX: a10 + 2, cpSpeed: 14, prompt: 'Put it together: pot, wall run over the canal, pillar', keys: '↑ then hold →', promptX0: a10, promptX1: pil10, featureX: pot10 - 5, required: true });
 
   // ---------------------------------------------------------------- finish
+  const aF = cur().x;
   slope(30, -2.5);
+  // optional harbour wall on the last descent: one more ride for fun before the finish line
+  walls.push({ id: walls.length, x0: aF + 2, x1: aF + 28, yBottom: cur().y - 1.5, yTop: cur().y + 4.6, side: 'right', lateral: 2.4, required: false });
   const finishX = cur().x + 10;
   flat(90);
   surfaces.push({ id: surfaces.length, kind: 'ground', points: pts, material, thickness: material === 'stone' ? 5 : 4 });
