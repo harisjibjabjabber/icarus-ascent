@@ -33,8 +33,9 @@ export const SET_PIECES: SetPieceSpec[] = [
     entry: [8, HC], exit: [10, HC], receiving: 'broad', cpSpeed: 13,
     build: (b, d) => {
       b.flat(4).runIn().railSlope(30, -5).flat(16);
-      b.gap(5 + d, -1.6); b.slope(10, -0.6, easeOut).flat(lerp(18, 16, d));
-      b.gap(5.5 + d, -1.8); b.slope(10, -0.6, easeOut).flat(lerp(18, 16, d));
+      // (17 m flats at d = 1 keep the 1.2 s combo approach for a flat-out rider arriving off a climb)
+      b.gap(5 + d, -1.6); b.slope(10, -0.6, easeOut).flat(lerp(18, 17, d));
+      b.gap(5.5 + d, -1.8); b.slope(10, -0.6, easeOut).flat(lerp(18, 17, d));
       b.gap(6 + d, -2.0); b.slope(12, -0.8, easeOut).flat(46);
       b.pillar(b.cur().x - 16); b.flat(4);
     },

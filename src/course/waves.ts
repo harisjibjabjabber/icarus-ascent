@@ -15,9 +15,10 @@ export const WAVE = {
   first: 250,
   /** One wave (m): about 45-55 s at a normal riding speed. */
   length: 800,
-  /** Phase split of a wave (fractions, sum 1). */
-  build: 0.5,
-  peak: 0.32,
+  /** Phase split of a wave (fractions, sum 1). The peak (288 m) holds the longest set piece
+   *  (sp-crest-wall, ~271 m) with room to spare: a set piece never spills into the breather. */
+  build: 0.46,
+  peak: 0.36,
   breather: 0.18,
   /** Base / top difficulty per wave index. */
   base: (w: number) => Math.min(0.7, 0.12 * w),

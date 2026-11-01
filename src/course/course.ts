@@ -116,7 +116,7 @@ export interface Chunk {
   tier?: number;
   difficulty?: number;
   connector?: boolean;
-  /** Endless: zone this chunk belongs to, zone gate / set piece flags and the wave it was assembled in. */
+  /** Endless: zone this chunk belongs to, zone gate / set piece flags and the wave phase its start (x0) lies in. */
   zone?: string;
   gate?: { from: string; to: string };
   setPiece?: boolean;

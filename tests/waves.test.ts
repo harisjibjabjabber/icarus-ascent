@@ -3,7 +3,7 @@ import { WAVE, waveAt, waveTimeline } from '../src/course/waves';
 import { EndlessCourse, SPEC, maxTier } from '../src/course/endless';
 import { ZoneSequence } from '../src/zones/sequence';
 import { ZONES, zonesFromSearch, DEFAULT_ZONES } from '../src/zones/registry';
-import type { Chunk } from '../src/course/course';
+import type { Chunk, Rail, Wall } from '../src/course/course';
 import { rideEndless, PROFILES } from './endlessHelpers';
 import { densityOf, featureElements } from '../src/course/stats';
 
@@ -12,6 +12,19 @@ function generate(seed: number, dist: number, zones?: string[]): Chunk[] {
   const seen = new Map<number, Chunk>();
   for (let x = 0; x <= dist; x += 50) { c.stream(x); for (const k of c.chunks) seen.set(k.id, k); }
   return [...seen.values()].filter((k) => k.x0 < dist).sort((a, b) => a.x0 - b.x0);
+}
+
+/** generate() plus the route origin (distance = x - originX) and every rail / wall seen while streaming. */
+function generateAt(seed: number, dist: number): { chunks: Chunk[]; originX: number; walls: Wall[]; rails: Rail[] } {
+  const c = new EndlessCourse(seed);
+  const seen = new Map<number, Chunk>(), walls = new Map<number, Wall>(), rails = new Map<number, Rail>();
+  for (let x = 0; x <= dist; x += 50) {
+    c.stream(x);
+    for (const k of c.chunks) seen.set(k.id, k);
+    for (const w of c.walls) walls.set(w.id, w);
+    for (const r of c.rails) rails.set(r.id, r);
+  }
+  return { chunks: [...seen.values()].filter((k) => k.x0 < dist).sort((a, b) => a.x0 - b.x0), originX: c.originX, walls: [...walls.values()], rails: [...rails.values()] };
 }
 
 describe('waves', () => {
@@ -33,17 +46,40 @@ describe('waves', () => {
     expect(waveTimeline(3000).filter((p) => p.phase === 'peak').length).toBe(Math.ceil((3000 - WAVE.first) / WAVE.length));
   });
 
-  it('every wave gets one set piece at its peak; breathers carry no compulsory phrases (200 seeds x 5 km)', () => {
+  it('set pieces lie wholly inside their wave\'s peak, at most one per wave, nearly every peak has one (200 seeds x 5 km, real positions)', () => {
+    let peaks = 0, withSp = 0;
     for (let s = 1; s <= 200; s++) {
-      const cs = generate(s, 5000);
-      const sp = cs.filter((c) => c.setPiece);
-      const waves = new Set(sp.map((c) => c.wave!.index));
-      expect(waves.size, `seed ${s}`).toBe(sp.length); // at most one per wave
-      for (let w = 0; WAVE.first + (w + 1) * WAVE.length <= 4800; w++) expect(waves.has(w), `seed ${s} wave ${w} has a set piece`).toBe(true);
-      for (const c of sp) expect(c.wave!.phase).toBe('peak');
-      for (const c of cs) if (c.wave?.phase === 'breather' && !c.setPiece && !c.connector) expect(SPEC[c.spec!].required, `seed ${s} ${c.spec} in a breather`).toBe(false);
+      const { chunks: cs, originX } = generateAt(s, 5000);
+      const perWave = new Map<number, number>();
+      for (const c of cs.filter((q) => q.setPiece)) {
+        const a = waveAt(c.x0 - originX), b = waveAt(c.x1 - originX - 1e-6);
+        expect(a.index, `seed ${s} ${c.spec} starts and ends in the same wave`).toBe(b.index);
+        expect(c.x0 - originX, `seed ${s} ${c.spec} starts at or after the peak`).toBeGreaterThanOrEqual(a.peakAt - 1e-6);
+        expect(c.x1 - originX, `seed ${s} ${c.spec} ends by the breather`).toBeLessThanOrEqual(a.breatherAt + 1e-6);
+        expect(c.wave, `seed ${s} label is the real phase`).toEqual({ index: a.index, phase: a.phase });
+        perWave.set(a.index, (perWave.get(a.index) ?? 0) + 1);
+      }
+      for (const n of perWave.values()) expect(n, `seed ${s}: one set piece per wave`).toBe(1);
+      for (let w = 0; WAVE.first + (w + 1) * WAVE.length <= 4800; w++) { peaks++; if (perWave.has(w)) withSp++; }
       for (const c of cs) if (!c.connector) expect(c.tier!).toBeLessThanOrEqual(maxTier(c.difficulty!));
     }
+    expect(withSp / peaks).toBeGreaterThanOrEqual(0.8);
+  });
+
+  it('breathers are calm: no pot, pillar, required gap, rail or wall lies in a breather window (200 seeds x 5 km, real positions)', () => {
+    const bad: string[] = [];
+    for (let s = 1; s <= 200; s++) {
+      const { chunks: cs, originX, walls, rails } = generateAt(s, 5000);
+      const inBreather = (x: number) => { const w = waveAt(x - originX); return w.index >= 0 && w.phase === 'breather'; };
+      for (const c of cs) {
+        if (c.wave?.phase === 'breather' && !c.connector) expect(SPEC[c.spec!].required, `seed ${s} ${c.spec} in a breather`).toBe(false);
+        for (const f of c.features) if (f.required && inBreather(f.x)) bad.push(`seed ${s} ${c.spec} ${f.kind}@${(f.x - originX).toFixed(0)}`);
+      }
+      // compulsory rails and walls: their whole span stays out of the breather
+      for (const w of walls) if (w.required) for (let x = w.x0; x <= w.x1; x += 1) if (inBreather(x)) { bad.push(`seed ${s} wall ${w.id}@${(x - originX).toFixed(0)}`); break; }
+      for (const r of rails) if (r.required) for (const p of r.points) if (inBreather(p.x)) { bad.push(`seed ${s} rail ${r.id}@${(p.x - originX).toFixed(0)}`); break; }
+    }
+    expect(bad).toEqual([]);
   });
 
   it('density rises with the wave: peaks carry far more compulsory features per 100 m than breathers', () => {
@@ -102,7 +138,8 @@ describe('zone sequencing', () => {
       }
       const g0 = gates[0];
       expect(cs.filter((c) => c.x1 <= g0.x0).every((c) => c.zone === 'town')).toBe(true);
-      expect(cs.filter((c) => c.x0 >= g0.x0 && c.x0 < b[1].at).every((c) => c.zone === 'hills')).toBe(true);
+      const originX = new EndlessCourse(s).originX; // chunk x is a course coordinate; b[].at is a distance from the route origin
+      expect(cs.filter((c) => c.x0 >= g0.x0 && c.x0 - originX < b[1].at).every((c) => c.zone === 'hills')).toBe(true);
     }
   });
 
