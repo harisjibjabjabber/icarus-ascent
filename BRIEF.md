@@ -1,3 +1,5 @@
+> **Status note (2026-11):** the setting and art direction in this brief are superseded by [VISION.md](VISION.md). The game is now a witch (Ao) riding a broom through a seaside town, working title "Witch Broom". The movement, controls, input, camera-readability, level-design and failure sections below remain canonical. Where this brief says "board", read "broom".
+
 # Build Icarus’s Ascent from scratch: a controls-first game brief
 
 Build **Icarus’s Ascent**, a momentum-driven skating game about travelling through a mythical Greek world above the clouds.

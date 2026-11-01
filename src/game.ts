@@ -1,4 +1,5 @@
 import { TUNING } from './tuning';
+import { GAME_TITLE } from './meta';
 import { buildLabCourse } from './course/lab';
 import { buildOpeningCourse } from './course/opening';
 import { EndlessCourse } from './course/endless';
@@ -20,6 +21,7 @@ type Mode = 'opening' | 'endless' | 'lab';
 const NEXT_MODE: Record<Mode, Mode> = { opening: 'endless', endless: 'lab', lab: 'opening' };
 const MODE_LABEL: Record<Mode, string> = { opening: 'Course', endless: 'Endless', lab: 'Lab' };
 /** Endless best = longest clean run (no fail) — v2 key: older bests included checkpoint retries. */
+// Storage keys keep the legacy `icarus.` prefix on purpose: renaming them would wipe players' saved bests.
 const BEST_KEY = 'icarus.endless.bestClean';
 /** Checkpoint carried across an update reload (sessionStorage). */
 const RESUME_KEY = 'icarus.resume';
@@ -73,7 +75,7 @@ export class Game {
       <div class="fail"><div class="fail-text"></div><div class="fail-sub">Tap / ↑ to retry · same course</div></div>
       <div class="finish"><div class="finish-title">Course complete</div><div class="finish-sub">That's every move. Keep going — endless strings them together.</div>
         <div class="finish-buttons"><button data-act="endless" class="primary">Continue endless</button><button data-act="again">Ride again</button><button data-act="lab">Go to the lab</button></div></div>
-      <div class="start"><div class="start-title">Icarus's Ascent</div><div class="start-sub">Swipe down to start the course</div>
+      <div class="start"><div class="start-title">${GAME_TITLE}</div><div class="start-sub">Swipe down to start the course</div>
         <div class="start-buttons"><button data-act="endless">Endless</button><button data-act="lab">Lab</button></div></div>
       <div class="distance"></div>
       <div class="buttons"><button data-act="sound" class="sound"></button><button data-act="mode" class="mode"></button><button data-act="look" class="look"></button><button data-act="new" class="new">New run</button><button data-act="dev">Dev</button></div>
@@ -198,7 +200,7 @@ export class Game {
     url.searchParams.delete('lab'); url.searchParams.delete('endless'); url.searchParams.delete('seed');
     if (this.mode !== 'opening') { url.searchParams.set(this.mode, ''); url.searchParams.set('seed', String(this.seed)); }
     history.replaceState(null, '', url.toString().replace(/(lab|endless)=(&|$)/, '$1$2'));
-    document.title = this.mode === 'lab' ? "Icarus's Ascent — Movement Lab" : this.mode === 'endless' ? "Icarus's Ascent — Endless" : "Icarus's Ascent";
+    document.title = this.mode === 'lab' ? `${GAME_TITLE} — Movement Lab` : this.mode === 'endless' ? `${GAME_TITLE} — Endless` : GAME_TITLE;
     const modeBtn = document.querySelector('button.mode'); if (modeBtn) modeBtn.textContent = MODE_LABEL[NEXT_MODE[this.mode]];
     const newBtn = document.querySelector('button.new'); if (newBtn) newBtn.textContent = this.mode === 'opening' ? 'Restart' : 'New run';
     this.ui.distance.style.display = this.mode === 'endless' ? '' : 'none';

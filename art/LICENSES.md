@@ -1,4 +1,4 @@
-# Art asset licences — Icarus's Ascent
+# Art asset licences — Witch Broom (working title)
 
 Project rule (BRIEF): every shipped asset is CC0 or self-made, recorded here.
 **Open decision for Haris:** the recommended character route uses a VRoid Studio model. VRoid

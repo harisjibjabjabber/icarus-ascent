@@ -10,7 +10,7 @@ import type { Heroine, HeroineTier } from './heroine/heroine';
 import { initialLook, lookUrl, saveLook, type Look } from './heroine/looks';
 import { BROOM, Broom, BristleTrail } from './broom';
 
-/** Rider palette: a terracotta-red chiton keeps Icarus readable against white marble and cloud. */
+/** Palette of the procedural low-poly stand-in rider (shown only until Ao's VRM loads, or if it fails). Ao herself is styled in src/render/heroine. */
 export const RIDER_STYLE = {
   skin: '#f0c49c', skinShade: '#d89e7a', hair: '#4a3328', tunic: '#d4513a', tunicShade: '#a83a2c', chiton: '#fbf3e6',
   gold: '#f0b94a', board: '#3d3556', boardEdge: '#2a2440', feather: '#fffaf0', featherShade: '#e9dccb', featherTip: '#f2c46a', laurel: '#8fae5a',

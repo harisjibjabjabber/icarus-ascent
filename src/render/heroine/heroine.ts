@@ -207,7 +207,7 @@ export class Heroine {
     this.setupSprings();
   }
 
-  /** Soft painterly cel to sit in the Icarus palette; outlines tinted warm. */
+  /** Soft painterly cel to sit in the witch-town palette; outlines tinted warm. */
   private styleMaterials(): void {
     const mats = new Set<MToonMaterial>();
     this.vrm.scene.traverse((o) => { const m = (o as THREE.Mesh).material; (Array.isArray(m) ? m : [m]).forEach((x) => { if (x && (x as MToonMaterial).isMToonMaterial) mats.add(x as MToonMaterial); }); });
