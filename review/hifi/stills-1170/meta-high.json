@@ -1,0 +1,146 @@
+[
+ {
+  "tick": 240,
+  "x": 24,
+  "mode": "grounded",
+  "canvas": [
+   877,
+   1899
+  ],
+  "renderDpr": 2.25,
+  "frame": 203,
+  "calls": 116,
+  "triangles": 676429,
+  "points": 220,
+  "lines": 728,
+  "geometries": 89,
+  "programs": 65,
+  "quality": "high"
+ },
+ {
+  "tick": 720,
+  "x": 102,
+  "mode": "grounded",
+  "canvas": [
+   877,
+   1899
+  ],
+  "renderDpr": 2.25,
+  "frame": 448,
+  "calls": 124,
+  "triangles": 648901,
+  "points": 220,
+  "lines": 728,
+  "geometries": 92,
+  "programs": 65,
+  "quality": "high"
+ },
+ {
+  "tick": 1200,
+  "x": 174,
+  "mode": "airborne",
+  "canvas": [
+   877,
+   1899
+  ],
+  "renderDpr": 2.25,
+  "frame": 693,
+  "calls": 120,
+  "triangles": 629009,
+  "points": 220,
+  "lines": 728,
+  "geometries": 94,
+  "programs": 65,
+  "quality": "high"
+ },
+ {
+  "tick": 1680,
+  "x": 239,
+  "mode": "grounded",
+  "canvas": [
+   877,
+   1899
+  ],
+  "renderDpr": 2.25,
+  "frame": 938,
+  "calls": 116,
+  "triangles": 687988,
+  "points": 220,
+  "lines": 728,
+  "geometries": 92,
+  "programs": 65,
+  "quality": "high"
+ },
+ {
+  "tick": 2160,
+  "x": 298,
+  "mode": "grounded",
+  "canvas": [
+   877,
+   1899
+  ],
+  "renderDpr": 2.25,
+  "frame": 1183,
+  "calls": 113,
+  "triangles": 694384,
+  "points": 220,
+  "lines": 728,
+  "geometries": 94,
+  "programs": 65,
+  "quality": "high"
+ },
+ {
+  "tick": 2640,
+  "x": 367,
+  "mode": "grounded",
+  "canvas": [
+   877,
+   1899
+  ],
+  "renderDpr": 2.25,
+  "frame": 1428,
+  "calls": 116,
+  "triangles": 605123,
+  "points": 220,
+  "lines": 728,
+  "geometries": 94,
+  "programs": 65,
+  "quality": "high"
+ },
+ {
+  "tick": 3120,
+  "x": 433,
+  "mode": "grinding",
+  "canvas": [
+   877,
+   1899
+  ],
+  "renderDpr": 2.25,
+  "frame": 1673,
+  "calls": 113,
+  "triangles": 548302,
+  "points": 220,
+  "lines": 728,
+  "geometries": 92,
+  "programs": 65,
+  "quality": "high"
+ },
+ {
+  "tick": 3600,
+  "x": 497,
+  "mode": "grounded",
+  "canvas": [
+   877,
+   1899
+  ],
+  "renderDpr": 2.25,
+  "frame": 1918,
+  "calls": 118,
+  "triangles": 457036,
+  "points": 220,
+  "lines": 728,
+  "geometries": 97,
+  "programs": 67,
+  "quality": "high"
+ }
+]
