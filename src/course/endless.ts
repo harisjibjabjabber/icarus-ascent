@@ -1,8 +1,6 @@
 import { Course, type Chunk, type Feature, type Gap, type Obstacle, type OrbPlacement, type Rail, type Surface, type Vec2, type Wall } from './course';
 import type { Orb } from './orbs';
-import {
-  placementCommonAir, placementCommonGrind, placementCommonRoute, placementRareGrind,
-} from './orbs';
+import { stampOrbTrails } from './orbTrails';
 import { extend, kicker, smooth, easeOut, linear, crestPop, rollingHills, type Ease } from './shapes';
 import { TUNING } from '../tuning';
 import { mulberry32 } from '../rng';
@@ -66,8 +64,6 @@ export class PhraseBuilder {
   readonly rails: Omit<Rail, 'id'>[] = [];
   readonly walls: Omit<Wall, 'id'>[] = [];
   readonly obstacles: { kind: Obstacle['kind']; x: number }[] = [];
-  /** Optional orbs (see src/course/orbs.ts). */
-  readonly orbs: OrbPlacement[] = [];
   readonly requires: [number, Gap['requires']][] = [];
   readonly features: Feature[] = [];
   /** Where the run-in for the next compulsory feature begins. */
@@ -82,13 +78,11 @@ export class PhraseBuilder {
   flat(len: number): this { extend(this.pts, this.cur().x + len, this.cur().y, linear, 4); return this; }
   slope(len: number, dy: number, ease: Ease = smooth): this { extend(this.pts, this.cur().x + len, this.cur().y + dy, ease, 1.5); return this; }
   kicker(len: number, rise: number): this { extend(this.pts, this.cur().x + len, this.cur().y + rise, kicker, 0.8); return this; }
-  /** Crest pop on continuous ground (style air, no gap). `orb`: common air orb in the launch arc. */
-  crest(rise: number, len: number, drop: number, backLen: number, orb = false): this {
-    const baseY = this.cur().y;
+  /** Crest pop on continuous ground (style air, no gap). Orbs come from trail stamping in EndlessCourse. */
+  crest(rise: number, len: number, drop: number, backLen: number): this {
     const top = this.cur().x + len;
     crestPop(this.pts, rise, len, drop, backLen);
     this.features.push({ x: top, kind: 'crest', required: false });
-    if (orb) this.orbs.push(placementCommonAir(top + 1.6, baseY + rise + 0.55, 0));
     return this;
   }
   /** Rolling hills: a pop chain for fast riders (style air), calm for slow ones. */
@@ -123,12 +117,11 @@ export class PhraseBuilder {
     }
     return this.cur().y;
   }
-  /** Optional handrail (right of the route) following the ground just built from x0 to x1. `orb`: common grind orb on the rail. */
-  handrail(x0: number, x1: number, h = 0.95, orb = false): this {
+  /** Optional handrail (right of the route) following the ground just built from x0 to x1. */
+  handrail(x0: number, x1: number, h = 0.95): this {
     const n = Math.max(2, Math.ceil((x1 - x0) / 3) + 1);
     this.rails.push({ points: Array.from({ length: n }, (_, i) => { const x = x0 + ((x1 - x0) * i) / (n - 1); return { x, y: this.yAt(x) + h }; }), lateral: 1.2, required: false });
     this.features.push({ x: x0, kind: 'rail-optional', required: false });
-    if (orb) { const x = x0 + (x1 - x0) * 0.72; this.orbs.push(placementCommonGrind(x, this.yAt(x) + h, 1.2)); }
     return this;
   }
   /**
@@ -145,18 +138,10 @@ export class PhraseBuilder {
     });
     this.rails.push({ points, lateral: 1.15, required: false, risky: true, voidX0: x0 + 0.45, voidX1: x0 + len - 5.2 });
     this.features.push({ x: x0, kind: 'rail-risky', required: false });
-    const cx = x0 + len * 0.7;
-    this.orbs.push(placementRareGrind(cx, this.yAt(cx) + h0 + (h1 - h0) * 0.7, 1.15));
     return this;
   }
   /** Descent with an optional handrail along most of it. */
-  railSlope(len: number, dy: number, orb = false): this { const a = this.cur().x; this.slope(len, dy); return this.handrail(a + 3, a + len - 4, 0.95, orb); }
-  /** A common orb over a calm straight (reachable on the ground). */
-  routeOrb(back = 8, height = 1.15): this {
-    const x = Math.max(this.x0 + 2, this.cur().x - back);
-    this.orbs.push(placementCommonRoute(x, this.yAt(x) + height, 0));
-    return this;
-  }
+  railSlope(len: number, dy: number): this { const a = this.cur().x; this.slope(len, dy); return this.handrail(a + 3, a + len - 4, 0.95); }
   wall(w: Omit<Wall, 'id'>): void { this.walls.push(w); }
   /** `cluster`: a second pot right behind the first, cleared or skimmed together with it. */
   pot(x: number, cluster = false): void {
@@ -194,7 +179,7 @@ export const PHRASES: PhraseSpec[] = [
   },
   {
     id: 'recovery', title: 'Recovery', tier: 0, style: false, required: false, entry: [6, HC], exit: [8, HC], airtime: 0, receiving: 'flat', cpSpeed: 13,
-    build: (b) => { b.flat(10).routeOrb(6).rollers(2, 0.7, 22).flat(10); },
+    build: (b) => { b.flat(10).rollers(2, 0.7, 22).flat(10); },
   },
   {
     // zone gate: a calm, readable run between zones (rendered as an arch + fog wall; see src/zones/scenery.ts)
@@ -208,7 +193,7 @@ export const PHRASES: PhraseSpec[] = [
   // ------------------------------------------------------------------ style air (no gaps)
   {
     id: 'crest-pop', title: 'Descent → crest pop', tier: 1, style: true, required: false, entry: [6, HC], exit: [14, HC], airtime: 0.8, receiving: 'downslope', cpSpeed: 11,
-    build: (b, d) => { b.flat(4).railSlope(40, -(9 + 3 * d), true).flat(6).crest(2.0 + 0.6 * d, 10, 2.2, 18, true).flat(14); },
+    build: (b, d) => { b.flat(4).railSlope(40, -(9 + 3 * d)).flat(6).crest(2.0 + 0.6 * d, 10, 2.2, 18).flat(14); },
   },
   {
     id: 'rollers', title: 'Rolling hills', tier: 1, style: true, required: false, entry: [6, HC], exit: [11, HC], airtime: 0.4, receiving: 'downslope', cpSpeed: 14,
@@ -216,7 +201,7 @@ export const PHRASES: PhraseSpec[] = [
   },
   {
     id: 'valley-launch', title: 'Valley launch', tier: 1, style: true, required: false, entry: [6, HC], exit: [16, HC], airtime: 0.9, receiving: 'downslope', cpSpeed: 11,
-    build: (b, d) => { b.flat(4).railSlope(36, -(10 + 2 * d), true).flat(4).crest(3.2, 18, 4.5, 24, true).flat(12); },
+    build: (b, d) => { b.flat(4).railSlope(36, -(10 + 2 * d)).flat(4).crest(3.2, 18, 4.5, 24).flat(12); },
   },
   {
     id: 'pop-chain', title: 'Rolling hills pop chain', tier: 2, style: true, required: false, entry: [6, HC], exit: [14, HC], airtime: 0.6, receiving: 'downslope', cpSpeed: 12,
@@ -225,11 +210,11 @@ export const PHRASES: PhraseSpec[] = [
   {
     id: 'big-kicker', title: 'Big kicker', tier: 2, style: true, required: false, entry: [6, HC], exit: [15, HC], airtime: 1.2, receiving: 'downslope', cpSpeed: 11,
     // Steep lip and a long landing: one flip is comfortable, a second rotation still finishes.
-    build: (b, d) => { b.flat(4).railSlope(44, -(13 + 3 * d), true).flat(8).crest(4.6 + 0.5 * d, 8, 7.4, 28, true).flat(4).rollers(1, 0.55, 18).flat(6); },
+    build: (b, d) => { b.flat(4).railSlope(44, -(13 + 3 * d)).flat(8).crest(4.6 + 0.5 * d, 8, 7.4, 28).flat(4).rollers(1, 0.55, 18).flat(6); },
   },
   {
     id: 'double-pop', title: 'Double crest', tier: 2, style: true, required: false, entry: [6, HC], exit: [12, HC], airtime: 0.7, receiving: 'downslope', cpSpeed: 11,
-    build: (b) => { b.flat(4).railSlope(36, -9).flat(4).crest(1.8, 9, 1.6, 14).flat(12).crest(2.0, 10, 2.2, 16, true).flat(12); },
+    build: (b) => { b.flat(4).railSlope(36, -9).flat(4).crest(1.8, 9, 1.6, 14).flat(12).crest(2.0, 10, 2.2, 16).flat(12); },
   },
   {
     id: 'high-line', title: 'High line', tier: 2, style: true, required: false, entry: [8, HC], exit: [8, HC], airtime: 0.55, receiving: 'flat', cpSpeed: 12,
@@ -274,8 +259,7 @@ export const PHRASES: PhraseSpec[] = [
       b.flat(4).runIn().slope(46, 2, linear); b.gap(5, -0.3); b.slope(10, -0.6, easeOut).flat(6);
       const x = b.cur().x, y = b.cur().y;
       b.flat(30); b.rail(x, 22, y + 0.95, y + 0.6, 1.2, false);
-      b.orbs.push(placementCommonGrind(x + 16, y + 0.95 + (0.6 - 0.95) * (16 / 22), 1.2));
-      b.crest(1.6, 9, 1.6, 14, true).flat(22);
+      b.crest(1.6, 9, 1.6, 14).flat(22);
     },
   },
   {
@@ -625,6 +609,9 @@ export class EndlessCourse extends Course {
   /** Total chunks ever built / recycled (diagnostics, memory tests). */
   built = 0;
   recycled = 0;
+  private nextTrailId = 1;
+  /** Course x where the next spacing-based rare orb may spawn (~150–250 m apart). */
+  private nextRareAt = 0;
 
   /** `x0` shifts the whole route (precision tests); `script` fixes the phrase list (tests). */
   constructor(seed: number, opts: { x0?: number; script?: string[]; d?: number; zones?: string[] } = {}) {
@@ -634,6 +621,7 @@ export class EndlessCourse extends Course {
     this.asm = new Assembler(seed, opts.script ? { ids: opts.script, d: opts.d ?? 0.5 } : undefined, this.zones);
     this.endX = (opts.x0 ?? 0) - 10;
     this.originX = this.endX;
+    this.nextRareAt = this.endX + 90 + mulberry32(seed)() * 60;
     this.generateTo(this.endX + STREAM.ahead);
   }
   /** Where the route begins (distance is measured from startX). */
@@ -663,7 +651,6 @@ export class EndlessCourse extends Course {
       id: this.ids.o++, kind: q.kind, x: q.x, baseY: ground(q.x),
       halfWidth: q.kind === 'pot' ? O.potHalfWidth : O.pillarHalfWidth, height: q.kind === 'pot' ? O.potHeight : O.pillarHeight,
     }));
-    const orbs: Orb[] = b.orbs.map((q) => ({ id: this.ids.h++, ...q }));
     const gaps: Gap[] = [];
     for (let k = 0; k + 1 < surfaces.length; k++) {
       const a = surfaces[k].points[surfaces[k].points.length - 1], c = surfaces[k + 1].points[0];
@@ -672,6 +659,23 @@ export class EndlessCourse extends Course {
     }
     const last = surfaces[surfaces.length - 1];
     const end = last.points[last.points.length - 1];
+    const trailPlacements: OrbPlacement[] = [];
+    stampOrbTrails(trailPlacements, {
+      phraseId: plan.spec.id,
+      chunkX0: this.endX,
+      chunkX1: end.x,
+      setPiece: plan.setPiece,
+      surfaces,
+      rails,
+      walls,
+      gaps,
+      features: b.features,
+      yAt: ground,
+      rng: this.asm.rngFor(i),
+      nextTrailId: () => this.nextTrailId++,
+      nextRareX: { at: this.nextRareAt },
+    });
+    const orbs: Orb[] = trailPlacements.map((q) => ({ id: this.ids.h++, ...q }));
     const chunk: Chunk = {
       id: this.ids.c++, x0: this.endX, x1: end.x, y0: this.endY, y1: end.y, title: plan.spec.title, spec: plan.spec.id, tier: plan.spec.tier,
       difficulty: plan.d, connector: plan.connector, zone: plan.zone, gate: plan.gate, setPiece: plan.setPiece, wave: this.waveLabel(this.endX), cpX: this.endX + 2, cpSpeed: plan.spec.cpSpeed, features: b.features,

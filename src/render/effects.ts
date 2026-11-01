@@ -11,7 +11,7 @@ export class Effects {
   private next = 0;
   private geo = new THREE.IcosahedronGeometry(1, 0);
 
-  constructor(size = 260) {
+  constructor(size = 280) {
     for (let i = 0; i < size; i++) {
       const mat = new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0, depthWrite: false });
       const mesh = new THREE.Mesh(this.geo, mat);
@@ -88,6 +88,26 @@ export class Effects {
     v.y = 0.3 + Math.random() * 0.6;
     v.x += (Math.random() - 0.5) * 1.2;
     this.spawn(p, v, 0.35 + Math.random() * 0.2, 0.08 + Math.random() * 0.05, '#e6d2bd', 2.5, 4);
+  }
+
+  /** Orb pickup: radial pop + ring (procedural; swap via orbFx when textures land). */
+  orbBurst(x: number, y: number, lateral: number, color: string, n = 12): void {
+    const base = toScene(x, y + 0.35, lateral);
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2;
+      const v = new THREE.Vector3(Math.cos(a) * 3.2, Math.sin(a) * 3.2 + 1.5, (Math.random() - 0.5) * 1.5);
+      this.spawn(base.clone(), v, 0.28 + Math.random() * 0.12, 0.08 + Math.random() * 0.05, color, 2.4, 2.5);
+    }
+    this.ring(x, y + 0.2, lateral, color);
+  }
+
+  /** Extra upward sparkles (HUD counter uses DOM juice separately). */
+  orbSparkleToHud(x: number, y: number, lateral: number, color: string, _hudX: number, _hudY: number): void {
+    const base = toScene(x, y + 0.35, lateral);
+    for (let i = 0; i < 5; i++) {
+      const v = new THREE.Vector3((Math.random() - 0.5) * 1.5, 2 + Math.random() * 3, (Math.random() - 0.5) * 1.2);
+      this.spawn(base.clone(), v, 0.35, 0.05 + Math.random() * 0.04, color, -0.3, 1.5);
+    }
   }
 
   /** Small ring of air when a flip completes / big events. */

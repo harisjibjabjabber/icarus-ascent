@@ -84,7 +84,7 @@ describe('trick variety and flow', () => {
 
 describe('orbs', () => {
   const orb = (pickup: Orb['pickup'], y: number, tier: Orb['tier'] = 'common'): Orb => ({
-    id: 1, x: 10, y, lateral: pickup === 'grind' ? 1.2 : 0, tier, pickup,
+    id: 1, x: 10, y, lateral: pickup === 'grind' ? 1.2 : 0, tier, pickup, trailId: 0, trailIdx: 0, trailLen: 1,
   });
 
   it('an air orb needs the arc, a grind orb needs a grind, and a teleport collects nothing', () => {
@@ -105,10 +105,10 @@ describe('orbs', () => {
   it('pays an orb once, and a scripted line puts crest and rail orbs where a real ride can take them', () => {
     const k = new ScoreKeeper();
     const o = orb('air', 5);
-    expect(k.collectOrb(o)).toBe(true);
-    expect(k.collectOrb(o)).toBe(false);
+    expect(k.collectOrb(o, 0)).toEqual({ streak: 1, trailDone: false, tier: 'common', trailLen: 1 });
+    expect(k.collectOrb(o, 0.1)).toBeNull();
     expect(k.orbCommon).toBe(1);
-    expect(k.banked).toBe(ORB.common);
+    expect(k.banked).toBe(ORB.gold);
 
     const ride = (id: string, profile: AutopilotOptions) => {
       const course = new EndlessCourse(4, { script: ['start', id], d: 0.7 });
@@ -122,7 +122,7 @@ describe('orbs', () => {
         sim.step();
         const s = sim.state;
         score.update(dt, s, sim.drainEvents(), course);
-        for (const q of course.orbs) if (orbTouched(q, prevX, s)) score.collectOrb(q);
+        for (const q of course.orbs) if (orbTouched(q, prevX, s)) score.collectOrb(q, s.tick * dt);
       }
       const here = course.orbs.filter((q) => q.x >= chunk.x0 && q.x <= chunk.x1);
       return { sim, score, here };
@@ -140,7 +140,7 @@ describe('orbs', () => {
     expect(plain.score.orbCommon).toBeGreaterThan(0);
     expect(grind.score.orbCommon).toBeGreaterThan(plain.score.orbCommon);
     const rollers = ride('rollers', PROFILES[0]);
-    expect(rollers.here).toHaveLength(0);
+    expect(rollers.here.length).toBeGreaterThan(0);
     expect(rollers.sim.state.mode).not.toBe('failed');
   });
 
@@ -154,7 +154,7 @@ describe('orbs', () => {
       for (const q of c.orbs) expect(ids.has(q.id)).toBe(true);
     }
     expect(max).toBeGreaterThan(0);
-    expect(max).toBeLessThan(40);
+    expect(max).toBeLessThan(520);
   });
 
   it('rare orbs pay more than common ones', () => {

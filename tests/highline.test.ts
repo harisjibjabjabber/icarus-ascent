@@ -23,7 +23,7 @@ function ride(opts: ConstructorParameters<typeof Autopilot>[0], speed = 14) {
     const ev = sim.drainEvents();
     events.push(...ev);
     score.update(sim.dt, sim.state, ev, course);
-    for (const o of course.orbs) if (!score.tookOrb(o.id) && orbTouched(o, prev, sim.state)) score.collectOrb(o);
+    for (const o of course.orbs) if (!score.tookOrb(o.id) && orbTouched(o, prev, sim.state)) score.collectOrb(o, sim.state.tick * sim.dt);
     prev = sim.state.x;
   }
   return { sim, course, chunk, events, score };
@@ -53,7 +53,7 @@ describe('risky high line', () => {
       score.update(sim.dt, sim.state, ev, course);
       peakKinds = Math.max(peakKinds, score.comboTrickKinds);
       peakPoints = Math.max(peakPoints, score.comboPoints);
-      for (const o of course.orbs) if (!score.tookOrb(o.id) && orbTouched(o, prev, sim.state)) score.collectOrb(o);
+      for (const o of course.orbs) if (!score.tookOrb(o.id) && orbTouched(o, prev, sim.state)) score.collectOrb(o, sim.state.tick * sim.dt);
       prev = sim.state.x;
     }
     expect(sim.state.mode, sim.state.fail?.message).not.toBe('failed');

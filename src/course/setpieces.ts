@@ -97,7 +97,7 @@ export const SET_PIECES: SetPieceSpec[] = [
     ...base, id: 'sp-crest-wall', title: 'Crest flip → pillar → wall', blurb: 'Flip the crest to smash the pillar, then catch the wall', minWave: 2, tier: 3, style: true,
     entry: [8, HC], exit: [10, HC], receiving: 'climb', cpSpeed: 12,
     build: (b, d) => {
-      b.flat(4).railSlope(40, -10, true).flat(6).crest(2.2, 10, 2.2, 18, true).runIn().flat(46);
+      b.flat(4).railSlope(40, -10).flat(6).crest(2.2, 10, 2.2, 18).runIn().flat(46);
       b.pillar(b.cur().x); b.flat(6).runIn().railSlope(44, -12).flat(8).kicker(10, 1.2);
       const len = 30 + 5 * d;
       const lip = b.gap(len, -1.4, 'wall');

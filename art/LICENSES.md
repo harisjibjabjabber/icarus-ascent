@@ -79,6 +79,18 @@ No new third-party downloads, accounts or purchases.
 
 No new accounts or purchases. Poly Pizza and kenney.nl direct downloads were blocked; the Gitea mirror above served the same CC0 pack.
 
+## Collectible orbs — SFX and particles (2026-11-01)
+
+| Asset | Where | Licence | Evidence | Ships? |
+|---|---|---|---|---|
+| `public/orbs/sfx/gold.ogg` / `.mp3` | **Gem Collect SFX** `gem-gather-stereo-reverb.wav` (Bobjt), mono, trimmed to **~0.35 s** for gold streaks | CC0 | opengameart.org/content/gem-collect-sfx | **yes** |
+| `public/orbs/sfx/rare.ogg` / `.mp3` | Same source, **full-length** (~0.55 s bake) for purple orbs | CC0 (Bobjt) | same | **yes** |
+| `public/orbs/sfx/trail.ogg` / `.mp3` | Kenney Interface Sounds `confirmation_003.ogg` | CC0 (Kenney) | same Interface Sounds pack | **yes** |
+| `public/orbs/sfx/trailPerfect.ogg` / `.mp3` | `24.wav` from Bell Arpeggio (cynicmusic) | CC0 | opengameart.org/content/bell-arpeggio-24 | **yes** |
+| `public/orbs/tex/particles.webp` | Kenney Particle Pack sprites (circle_02, star_09, star_02, circle_05, circle_03, twirl_02, light_03, trace_01), white-alpha atlas | CC0 (Kenney) | opengameart.org/content/particle-pack-80-sprites | **yes** |
+
+Bake: `node art/orb/process-assets.mjs` (requires `sharp` for atlas; `ffmpeg` for audio).
+
 ## Vision presets (time of day + hills biome mock, ported from `spike/vision`, 2026-11-01)
 
 | Asset | Where | Licence | Evidence | Ships? |

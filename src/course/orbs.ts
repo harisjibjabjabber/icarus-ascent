@@ -10,7 +10,7 @@ import { toScene } from '../render/space';
 
 export type OrbTier = 'common' | 'rare';
 /** How the rider must pass the orb to collect it. */
-export type OrbPickup = 'air' | 'grind' | 'route';
+export type OrbPickup = 'air' | 'grind' | 'route' | 'wall';
 
 export interface Orb {
   id: number;
@@ -19,13 +19,26 @@ export interface Orb {
   lateral: number;
   tier: OrbTier;
   pickup: OrbPickup;
+  /** Trail grouping for streak / completion bonuses (0 if solo). */
+  trailId: number;
+  trailIdx: number;
+  trailLen: number;
 }
 
 export type OrbPlacement = Omit<Orb, 'id'>;
 
 export const ORB = {
-  common: 500,
-  rare: 1400,
+  /** Per gold orb (banked immediately). */
+  gold: 75,
+  /** Per purple orb. */
+  rare: 1200,
+  /** Bonus when every orb in a trail is collected. */
+  trailComplete: 400,
+  /** Extra gold per consecutive pickup within the streak window (capped). */
+  streakStep: 8,
+  streakMax: 64,
+  /** Sim seconds: longer gap resets the streak pitch. */
+  streakGap: 0.6,
   /** A step longer than this (m) is a teleport, not a pickup. */
   stepMax: 4,
   /** Feet may be this far below / above an air orb (m). */
@@ -37,8 +50,10 @@ export const ORB = {
   routeBand: 1.25,
 } as const;
 
-export function orbPoints(tier: OrbTier): number {
-  return tier === 'rare' ? ORB.rare : ORB.common;
+export function orbPoints(tier: OrbTier, streak = 1): number {
+  const base = tier === 'rare' ? ORB.rare : ORB.gold;
+  if (tier === 'rare') return base;
+  return base + Math.min(ORB.streakMax, Math.max(0, streak - 1) * ORB.streakStep);
 }
 
 export function orbPopup(tier: OrbTier): string {
@@ -51,24 +66,23 @@ export function orbBurstColor(tier: OrbTier): string {
 
 /** Set pieces and phrase builders push placements here; ids are assigned when the chunk is built. */
 export function addOrb(placements: OrbPlacement[], tier: OrbTier, x: number, y: number, lateral: number, pickup: OrbPickup): void {
-  placements.push({ x, y, lateral, tier, pickup });
+  placements.push({ x, y, lateral, tier, pickup, trailId: 0, trailIdx: 0, trailLen: 1 });
 }
 
 export function placementCommonAir(x: number, y: number, lateral = 0): OrbPlacement {
-  return { x, y, lateral, tier: 'common', pickup: 'air' };
+  return { x, y, lateral, tier: 'common', pickup: 'air', trailId: 0, trailIdx: 0, trailLen: 1 };
 }
 
 export function placementCommonGrind(x: number, y: number, lateral: number): OrbPlacement {
-  return { x, y, lateral, tier: 'common', pickup: 'grind' };
+  return { x, y, lateral, tier: 'common', pickup: 'grind', trailId: 0, trailIdx: 0, trailLen: 1 };
 }
 
 export function placementRareGrind(x: number, y: number, lateral: number): OrbPlacement {
-  return { x, y, lateral, tier: 'rare', pickup: 'grind' };
+  return { x, y, lateral, tier: 'rare', pickup: 'grind', trailId: 0, trailIdx: 0, trailLen: 1 };
 }
 
-/** Calm straight: a gold orb over the cobbles, collectable while grounded or airborne. */
 export function placementCommonRoute(x: number, y: number, lateral = 0): OrbPlacement {
-  return { x, y, lateral, tier: 'common', pickup: 'route' };
+  return { x, y, lateral, tier: 'common', pickup: 'route', trailId: 0, trailIdx: 0, trailLen: 1 };
 }
 
 /**
@@ -79,6 +93,7 @@ export function orbTouched(o: Orb, prevX: number, st: RiderState): boolean {
   if (!(st.x > prevX) || st.x - prevX > ORB.stepMax) return false;
   if (o.x <= prevX - 0.05 || o.x > st.x + 0.2) return false;
   if (o.pickup === 'grind') return st.mode === 'grinding' && Math.abs(st.y - o.y) <= ORB.grindBand;
+  if (o.pickup === 'wall') return st.mode === 'wallRiding' && Math.abs(st.y - o.y) <= ORB.grindBand + 0.4;
   if (o.pickup === 'air') return st.mode === 'airborne' && st.y >= o.y - ORB.airBelow && st.y <= o.y + ORB.airAbove;
   return Math.abs(st.y - o.y) <= ORB.routeBand;
 }
@@ -99,10 +114,10 @@ export class OrbView {
   private rare: THREE.InstancedMesh | null = null;
   private haloCommon: THREE.InstancedMesh | null = null;
   private haloRare: THREE.InstancedMesh | null = null;
-  private commonMat = toon(COMMON_BODY, { emissive: COMMON_EMI, emissiveIntensity: 1.1 });
-  private rareMat = toon(RARE_BODY, { emissive: RARE_EMI, emissiveIntensity: 1.25 });
-  private haloMatCommon = new THREE.MeshBasicMaterial({ color: HALO_COMMON, transparent: true, opacity: 0.35, depthWrite: false, blending: THREE.AdditiveBlending });
-  private haloMatRare = new THREE.MeshBasicMaterial({ color: HALO_RARE, transparent: true, opacity: 0.42, depthWrite: false, blending: THREE.AdditiveBlending });
+  private commonMat = toon(COMMON_BODY, { emissive: COMMON_EMI, emissiveIntensity: 1.45 });
+  private rareMat = toon(RARE_BODY, { emissive: RARE_EMI, emissiveIntensity: 1.65 });
+  private haloMatCommon = new THREE.MeshBasicMaterial({ color: HALO_COMMON, transparent: true, opacity: 0.58, depthWrite: false, fog: false, blending: THREE.AdditiveBlending });
+  private haloMatRare = new THREE.MeshBasicMaterial({ color: HALO_RARE, transparent: true, opacity: 0.68, depthWrite: false, fog: false, blending: THREE.AdditiveBlending });
   private bodyGeo = new THREE.SphereGeometry(1, 10, 8);
   private haloGeo = new THREE.SphereGeometry(1, 8, 6);
   private signature = '';
@@ -110,6 +125,8 @@ export class OrbView {
   constructor(readonly parent: THREE.Group, readonly course: Course) {
     this.commonMat.side = THREE.DoubleSide;
     this.rareMat.side = THREE.DoubleSide;
+    this.commonMat.fog = false;
+    this.rareMat.fog = false;
   }
 
   hide(id: number): void {
@@ -137,10 +154,10 @@ export class OrbView {
     let ic = 0, ir = 0;
     for (const o of this.list) {
       const bob = Math.sin(time * 2.3 + o.id * 0.17) * 0.11;
-      const base = o.tier === 'rare' ? 0.38 : 0.22;
+      const base = o.tier === 'rare' ? 0.52 : 0.36;
       const s = base * pulse * (1 + Math.sin(time * 5.5 + o.id) * 0.035);
       this.dummy.position.copy(toScene(o.x, o.y + bob, o.lateral));
-      this.dummy.quaternion.identity();
+      this.dummy.rotation.set(Math.sin(time * 2.8 + o.id * 0.2) * 0.22, time * 2.1 + o.id * 0.11, 0);
       this.dummy.scale.setScalar(s);
       this.dummy.updateMatrix();
       const idx = o.tier === 'rare' ? ir++ : ic++;
@@ -148,7 +165,8 @@ export class OrbView {
       const halo = o.tier === 'rare' ? this.haloRare : this.haloCommon;
       mesh?.setMatrixAt(idx, this.dummy.matrix);
       if (halo) {
-        this.dummy.scale.setScalar(s * (o.tier === 'rare' ? 2.6 : 2.2));
+        this.dummy.scale.setScalar(s * (o.tier === 'rare' ? 3.8 : 3.2));
+        this.dummy.rotation.y += 0.4;
         this.dummy.updateMatrix();
         halo.setMatrixAt(idx, this.dummy.matrix);
       }
@@ -195,14 +213,14 @@ export class OrbView {
       const idx = o.tier === 'rare' ? ir++ : ic++;
       const mesh = o.tier === 'rare' ? this.rare! : this.common!;
       const bob = 0;
-      const base = o.tier === 'rare' ? 0.38 : 0.22;
+      const base = o.tier === 'rare' ? 0.52 : 0.36;
       this.dummy.position.copy(toScene(o.x, o.y + bob, o.lateral));
       this.dummy.quaternion.identity();
       this.dummy.scale.setScalar(base);
       this.dummy.updateMatrix();
       mesh.setMatrixAt(idx, this.dummy.matrix);
       const halo = o.tier === 'rare' ? this.haloRare! : this.haloCommon!;
-      this.dummy.scale.setScalar(base * (o.tier === 'rare' ? 2.6 : 2.2));
+      this.dummy.scale.setScalar(base * (o.tier === 'rare' ? 3.8 : 3.2));
       this.dummy.updateMatrix();
       halo.setMatrixAt(idx, this.dummy.matrix);
     }
@@ -221,8 +239,9 @@ export class OrbView {
     if (prev && prev.count >= cap) return prev;
     if (prev) { this.parent.remove(prev); prev.dispose(); }
     const m = new THREE.InstancedMesh(this.bodyGeo, mat, cap);
-    m.frustumCulled = false;
-    m.castShadow = false;
+      m.frustumCulled = false;
+      m.castShadow = false;
+      m.renderOrder = 520;
     this.parent.add(m);
     return m;
   }
@@ -235,8 +254,9 @@ export class OrbView {
     if (prev && prev.count >= cap) return prev;
     if (prev) { this.parent.remove(prev); prev.dispose(); }
     const m = new THREE.InstancedMesh(this.haloGeo, mat, cap);
-    m.frustumCulled = false;
-    m.castShadow = false;
+      m.frustumCulled = false;
+      m.castShadow = false;
+      m.renderOrder = 520;
     this.parent.add(m);
     return m;
   }

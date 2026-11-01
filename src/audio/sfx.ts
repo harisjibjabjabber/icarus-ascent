@@ -1,3 +1,4 @@
+import { OrbSfx } from './orbSfx';
 import type { SimEvent, RiderState } from '../sim/types';
 import { TUNING } from '../tuning';
 
@@ -10,6 +11,8 @@ import { TUNING } from '../tuning';
 export class Sfx {
   private ctx: AudioContext | null = null;
   private master!: GainNode;
+  /** Orb pickups (CC0 one-shots or procedural chimes). */
+  readonly orbs: OrbSfx;
   private noise!: AudioBuffer;
   private beds: Record<'wind' | 'grind' | 'wall' | 'skim', { gain: GainNode; filter: BiquadFilterNode }> | null = null;
   private grindTone: { osc: OscillatorNode; gain: GainNode } | null = null;
@@ -19,6 +22,7 @@ export class Sfx {
     let m = false;
     try { m = localStorage.getItem('icarus.muted') === '1'; } catch { /* storage unavailable */ }
     this.muted = m;
+    this.orbs = new OrbSfx(() => this.ctx, () => this.master, () => this.muted);
   }
 
   /** Call from a user gesture. Safe to call repeatedly. */

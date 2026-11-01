@@ -22,7 +22,7 @@ const fmtKm = (m: number) => (m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).to
  */
 export class EndlessHud {
   readonly root: HTMLElement;
-  private el: Record<'score' | 'sub' | 'lives' | 'goal' | 'orbs' | 'combo' | 'mult' | 'chain' | 'meter' | 'flow' | 'pops' | 'banner' | 'bk' | 'bt' | 'bs' | 'sum', HTMLElement>;
+  private el: Record<'score' | 'sub' | 'lives' | 'goal' | 'orbs' | 'orbN' | 'orbBest' | 'combo' | 'mult' | 'chain' | 'meter' | 'flow' | 'pops' | 'banner' | 'bk' | 'bt' | 'bs' | 'sum', HTMLElement>;
   private lastMult = 0;
   private lastScore = '';
   private lastSub = '';
@@ -30,7 +30,8 @@ export class EndlessHud {
   private lastMeter = '';
   private lastFlow = '';
   private lastGoal = '';
-  private lastOrbs = '';
+  private lastOrbN = '';
+  private lastOrbBest = '';
   private comboOn = false;
   private bannerTimer = 0;
   /** Wave hook: the wave / phase the rider is in (kept for future use and dev tools; not shown). */
@@ -44,7 +45,7 @@ export class EndlessHud {
     const r = document.createElement('div');
     r.className = 'eh';
     r.innerHTML = `
-      <div class="eh-score">0</div><div class="eh-sub"></div><div class="eh-orbs"></div><div class="eh-lives"></div><div class="eh-goal"></div>
+      <div class="eh-score">0</div><div class="eh-sub"></div><div class="eh-orbs"><span class="eh-orb-i" aria-hidden="true"></span><span class="eh-orb-n">0</span><span class="eh-orb-best"></span></div><div class="eh-lives"></div><div class="eh-goal"></div>
       <div class="eh-combo"><div class="eh-mult">×1</div><div class="eh-chain"></div><div class="eh-meter eh-flow"><i></i></div><div class="eh-meter"><i></i></div></div>
       <div class="eh-pops"></div>
       <div class="eh-banner"><div class="eh-banner-k"></div><div class="eh-banner-t"></div><div class="eh-banner-s"></div></div>
@@ -52,7 +53,14 @@ export class EndlessHud {
     parent.appendChild(r);
     this.root = r;
     const q = (s: string) => r.querySelector(s) as HTMLElement;
-    this.el = { score: q('.eh-score'), sub: q('.eh-sub'), orbs: q('.eh-orbs'), lives: q('.eh-lives'), goal: q('.eh-goal'), combo: q('.eh-combo'), mult: q('.eh-mult'), chain: q('.eh-chain'), meter: q('.eh-combo .eh-meter:not(.eh-flow)'), flow: q('.eh-flow'), pops: q('.eh-pops'), banner: q('.eh-banner'), bk: q('.eh-banner-k'), bt: q('.eh-banner-t'), bs: q('.eh-banner-s'), sum: q('.eh-sum') };
+    this.el = {
+      score: q('.eh-score'), sub: q('.eh-sub'), orbs: q('.eh-orbs'),
+      orbN: q('.eh-orb-n'), orbBest: q('.eh-orb-best'),
+      lives: q('.eh-lives'), goal: q('.eh-goal'), combo: q('.eh-combo'), mult: q('.eh-mult'), chain: q('.eh-chain'),
+      meter: q('.eh-combo .eh-meter:not(.eh-flow)'), flow: q('.eh-flow'), pops: q('.eh-pops'),
+      banner: q('.eh-banner'), bk: q('.eh-banner-k'), bt: q('.eh-banner-t'), bs: q('.eh-banner-s'), sum: q('.eh-sum'),
+    };
+    this.el.orbs.classList.add('show');
   }
 
   show(on: boolean): void { this.root.classList.toggle('on', on); if (!on) this.hideSummary(); }
@@ -70,8 +78,10 @@ export class EndlessHud {
     if (sub !== this.lastSub) { this.el.sub.textContent = sub; this.lastSub = sub; }
     const g = goal ? (goal.goal > 1 ? `${goal.text}  ${Math.min(goal.progress, goal.goal)}/${goal.goal}` : goal.text) : '';
     if (g !== this.lastGoal) { this.el.goal.textContent = g; this.el.goal.classList.toggle('show', !!g); this.lastGoal = g; }
-    const orbs = k.orbCount > 0 || orbBest > 0 ? `Orbs ${k.orbCount}${orbBest > 0 ? ` · best ${orbBest}` : ''}` : '';
-    if (orbs !== this.lastOrbs) { this.el.orbs.textContent = orbs; this.el.orbs.classList.toggle('show', !!orbs); this.lastOrbs = orbs; }
+    const orbN = String(k.orbCount);
+    if (orbN !== this.lastOrbN) { this.el.orbN.textContent = orbN; this.lastOrbN = orbN; }
+    const best = orbBest > 0 ? ` · best ${orbBest}` : '';
+    if (best !== this.lastOrbBest) { this.el.orbBest.textContent = best; this.lastOrbBest = best; }
     const on = k.chain >= 2;
     if (on !== this.comboOn) { this.el.combo.classList.toggle('show', on); this.comboOn = on; }
     if (on) {
@@ -141,4 +151,18 @@ export class EndlessHud {
   }
   hideSummary(): void { this.el.sum.classList.remove('show'); }
   get summaryShown(): boolean { return this.el.sum.classList.contains('show'); }
+
+  /** Screen position of the orb counter (for pickup sparkle fly-to). */
+  orbTarget(): { x: number; y: number } {
+    const r = this.el.orbs.getBoundingClientRect();
+    return { x: r.left + 18, y: r.top + r.height * 0.5 };
+  }
+
+  /** Brief scale pulse when an orb is collected. */
+  bumpOrbs(rare = false): void {
+    this.el.orbs.classList.remove('bump', 'bump-rare');
+    void this.el.orbs.offsetWidth;
+    this.el.orbs.classList.add('bump');
+    if (rare) this.el.orbs.classList.add('bump-rare');
+  }
 }

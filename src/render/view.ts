@@ -5,6 +5,8 @@ import type { RiderState, SimEvent } from '../sim/types';
 import { CameraRig } from './cameraRig';
 import { CourseView } from './courseView';
 import { Effects, SpeedLines, Petals } from './effects';
+import { OrbPickupFx } from './orbFx';
+import type { OrbFxEvent } from '../orb/orbFxEvent';
 import { QualityManager, QUALITY, ORDER, deviceAnisotropy, type Quality } from './quality';
 import { loadLoss, recordLoss, saveLoss } from './gfxHistory';
 import { ART_UNIFORMS } from './materials';
@@ -43,6 +45,7 @@ export class GameView {
   private courseView: CourseView | null = null;
   readonly rider = new RiderView();
   private effects = new Effects();
+  private orbFx = new OrbPickupFx();
   private debris = new Debris();
   private speedLines = new SpeedLines();
   /** 0..1 from the score's flow meter. Presentation only: speed lines thicken when a combo is flowing. */
@@ -95,7 +98,7 @@ export class GameView {
     const tod = todName(location.search);
     if (tod !== DEFAULT_TOD) this.setTimeOfDay(tod);
     this.env.biome = biomeName(location.search);
-    this.scene.add(this.rider.root, this.effects.group, this.speedLines.group, this.petals.mesh);
+    this.scene.add(this.rider.root, this.effects.group, this.speedLines.group, this.petals.mesh, this.orbFx.particles.group);
     this.quality.onChange = (q) => this.applyQuality(q);
     this.quality.onScale = () => this.applyResolution();
     this.applyQuality(this.quality.level);
@@ -268,6 +271,7 @@ export class GameView {
     this.scene.add(this.courseView.group);
     this.debris.setCourse(course);
     this.effects.clear();
+    this.orbFx.clear();
     const streamed = course.kind === 'endless';
     const minY = streamed ? 0 : Math.min(...course.surfaces.flatMap((q) => q.points.map((pt) => pt.y)));
     let lastH = 0;
@@ -299,6 +303,7 @@ export class GameView {
     const d = rebaseDelta(ORIGIN, t);
     ORIGIN.x = t.x; ORIGIN.y = t.y;
     for (const c of this.effects.group.children) c.position.add(d);
+    for (const c of this.orbFx.particles.group.children) c.position.add(d);
     for (const c of this.speedLines.group.children) c.position.add(d);
     for (const o of [this.trailLine, this.arcLine, this.failMarker, this.edgeMarker]) o.position.add(d);
     this.env.shift(d);
@@ -476,6 +481,8 @@ export class GameView {
       if (this.streakTimer <= 0) { this.effects.speedStreak(x, y, curr.speed); this.streakTimer = 1; }
     }
     this.effects.update(dt);
+    this.orbFx.setLowTier(this.quality.level.name === 'low');
+    this.orbFx.update(dt, this.rig.camera.quaternion);
     this.debris.update(dt);
     if (this.failMarker.visible) this.failMarker.scale.setScalar(1 + 0.1 * Math.sin(performance.now() / 120));
     // mid-jump: resolution changes and promotions wait for the landing (a resize there is the most visible hitch)
@@ -490,10 +497,10 @@ export class GameView {
 
   /** Restrained camera punch. Does not change the frame step. */
   punch(amount: number): void { this.rig.jolt(amount); }
-  /** Orb pickup: a ring at the orb and a small punch. */
-  burst(x: number, y: number, lateral = 0, color = '#ffd36b'): void {
-    this.effects.ring(x, y + 0.3, lateral, color);
-    this.rig.jolt(TUNING.feedback.charmShake);
+  /** Orb pickup VFX (deterministic from sim tick + orb id). */
+  onOrbCollect(e: OrbFxEvent): void {
+    this.orbFx.onCollect(e);
+    this.rig.jolt(e.tier === 'rare' ? TUNING.feedback.charmShake * 1.15 : TUNING.feedback.charmShake);
   }
   hideOrb(id: number): void { this.courseView?.hideOrb(id); }
 

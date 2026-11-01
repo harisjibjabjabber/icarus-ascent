@@ -17,7 +17,7 @@ import { Autopilot } from './diag/autopilot';
 import { Sfx } from './audio/sfx';
 import { LOOKS, nextLook } from './render/heroine/looks';
 import { ScoreKeeper, SCORE, orbTouched } from './score/score';
-import { orbBurstColor } from './course/orbs';
+import type { OrbFxEvent } from './orb/orbFxEvent';
 import { EndlessHud } from './score/hud';
 import { Challenges } from './score/challenges';
 import { SET_PIECES } from './course/setpieces';
@@ -510,17 +510,25 @@ export class Game {
     const events: SimEvent[] = this.sim.drainEvents();
     if (this.mode === 'endless' && !this.replayer && !this.run.over) {
       this.score.update(TUNING.sim.dt, st, events, this.course);
+      const simTime = st.tick * TUNING.sim.dt;
       for (const o of this.course.orbs) {
         if (this.score.tookOrb(o.id) || !orbTouched(o, prevX, st)) continue;
-        if (this.score.collectOrb(o)) {
-          this.view.hideOrb(o.id);
-          this.view.burst(o.x, o.y, o.lateral, orbBurstColor(o.tier));
-        }
+        const hit = this.score.collectOrb(o, simTime);
+        if (!hit) continue;
+        this.view.hideOrb(o.id);
+        const fx: OrbFxEvent = {
+          tick: st.tick, id: o.id, x: o.x, y: o.y, lateral: o.lateral, tier: o.tier,
+          streak: hit.streak, trailDone: hit.trailDone, trailLen: hit.trailLen,
+        };
+        this.view.onOrbCollect(fx);
+        if (hit.tier === 'rare') this.sfx.orbs.pickupRare(simTime);
+        else this.sfx.orbs.pickupGold(simTime);
+        if (hit.trailDone) this.sfx.orbs.trailComplete(hit.trailLen >= 8);
+        this.hud.bumpOrbs(hit.tier === 'rare');
       }
       const goal = this.challenges.update(st, events, { nearMisses: this.score.nearMisses, comboTrickKinds: this.score.comboTrickKinds, distance: this.runDistance() });
       if (goal) { this.score.bonus(goal.text, goal.pts); this.view.punch(TUNING.feedback.challengeShake); this.sfx.cue('challenge'); }
       for (const cue of this.score.drainCues()) {
-        if (cue === 'orb') { this.sfx.cue('orb'); continue; } // the burst already punched
         this.sfx.cue(cue);
         const shake = cue === 'near' ? TUNING.feedback.nearShake : cue === 'rank' ? TUNING.feedback.rankShake : cue === 'bank' ? TUNING.feedback.bankShake : 0;
         if (shake) this.view.punch(shake);

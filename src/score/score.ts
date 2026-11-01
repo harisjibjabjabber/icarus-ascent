@@ -1,7 +1,9 @@
 import type { RiderState, SimEvent } from '../sim/types';
 import type { Course } from '../course/course';
 import type { Orb } from '../course/orbs';
-import { orbPoints, orbPopup } from '../course/orbs';
+import { ORB, orbPoints, orbPopup } from '../course/orbs';
+
+export type OrbCollectResult = { streak: number; trailDone: boolean; tier: Orb['tier']; trailLen: number };
 
 export { orbTouched } from '../course/orbs';
 
@@ -142,6 +144,10 @@ export class ScoreKeeper {
   private orbIds: number[] = [];
   orbCommon = 0;
   orbRare = 0;
+  private orbStreak = 0;
+  private lastOrbT = -999;
+  private trailProgress = new Map<number, number>();
+  private trailsDone = new Set<number>();
   lastBail: BailInfo | null = null;
 
   /** Chain length only, before variety. */
@@ -182,7 +188,9 @@ export class ScoreKeeper {
     this.tricks = 0; this.nearMisses = 0; this.comboTricks = 0; this.comboNear = 0; this.idle = 0;
     this.maxX = -Infinity; this.bonusKeys = []; this.popups = []; this.cues = [];
     this.comboKinds.clear(); this.runKinds.clear(); this.lastKind = null; this.rankShown = 0;
-    this.flow = 0; this.flowPeak = 0; this.orbIds = []; this.orbCommon = 0; this.orbRare = 0; this.lastBail = null;
+    this.flow = 0; this.flowPeak = 0; this.orbIds = []; this.orbCommon = 0; this.orbRare = 0;
+    this.orbStreak = 0; this.lastOrbT = -999; this.trailProgress.clear(); this.trailsDone.clear();
+    this.lastBail = null;
     this.respawn();
   }
 
@@ -329,15 +337,29 @@ export class ScoreKeeper {
   }
 
   /** An orb, banked at once. Paying twice for the same id is refused. */
-  collectOrb(o: Orb): boolean {
-    if (this.orbIds.includes(o.id)) return false;
+  collectOrb(o: Orb, simTime: number): OrbCollectResult | null {
+    if (this.orbIds.includes(o.id)) return null;
+    if (simTime - this.lastOrbT > ORB.streakGap) this.orbStreak = 0;
+    this.orbStreak++;
+    this.lastOrbT = simTime;
+    const streak = o.tier === 'rare' ? 1 : this.orbStreak;
+    const pts = orbPoints(o.tier, streak);
     this.orbIds.push(o.id);
-    const pts = orbPoints(o.tier);
     if (o.tier === 'rare') this.orbRare++; else this.orbCommon++;
     this.banked += pts;
     this.popups.push({ text: orbPopup(o.tier), pts, kind: 'bonus' });
-    this.cues.push('orb');
-    return true;
+    let trailDone = false;
+    if (o.trailId > 0 && o.trailLen > 1) {
+      const n = (this.trailProgress.get(o.trailId) ?? 0) + 1;
+      this.trailProgress.set(o.trailId, n);
+      if (n >= o.trailLen && !this.trailsDone.has(o.trailId)) {
+        this.trailsDone.add(o.trailId);
+        trailDone = true;
+        this.banked += ORB.trailComplete;
+        this.popups.push({ text: '+TRAIL BONUS', pts: ORB.trailComplete, kind: 'bonus' });
+      }
+    }
+    return { streak, trailDone, tier: o.tier, trailLen: o.trailLen };
   }
 
   /** A retry starts mid-route: forget the last position (no phantom flight / distance); ground up to the
