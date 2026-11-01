@@ -3,30 +3,32 @@ import { Course, type Chunk, type Obstacle, type Surface } from '../course/cours
 import { toScene, toSceneRaw, ROUTE_YAW } from './space';
 import type { Vector3 } from 'three';
 import { toon } from './materials';
-import { GeoBuilder, blob, flutedShaft } from './geo';
+import { GeoBuilder, blob } from './geo';
 import { mulberry32 } from '../rng';
 
 /**
- * Course palette (art pass): sun-bleached marble and travertine paths, cloud
- * platforms, bronze/gold rails, marble walls with a painted frieze, terracotta
- * amphorae and fluted columns. Gameplay colours (gap posts, lip lines, required
- * rail/wall tints) keep their contrast against the warm world.
+ * Course palette (witch town pass): a cobbled street (grey-ochre setts, darker kerbs), terracotta-tiled
+ * plazas for the "cloud" surfaces, wrought-iron railings, whitewashed plaster/harbour walls with a
+ * terracotta coping and a blue tile band, terracotta flower pots and stacked crates/barrels for the
+ * breakables. Gameplay colours (gap lamps, lip lines, required rail/wall tints) keep their contrast.
  */
 export const COURSE_STYLE = {
   routeWidth: 3.2,
-  cloudTop: '#fffaf4', cloudTopAlt: '#fbeef0', cloudSide: '#f4dde4', cloudPuff: '#ffffff', cloudPuffShade: '#d7c9e8',
-  stoneTop: '#efdcc0', stoneTopAlt: '#e5c9a3', stoneTopWarm: '#ecd2ae', stoneCurb: '#c48a5e', stoneSide: '#d9a57f',
-  underside: '#8f78ad',
-  lipLine: '#6a5878',
+  cloudTop: '#d98a5c', cloudTopAlt: '#cf7a4e', cloudSide: '#c9b19a', cloudPuff: '#ffffff', cloudPuffShade: '#d7c9e8',
+  stoneTop: '#b8aa9c', stoneTopAlt: '#a99886', stoneTopWarm: '#c4ab8c', stoneCurb: '#8c7c74', stoneSide: '#b9a796',
+  underside: '#6f6270',
+  lipLine: '#4a3f52',
   edgeLine: '#2f7d6d',
-  takeoffPost: '#e07a3f',
-  receivePost: '#2f9d87',
-  postBase: '#efe3d2',
-  rail: '#b77a3a', railPost: '#7d5a3c', railRequired: '#ffc44d',
-  wall: '#f1e8dc', wallShade: '#dccbbb', wallTrim: '#c96f47', wallFrieze: '#4f6f9a', wallRequired: '#cdeadc', wallRequiredShade: '#a9d3c0',
+  takeoffPost: '#f08a3a',
+  receivePost: '#2fb39a',
+  postBase: '#3d3a44',
+  rail: '#3d3a44', railPost: '#34313b', railRequired: '#ffc44d',
+  wall: '#f4ead9', wallShade: '#dccdbb', wallTrim: '#c96a42', wallFrieze: '#3c6fa8', wallRequired: '#cdeadc', wallRequiredShade: '#a9d3c0',
+  wallPlinth: '#a9978a',
   marker: '#5d4f6e',
-  pot: '#cf6d3f', potDark: '#a8502c', potBand: '#2e2420', potPaint: '#f2d7a8',
-  pillar: '#ecd8bc', pillarAlt: '#dfc6a6', pillarCap: '#c99f7a', pillarBand: '#c2593a',
+  pot: '#cf6d3f', potDark: '#a8502c', potBand: '#3c6fa8', potPaint: '#f2d7a8',
+  pillar: '#b98552', pillarAlt: '#94653d', pillarCap: '#6e4a2e', pillarBand: '#4a4650',
+  flowers: ['#e04b6a', '#f2c14e', '#ffffff', '#b061c9', '#ff7a45'], leaf: '#4f8a3a', leafTop: '#79b04f',
 };
 
 const vc = (rim = 1) => mat('#ffffff', { vertexColors: true, rim });
@@ -138,26 +140,31 @@ export class CourseView {
     const g = new THREE.Group();
     const C = COURSE_STYLE, gb = new GeoBuilder();
     const r = o.halfWidth, h = o.height;
+    const rng = mulberry32(((o.x * 1000) | 0) >>> 0);
     if (o.kind === 'pot') {
-      // amphora: lathe body with neck and lip, two handles, black painted band
-      const prof = [[0.0, 0], [r * 0.32, 0], [r * 0.4, h * 0.05], [r * 0.85, h * 0.25], [r, h * 0.45], [r * 0.9, h * 0.62], [r * 0.55, h * 0.76], [r * 0.34, h * 0.84], [r * 0.32, h * 0.94], [r * 0.46, h * 0.97], [r * 0.44, h], [r * 0.3, h]].map(([a, b]) => new THREE.Vector2(a, b));
-      gb.add(new THREE.LatheGeometry(prof, 16), [0, 0, 0], C.potDark, { top: C.pot });
-      gb.add(new THREE.CylinderGeometry(r * 1.005, r * 0.99, h * 0.09, 16, 1, true), [0, h * 0.44, 0], C.potBand);
-      gb.add(new THREE.CylinderGeometry(r * 0.93, r * 0.98, h * 0.035, 16, 1, true), [0, h * 0.535, 0], C.potPaint);
-      gb.add(new THREE.CylinderGeometry(r * 0.88, r * 0.84, h * 0.03, 16, 1, true), [0, h * 0.62, 0], C.potBand);
-      for (const sd of [-1, 1]) gb.add(new THREE.TorusGeometry(h * 0.1, r * 0.06, 5, 10, Math.PI), [0, h * 0.8, sd * r * 0.48], C.potDark, { rot: [0, Math.PI / 2, sd > 0 ? -Math.PI / 2.4 : Math.PI / 2.4] });
-    } else {
-      // fluted column: base, drums slightly off-axis (reads as breakable masonry), echinus, abacus
-      const n = 4, base = 0.2, shaft = h - base - 0.36;
-      gb.add(new THREE.CylinderGeometry(r * 1.2, r * 1.3, base, 16), [0, base / 2, 0], C.pillarCap, { top: C.pillarAlt });
-      for (let i = 0; i < n; i++) {
-        const dh = shaft / n - 0.03;
-        gb.add(flutedShaft(r * (1 - (i + 1) * 0.025), dh, 12, 0.08, (1 - (i + 1) * 0.025) / (1 - i * 0.025)), [Math.sin(i * 2.1) * 0.03, base + (shaft / n) * (i + 0.5), Math.cos(i * 1.7) * 0.03], i % 2 ? C.pillarAlt : C.pillar, { rot: [0, i * 0.5, 0] });
+      // terracotta flower pot: tapered lathe with a rolled rim and a painted tile band, flowers to the collider top
+      const ph = h * 0.72;
+      const prof = [[0, 0], [r * 0.62, 0], [r * 0.7, ph * 0.08], [r * 0.9, ph * 0.86], [r * 1.02, ph * 0.88], [r * 1.02, ph], [r * 0.88, ph], [r * 0.84, ph * 0.95], [0, ph * 0.95]].map(([a, b]) => new THREE.Vector2(a, b));
+      gb.add(new THREE.LatheGeometry(prof, 14), [0, 0, 0], C.potDark, { top: C.pot });
+      gb.add(new THREE.CylinderGeometry(r * 0.875, r * 0.825, ph * 0.14, 14, 1, true), [0, ph * 0.55, 0], C.potBand);
+      gb.add(new THREE.CylinderGeometry(r * 0.885, r * 0.875, ph * 0.03, 14, 1, true), [0, ph * 0.64, 0], C.potPaint);
+      gb.add(blob(1, 0.12, rng()), [0, ph * 0.98, 0], C.leaf, { top: C.leafTop, scale: [r * 0.95, (h - ph) * 0.9, r * 0.95] });
+      for (let k = 0; k < 7; k++) {
+        const a = (k / 7) * Math.PI * 2 + rng(), rr = r * (0.25 + rng() * 0.5), fc = C.flowers[Math.floor(rng() * C.flowers.length)];
+        gb.add(blob(0, 0.1, rng()), [Math.cos(a) * rr, ph + (h - ph) * (0.55 + rng() * 0.35), Math.sin(a) * rr], fc, { top: fc, scale: r * 0.2 });
       }
-      gb.add(new THREE.CylinderGeometry(r * 1.25, r * 0.9, 0.18, 16), [0, base + shaft + 0.09, 0], C.pillarAlt, { top: C.pillar });
-      gb.add(new THREE.BoxGeometry(r * 2.6, 0.18, r * 2.6), [0, base + shaft + 0.27, 0], C.pillarCap, { top: C.pillar });
-      gb.add(new THREE.BoxGeometry(r * 2.64, 0.08, r * 2.64), [0, base + shaft + 0.27, 0], C.pillarBand);
-      gb.add(new THREE.CylinderGeometry(r * 1.0, r * 1.0, 0.1, 16, 1, true), [0, base + shaft - 0.08, 0], C.pillarBand);
+    } else {
+      // stacked market crates with a barrel on top (reads as breakable wood; same collider as before)
+      const crates = Math.max(1, Math.round((h - 1.0) / 0.95)), ch = (h - 0.95) / crates, cw = r * 2.1;
+      for (let i = 0; i < crates; i++) {
+        const y = ch * i, rot: [number, number, number] = [0, (rng() - 0.5) * 0.35, 0];
+        gb.add(new THREE.BoxGeometry(cw, ch - 0.03, cw), [0, y + ch / 2, 0], i % 2 ? C.pillarAlt : C.pillar, { rot, top: C.pillar });
+        for (const yy of [y + 0.12, y + ch - 0.15]) gb.add(new THREE.BoxGeometry(cw + 0.04, 0.07, cw + 0.04), [0, yy, 0], C.pillarCap, { rot });
+      }
+      const by = ch * crates, br = r * 0.85;
+      gb.add(new THREE.CylinderGeometry(br * 0.9, br * 0.9, 0.95, 12), [0, by + 0.475, 0], C.pillarAlt, { top: C.pillar });
+      gb.add(new THREE.CylinderGeometry(br * 1.0, br * 0.92, 0.3, 12), [0, by + 0.32, 0], C.pillar, { top: C.pillar });
+      for (const yy of [by + 0.12, by + 0.83]) gb.add(new THREE.CylinderGeometry(br * 0.93, br * 0.93, 0.06, 12, 1, true), [0, yy, 0], C.pillarBand);
     }
     const m = new THREE.Mesh(gb.build()!, vc(1.2));
     m.castShadow = true; m.receiveShadow = true;
@@ -187,7 +194,7 @@ export class CourseView {
       return y - s.thickness - 2.2 * Math.sin(Math.PI * t) ** 0.6 - 0.6 * Math.sin(x * 0.37);
     };
     // top split into strips: curb | slabs | curb (flagstones by colour variation; cloud: soft mottling)
-    const lats = [-W / 2, -W / 2 + 0.28, 0.1, W / 2 - 0.28, W / 2];
+    const lats = cloud ? [-W / 2, -W / 2 + 0.22, -0.5, 0.5, W / 2 - 0.22, W / 2] : [-W / 2, -W / 2 + 0.3, -0.75, -0.05, 0.6, W / 2 - 0.3, W / 2];
     const tc = new THREE.Color();
     for (let i = 0; i < p.length - 1; i++) {
       const a = p[i], b = p[i + 1];
@@ -195,9 +202,9 @@ export class CourseView {
         const edge = k === 0 || k === lats.length - 2;
         if (edge) tc.copy(curb);
         else {
-          const key = Math.floor((a.x + b.x) / 2 / (cloud ? 5 : 1.5) + k * 0.5);
+          const key = Math.floor((a.x + b.x) / 2 / (cloud ? 1.2 : 0.75) + k * 0.5);
           const hv = hash(key, k + s.id * 7);
-          tc.copy(tops[Math.floor(hv * 3) % 3]).offsetHSL(0, 0, (hash(key, k + 3) - 0.5) * (cloud ? 0.015 : 0.035));
+          tc.copy(tops[Math.floor(hv * 3) % 3]).offsetHSL(0, 0, (hash(key, k + 3) - 0.5) * (cloud ? 0.04 : 0.06));
         }
         quad([a.x, a.y, lats[k + 1]], [b.x, b.y, lats[k + 1]], [a.x, a.y, lats[k]], [b.x, b.y, lats[k]], tc.clone());
       }
@@ -217,27 +224,10 @@ export class CourseView {
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
     g.computeVertexNormals();
-    const mesh = new THREE.Mesh(g, mat('#ffffff', { vertexColors: true, side: THREE.DoubleSide, rim: 0.6, emissive: cloud ? '#33282c' : undefined }));
+    const mesh = new THREE.Mesh(g, mat('#ffffff', { vertexColors: true, side: THREE.DoubleSide, rim: 0.6, emissive: undefined }));
     mesh.receiveShadow = true;
     mesh.castShadow = true;
-    if (!cloud) return mesh;
-    // cloud platforms: soft puffs hugging the sides and underside, always below the riding line
-    const grp = new THREE.Group();
-    grp.add(mesh);
-    const gb = new GeoBuilder();
-    const rng = mulberry32((s.id * 2654435761) >>> 0);
-    const ysAt = (x: number) => { for (let i = 0; i + 1 < p.length; i++) if (x <= p[i + 1].x) return p[i].y + ((p[i + 1].y - p[i].y) * (x - p[i].x)) / Math.max(1e-6, p[i + 1].x - p[i].x); return p[p.length - 1].y; };
-    for (let x = x0 + 0.9; x < x1 - 0.9; x += 3.4 + rng() * 1.6) {
-      const y = ysAt(x);
-      for (const sd of [-1, 1]) {
-        const rr = 0.6 + rng() * 0.45;
-        gb.add(blob(1, 0.1, rng()), this.L(x, y - rr - 0.1, sd * (W / 2 + rr * 0.05)), C.cloudPuffShade, { top: C.cloudPuff, scale: [rr * 1.35, rr * 0.95, rr * 1.2] });
-      }
-      if (rng() < 0.4) { const rr = 0.9 + rng() * 0.8; gb.add(blob(0, 0.15, rng()), this.L(x, bottom(x, y) + rr * 0.5, (rng() - 0.5) * W * 0.6), C.cloudPuffShade, { top: C.cloudSide, scale: rr }); }
-    }
-    const pg = gb.build();
-    if (pg) { const pm = new THREE.Mesh(pg, mat('#ffffff', { vertexColors: true, rim: 1.6, emissive: '#3b2f3a' })); pm.receiveShadow = true; grp.add(pm); }
-    return grp;
+    return mesh;
   }
 
   /** Thin lines on both lips so the riding surface and its edges read crisply at speed. */
@@ -260,10 +250,12 @@ export class CourseView {
   private gapPosts(x0: number, y0: number, x1: number, y1: number): THREE.Mesh {
     const W = COURSE_STYLE.routeWidth, C = COURSE_STYLE, gb = new GeoBuilder();
     const mk = (x: number, y: number, color: string, h: number) => {
+      // wrought-iron street lamps with coloured glass: warm = takeoff, teal = receiving
       for (const lat of [-W / 2 - 0.15, W / 2 + 0.15]) {
-        gb.add(new THREE.CylinderGeometry(0.16, 0.2, 0.18, 8), this.L(x, y + 0.09, lat), C.postBase);
-        gb.add(new THREE.CylinderGeometry(0.07, 0.07, h, 6), this.L(x, y + h / 2, lat), color);
-        gb.add(new THREE.SphereGeometry(0.17, 10, 7), this.L(x, y + h, lat), color);
+        gb.add(new THREE.CylinderGeometry(0.15, 0.19, 0.18, 8), this.L(x, y + 0.09, lat), C.postBase);
+        gb.add(new THREE.CylinderGeometry(0.05, 0.06, h, 6), this.L(x, y + h / 2, lat), C.postBase);
+        gb.add(new THREE.CylinderGeometry(0.13, 0.1, 0.32, 6), this.L(x, y + h + 0.1, lat), color, { top: '#fff4d6' });
+        gb.add(new THREE.ConeGeometry(0.2, 0.16, 6), this.L(x, y + h + 0.34, lat), C.postBase);
       }
     };
     mk(x0, y0, C.takeoffPost, 1.1);
@@ -278,7 +270,7 @@ export class CourseView {
     const curve = new THREE.CurvePath<THREE.Vector3>();
     for (let i = 0; i + 1 < points.length; i++) curve.add(new THREE.LineCurve3(this.L(points[i].x, points[i].y, lateral), this.L(points[i + 1].x, points[i + 1].y, lateral)));
     // required rails read differently before commitment: brighter, thicker
-    const railMat = required ? mat(COURSE_STYLE.railRequired, { rim: 2.2, emissive: '#7a4a00', emissiveIntensity: 0.35 }) : mat(COURSE_STYLE.rail, { rim: 1.8 });
+    const railMat = required ? mat(COURSE_STYLE.railRequired, { rim: 2.2, emissive: '#7a4a00', emissiveIntensity: 0.35 }) : mat(COURSE_STYLE.rail, { rim: 2.4 });
     const tube = new THREE.Mesh(new THREE.TubeGeometry(curve as unknown as THREE.Curve<THREE.Vector3>, 48, required ? 0.1 : 0.07, 6, false), railMat);
     tube.castShadow = true;
     g.add(tube);
@@ -292,7 +284,8 @@ export class CourseView {
       const h = y - gnd.sample.y;
       gb.add(new THREE.CylinderGeometry(0.05, 0.05, h, 6), this.L(x, y - h / 2, lateral), COURSE_STYLE.railPost);
       gb.add(new THREE.CylinderGeometry(0.12, 0.14, 0.12, 8), this.L(x, y - h + 0.06, lateral), COURSE_STYLE.railPost);
-      gb.add(new THREE.SphereGeometry(0.09, 8, 6), this.L(x, y - 0.06, lateral), COURSE_STYLE.railRequired);
+      gb.add(new THREE.SphereGeometry(0.08, 8, 6), this.L(x, y - 0.06, lateral), required ? COURSE_STYLE.railRequired : '#c9a24a');
+      gb.add(new THREE.TorusGeometry(Math.min(0.32, h * 0.3), 0.025, 4, 10), this.L(x, y - Math.min(0.32, h * 0.3) - 0.08, lateral), COURSE_STYLE.railPost, { rot: [0, ROUTE_YAW + Math.PI / 2, 0] });
     }
     const posts = gb.build();
     if (posts) { const pm = new THREE.Mesh(posts, vc(1.4)); pm.castShadow = true; g.add(pm); }
@@ -304,13 +297,13 @@ export class CourseView {
     const len = w.x1 - w.x0, h = w.yTop - w.yBottom, mid = w.x0 + len / 2;
     const rot: [number, number, number] = [0, ROUTE_YAW, 0];
     const face = w.required ? C.wallRequired : C.wall, shade = w.required ? C.wallRequiredShade : C.wallShade;
-    // marble slab (riding face at w.lateral), plinth, frieze band with triglyphs, cornice
+    // whitewashed plaster/harbour wall (riding face at w.lateral): stone plinth, blue tile band, terracotta coping
     gb.add(new THREE.BoxGeometry(len, h, 0.5), this.L(mid, w.yBottom + h / 2, w.lateral + 0.25), shade, { rot, top: face });
-    gb.add(new THREE.BoxGeometry(len + 0.2, 0.3, 0.7), this.L(mid, w.yBottom + 0.15, w.lateral + 0.25), shade, { rot });
-    const fb = Math.min(0.55, h * 0.16), fy = w.yTop - 0.18 - fb / 2;
-    gb.add(new THREE.BoxGeometry(len, fb, 0.04), this.L(mid, fy, w.lateral - 0.01), C.wallTrim, { rot });
-    for (let x = w.x0 + 0.6; x < w.x1 - 0.3; x += 1.2) gb.add(new THREE.BoxGeometry(0.34, fb * 0.9, 0.06), this.L(x, fy, w.lateral - 0.03), C.wallFrieze, { rot });
-    gb.add(new THREE.BoxGeometry(len + 0.3, 0.22, 0.75), this.L(mid, w.yTop + 0.02, w.lateral + 0.25), C.wallShade, { rot, top: C.wall });
+    gb.add(new THREE.BoxGeometry(len + 0.2, Math.min(1.2, h * 0.15), 0.7), this.L(mid, w.yBottom + Math.min(1.2, h * 0.15) / 2, w.lateral + 0.25), C.wallPlinth, { rot });
+    const fb = Math.min(0.42, h * 0.12), fy = w.yTop - 0.3 - fb / 2;
+    gb.add(new THREE.BoxGeometry(len, fb, 0.04), this.L(mid, fy, w.lateral - 0.01), C.wallFrieze, { rot });
+    for (let x = w.x0 + 0.3; x < w.x1 - 0.1; x += 0.6) gb.add(new THREE.BoxGeometry(0.2, 0.2, 0.06), this.L(x, fy, w.lateral - 0.03), '#f2efe6', { rot: [Math.PI / 4, ROUTE_YAW, 0] });
+    gb.add(new THREE.BoxGeometry(len + 0.3, 0.2, 0.8), this.L(mid, w.yTop + 0.02, w.lateral + 0.25), C.potDark, { rot, top: C.wallTrim });
     const m = new THREE.Mesh(gb.build()!, vc(0.9));
     m.castShadow = m.receiveShadow = true;
     return m;

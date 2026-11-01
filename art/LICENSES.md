@@ -50,3 +50,10 @@ Content rule kept: Ao is an adult-presenting character; animations are playful b
 |---|---|---|---|---|
 | `art/concepts/broom/01..06-*.jpg` (key art, town overview, rooftop grind, wall run, mood board, broom + stance sheet) | Generated for this project with the Grok Bot image tool from text prompts (`art/concepts/broom/README.md`); no reference images, no third-party art | Our own generated concept art; internal reference only | prompts in the README | no (reference only, not in `public/`) |
 | Broom mesh + trail (`src/render/broom.ts`) | Procedural three.js geometry written for this project | project code | — | yes (branch only) |
+
+## Witch town sourcing (level/witch-town, proof only: spikes/town-proof/assets/)
+- Quaternius – Medieval Village MegaKit (Standard) – CC0 1.0 – https://quaternius.com/packs/medievalvillagemegakit.html (via opengameart.org/content/medieval-village-megakit). Textures downscaled to 512².
+- Quaternius – Stylized Nature MegaKit (Standard) – CC0 1.0 – opengameart.org/content/stylized-nature-megakit
+- MiniPoly – "Witch Broom" – CC0 – https://poly.pizza/m/gwE8397gO3 (palette atlas recoloured by us: minipoly-witch-broom-palette-retex.png)
+- Painted backdrop + tileable textures (plaster, roof tiles, cobbles, wood) – generated for this project (ours).
+- Evaluated, not shipped: Kenney Fantasy Town Kit 2.0 (CC0), Kenney Pirate Kit 2.1 (CC0), poly.pizza brooms by Jarlan Perez / Garrett LeFever / Don Carson (CC-BY), Polygonal Mind Broom Character (CC0).

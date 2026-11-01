@@ -16,6 +16,19 @@ describe('broom prototype (presentation only)', () => {
     expect(hit.point.y).toBeGreaterThan(0.03);
     expect(hit.point.y).toBeLessThan(0.05);
   });
+  it('is the baked premade witch broom (CC0 MiniPoly, palette-retextured): golden straw bulb that reads from behind', () => {
+    const b = new Broom();
+    b.group.updateMatrixWorld(true);
+    const straw = new THREE.Box3().setFromObject(b.bristles);
+    expect(straw.max.z - straw.min.z).toBeGreaterThan(0.3); // bulb is wide from the chase cam
+    expect(straw.max.y - straw.min.y).toBeGreaterThan(0.2);
+    // warm straw colours (vertex colours, no texture): red > blue on average
+    const m = b.bristles.children.find((o) => (o as THREE.Mesh).isMesh) as THREE.Mesh;
+    const c = m.geometry.getAttribute('color'); let r = 0, bl = 0;
+    for (let i = 0; i < c.count; i++) { r += c.getX(i); bl += c.getZ(i); }
+    expect(r / c.count).toBeGreaterThan(bl / c.count * 1.8);
+    expect(m.geometry.index!.count / 3).toBeGreaterThan(200); // real modelled bulb, not a stand-in
+  });
   it('grab targets (wrist) sit just over the handle, front hand ahead of the back hand, on her facing side', () => {
     expect(BROOM.grabL.x).toBeGreaterThan(BROOM.grabR.x + 0.3);
     for (const g of [BROOM.grabL, BROOM.grabR]) {

@@ -1,45 +1,53 @@
 import * as THREE from 'three';
 import { mulberry32 } from '../rng';
 import { toon, ART_UNIFORMS } from './materials';
-import { toScene, ORIGIN } from './space';
-import { GeoBuilder, jitter, blob } from './geo';
+import { toScene, ORIGIN, ROUTE_DIR, ROUTE_RIGHT, ROUTE_YAW } from './space';
+import { GeoBuilder, blob } from './geo';
 import type { Quality } from './quality';
+import { Kit, townMaterial, TOWN_DETAIL } from './town/kit';
+import { buildTownChunk, TOWN, type GroundFn, type ChunkOpts } from './town/town';
 
 /**
- * Environment (art pass): a warm late-afternoon sky with a low sun glow, a shader
- * cloud sea with billowy, slowly drifting tops, soft volume puffs, and distant
- * floating islands carrying Greek ruins, cypress and olive trees.
- *
- * Draw-call budget: sky 1, sea 1, puffs 1 (instanced), one merged mesh per 200 m
- * scenery segment (~8 live). Everything is procedural.
+ * Environment: the witch town (Kiki-style seaside town on a hill). Layers, back to front:
+ *  - sky dome (gradient) + a painted sky/sea panorama band (camera-anchored, i.e. at infinity);
+ *  - a painted far-town layer on the hill to the left (slow parallax);
+ *  - a shader sea far below that fades into the painted sea;
+ *  - distant hillside town blocks (impostor LOD, one merged mesh per 200 m segment);
+ *  - the near town: premade kit pieces merged per 40 m chunk, with a near and a far LOD (src/render/town).
+ * Draw calls: sky 1-2, layers 1, sea 1, clouds 1 (instanced), ~8 far segments, ~8 town chunks.
  */
 export const ENV_STYLE = {
-  skyTop: '#76a6d6',
-  skyMid: '#b9cfe0',
-  skyHorizon: '#ffd6aa',
-  skyBelow: '#f1d9d4',
-  sunGlow: '#fff0c8',
-  /** Visible sun position in the sky (scene direction). Low, ahead-left of the route. */
-  sunSky: new THREE.Vector3(-0.42, 0.16, -1),
-  fog: '#f2dccd',
-  fogNear: 60,
-  fogFar: 950,
-  hemiSky: '#ffeedd',
-  hemiGround: '#a296cc',
-  hemiIntensity: 1.15,
-  sun: '#ffd9a8',
-  sunIntensity: 2.6,
-  /** Direction the sunlight comes FROM (scene space). Warm, low, from the left and a little ahead. */
-  sunFrom: new THREE.Vector3(-0.62, 0.62, -0.18),
-  cloudLit: '#fff6ee',
-  cloudShade: '#c4b0da',
-  cloudWarm: '#ffe1c2',
-  cloudSeaY: -45,
-  rock: '#d9a77c', rockDeep: '#a78db3', grass: '#9fbf6e', grassTop: '#c4d68a',
-  marble: '#f4ece0', marbleShade: '#e6d6c6', terracotta: '#cf7a4f',
-  cypress: '#4f7a4e', cypressTop: '#6f9a5e', olive: '#9fb08a', oliveTop: '#c2cfa6', trunk: '#8a6a52',
-  peak: '#c9b6d8', peakTop: '#efe2ee',
+  skyTop: '#4f93d0',
+  skyMid: '#86b8e0',
+  skyHorizon: '#dbe9ef',
+  skyBelow: '#9ccbd2',
+  sunGlow: '#fff4d8',
+  sunSky: new THREE.Vector3(-0.42, 0.3, -1),
+  fog: '#d9e7ee',
+  fogNear: 70,
+  fogFar: 520,
+  hemiSky: '#fff3e2',
+  hemiGround: '#b4a6c6',
+  hemiIntensity: 1.2,
+  sun: '#ffe2b8',
+  sunIntensity: 2.5,
+  sunFrom: new THREE.Vector3(-0.62, 0.7, -0.18),
+  cloudLit: '#ffffff',
+  cloudShade: '#c8c4e2',
+  sea: '#2fa6b2', seaDeep: '#1f7f99', seaFoam: '#e8fbff',
+  hill: '#b9b27a', hillTop: '#d3c98e', cypress: '#3f6a45', cypressTop: '#5f8a55', olive: '#93a87a', oliveTop: '#b8c99a', trunk: '#7a5e48',
+  blockRoof: '#cf6f45', blockRoofTop: '#e88a58', blockWall: ['#f6ead8', '#f2dcc2', '#efe3e0', '#fbf0d6', '#e6ece4'],
+  /** Painted panorama band: horizontal arc (deg) centred on the route direction; horizon height in the image (0 = top). */
+  panoArc: 74, panoHorizon: 0.565,
 };
+
+const loadTex = (url: string, cb?: (t: THREE.Texture) => void): THREE.Texture | null => {
+  if (typeof document === 'undefined') return null;
+  const t = new THREE.TextureLoader().load(url, cb);
+  t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+  return t;
+};
+const BASE = (typeof import.meta !== 'undefined' && (import.meta as { env?: { BASE_URL?: string } }).env?.BASE_URL) || './';
 
 function skyDome(): THREE.Mesh {
   const mat = new THREE.ShaderMaterial({
@@ -48,20 +56,14 @@ function skyDome(): THREE.Mesh {
       top: { value: new THREE.Color(ENV_STYLE.skyTop) }, mid: { value: new THREE.Color(ENV_STYLE.skyMid) },
       horizon: { value: new THREE.Color(ENV_STYLE.skyHorizon) }, below: { value: new THREE.Color(ENV_STYLE.skyBelow) },
       glow: { value: new THREE.Color(ENV_STYLE.sunGlow) }, sunDir: { value: ENV_STYLE.sunSky.clone().normalize() },
-      uTime: ART_UNIFORMS.uTime,
     },
     vertexShader: `varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
-    fragmentShader: `uniform vec3 top; uniform vec3 mid; uniform vec3 horizon; uniform vec3 below; uniform vec3 glow; uniform vec3 sunDir; uniform float uTime; varying vec3 vDir;
-      float h21(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
-      float n2(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f); return mix(mix(h21(i),h21(i+vec2(1,0)),f.x), mix(h21(i+vec2(0,1)),h21(i+vec2(1,1)),f.x), f.y); }
+    fragmentShader: `uniform vec3 top; uniform vec3 mid; uniform vec3 horizon; uniform vec3 below; uniform vec3 glow; uniform vec3 sunDir; varying vec3 vDir;
       void main(){
         vec3 d = normalize(vDir); float h = d.y;
-        vec3 c = h > 0.0 ? mix(horizon, mix(mid, top, smoothstep(0.18, 0.7, h)), smoothstep(0.0, 0.22, h)) : mix(horizon, below, smoothstep(0.0, 0.2, -h));
+        vec3 c = h > 0.0 ? mix(horizon, mix(mid, top, smoothstep(0.15, 0.6, h)), smoothstep(0.0, 0.2, h)) : mix(horizon, below, smoothstep(0.0, 0.08, -h));
         float s = max(dot(d, sunDir), 0.0);
-        c += glow * (pow(s, 6.0) * 0.35 + pow(s, 60.0) * 0.6);
-        c = mix(c, vec3(1.0, 0.98, 0.92), smoothstep(0.9975, 0.999, s)); // soft sun disc
-        // faint high cirrus streaks
-        if (h > 0.05) { vec2 uv = d.xz / (h + 0.25) * 2.2 + vec2(uTime * 0.004, 0.0); float k = n2(uv * vec2(1.0, 6.0)) * n2(uv * 2.3); c = mix(c, vec3(1.0, 0.97, 0.94), smoothstep(0.35, 0.75, k) * 0.28 * smoothstep(0.05, 0.3, h)); }
+        c += glow * (pow(s, 8.0) * 0.25 + pow(s, 80.0) * 0.5);
         gl_FragColor = vec4(c, 1.0);
         #include <colorspace_fragment>
       }`,
@@ -72,65 +74,102 @@ function skyDome(): THREE.Mesh {
   return m;
 }
 
-/** Cloud sea: one large disc around the camera; billows come from fbm in world space. */
-function cloudSea(octaves: number): THREE.Mesh {
+/** A painted layer on a vertical cylinder segment around the camera (inside the dome). Edges fade into the sky. */
+function paintedBand(url: string, radius: number, arcDeg: number, horizon: number, centre: THREE.Vector3, keyed: boolean, order: number): THREE.Mesh {
+  const arc = (arcDeg * Math.PI) / 180, H = radius * arc * (9 / 16);
+  const theta0 = Math.atan2(centre.x, centre.z) - arc / 2;
+  const g = new THREE.CylinderGeometry(radius, radius, H, 48, 1, true, theta0, arc);
+  // image horizon at camera height: shift so that (1 - horizon) of the height is below y = 0
+  g.translate(0, H / 2 - horizon * H, 0);
+  const tex = loadTex(url);
   const mat = new THREE.ShaderMaterial({
-    fog: false, depthWrite: true,
-    defines: { OCTAVES: octaves },
-    uniforms: {
-      uTime: ART_UNIFORMS.uTime, uShift: { value: new THREE.Vector2() },
-      lit: { value: new THREE.Color(ENV_STYLE.cloudLit) }, shade: { value: new THREE.Color(ENV_STYLE.cloudShade) },
-      warm: { value: new THREE.Color(ENV_STYLE.cloudWarm) }, horizon: { value: new THREE.Color(ENV_STYLE.fog) },
-    },
-    vertexShader: `varying vec3 vW; void main(){ vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`,
-    fragmentShader: `uniform float uTime; uniform vec2 uShift; uniform vec3 lit; uniform vec3 shade; uniform vec3 warm; uniform vec3 horizon; varying vec3 vW;
-      float h21(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
-      float n2(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f); return mix(mix(h21(i),h21(i+vec2(1,0)),f.x), mix(h21(i+vec2(0,1)),h21(i+vec2(1,1)),f.x), f.y); }
-      float fbm(vec2 p){ float a=0.5, s=0.0; for(int i=0;i<OCTAVES;i++){ s += a * n2(p); p = mat2(1.6,1.2,-1.2,1.6) * p; a *= 0.5; } return s; }
+    side: THREE.BackSide, depthWrite: false, fog: false, transparent: true,
+    uniforms: { map: { value: tex }, keyed: { value: keyed ? 1 : 0 } },
+    vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+    fragmentShader: `uniform sampler2D map; uniform float keyed; varying vec2 vUv;
       void main(){
-        vec2 w = vW.xz + uShift;
-        vec2 p = w * 0.012 + vec2(uTime * 0.02, uTime * 0.007);
-        float d = fbm(p);
-        // billow: rounded tops from a remapped density, light from the left (sun side)
-        float b = smoothstep(0.28, 0.78, d);
-        float dl = fbm(p + vec2(-0.08, 0.03));
-        float light = clamp(0.5 + (d - dl) * 5.0, 0.0, 1.0);
-        vec3 c = mix(shade, lit, b * 0.8 + light * 0.25);
-        c = mix(c, warm, light * b * 0.35);
-        float dist = length(vW - cameraPosition);
-        c = mix(c, horizon, smoothstep(220.0, 1250.0, dist));
-        gl_FragColor = vec4(c, 1.0);
+        vec2 uv = vec2(1.0 - vUv.x, vUv.y);
+        vec4 c = texture2D(map, uv);
+        float edge = smoothstep(0.0, 0.12, uv.x) * smoothstep(1.0, 0.88, uv.x);
+        float a = (keyed > 0.5 ? c.a : 1.0) * edge * smoothstep(1.0, 0.94, uv.y);
+        gl_FragColor = vec4(c.rgb, a);
         #include <colorspace_fragment>
       }`,
   });
-  const m = new THREE.Mesh(new THREE.CircleGeometry(1500, 48), mat);
+  if (!tex) mat.visible = false;
+  const m = new THREE.Mesh(g, mat);
+  m.renderOrder = order;
+  m.frustumCulled = false;
+  return m;
+}
+
+/** The sea far below: painted-looking teal water with drifting streaks and glints, fading out into the panorama. */
+function seaPlane(): THREE.Mesh {
+  const mat = new THREE.ShaderMaterial({
+    fog: false, transparent: true, depthWrite: true,
+    uniforms: {
+      uTime: ART_UNIFORMS.uTime, uShift: { value: new THREE.Vector2() },
+      sea: { value: new THREE.Color(ENV_STYLE.sea) }, deep: { value: new THREE.Color(ENV_STYLE.seaDeep) }, foam: { value: new THREE.Color(ENV_STYLE.seaFoam) },
+    },
+    vertexShader: `varying vec3 vW; void main(){ vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`,
+    fragmentShader: `uniform float uTime; uniform vec2 uShift; uniform vec3 sea; uniform vec3 deep; uniform vec3 foam; varying vec3 vW;
+      float h21(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
+      float n2(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f); return mix(mix(h21(i),h21(i+vec2(1,0)),f.x), mix(h21(i+vec2(0,1)),h21(i+vec2(1,1)),f.x), f.y); }
+      void main(){
+        vec2 w = vW.xz + uShift;
+        float dist = length(vW.xz - cameraPosition.xz);
+        float s = n2(w * vec2(0.02, 0.08) + vec2(uTime * 0.03, 0.0)) * 0.6 + n2(w * vec2(0.05, 0.2) - vec2(0.0, uTime * 0.05)) * 0.4;
+        vec3 c = mix(deep, sea, smoothstep(0.25, 0.75, s));
+        float g = smoothstep(0.82, 0.9, n2(w * vec2(0.18, 0.6) + uTime * vec2(0.2, 0.05)));
+        c = mix(c, foam, g * 0.5 * (1.0 - smoothstep(150.0, 600.0, dist)));
+        float a = 1.0 - smoothstep(700.0, 1350.0, dist);
+        gl_FragColor = vec4(c, a);
+        #include <colorspace_fragment>
+      }`,
+  });
+  const m = new THREE.Mesh(new THREE.CircleGeometry(1450, 48), mat);
   m.rotation.x = -Math.PI / 2;
   m.renderOrder = -50;
   return m;
 }
 
+interface TownView { group: THREE.Group; near: THREE.Mesh | null; far: THREE.Mesh | null; x0: number; tris: [number, number] }
+
 export class Environment {
   readonly group = new THREE.Group();
   readonly sun: THREE.DirectionalLight;
   private dome: THREE.Mesh;
+  private pano: THREE.Mesh;
+  private farTown: THREE.Mesh;
   private sunOffset: THREE.Vector3;
-  private sea: THREE.Mesh | null = null;
+  private sea: THREE.Mesh;
   private puffs: THREE.InstancedMesh;
   private puffData: { x: number; lat: number; dy: number; s: number; ph: number }[] = [];
-  private seaBase = ENV_STYLE.cloudSeaY;
+  private seaBase = -60;
   private seaFollow = false;
-  private seaY = ENV_STYLE.cloudSeaY;
+  private seaY = -60;
   private seed = 0;
   private heightAt: (x: number) => number = () => 0;
+  private groundAt: GroundFn = (x) => ({ y: this.heightAt(x), gap: false });
+  private townOpts: ChunkOpts = {};
   private segs = new Map<number, THREE.Mesh>();
-  private sceneryMat = toon('#ffffff', { vertexColors: true, sway: true, rim: 0.7 });
-  private octaves = 4;
+  private town = new Map<number, TownView>();
+  private kit: Kit | null = null;
+  private sceneryMat = toon('#ffffff', { vertexColors: true, sway: true, rim: 0.6 });
   static readonly SEG = 200;
+  /** Town streaming window (route m behind / ahead of the rider) and the near-LOD radius. */
+  static readonly TOWN = { behind: 60, ahead: 300, near: 50 };
 
-  constructor(private scene: THREE.Scene) {
+  constructor(scene: THREE.Scene) {
     scene.fog = new THREE.Fog(ENV_STYLE.fog, ENV_STYLE.fogNear, ENV_STYLE.fogFar);
     this.dome = skyDome();
     scene.add(this.dome);
+    this.pano = paintedBand(`${BASE}town/sky-sea.webp`, 1400, ENV_STYLE.panoArc, ENV_STYLE.panoHorizon, ROUTE_DIR, false, -90);
+    scene.add(this.pano);
+    // far town on the hill: left of the route ahead, slightly nearer so it parallaxes against the panorama
+    const left = ROUTE_DIR.clone().multiplyScalar(0.8).addScaledVector(ROUTE_RIGHT, -0.6).normalize();
+    this.farTown = paintedBand(`${BASE}town/far-town.webp`, 1100, 58, 0.62, left, true, -80);
+    scene.add(this.farTown);
     scene.add(new THREE.HemisphereLight(ENV_STYLE.hemiSky, ENV_STYLE.hemiGround, ENV_STYLE.hemiIntensity));
     this.sun = new THREE.DirectionalLight(ENV_STYLE.sun, ENV_STYLE.sunIntensity);
     this.sun.castShadow = true;
@@ -143,14 +182,29 @@ export class Environment {
     this.sunOffset = ENV_STYLE.sunFrom.clone().normalize().multiplyScalar(60);
     scene.add(this.sun, this.sun.target);
     scene.add(this.group);
-    // soft cloud puffs that give the sea volume (one instanced draw call)
-    const pg = blob(1, 0.15, 0.5);
-    this.puffs = new THREE.InstancedMesh(pg, toon(ENV_STYLE.cloudLit, { rim: 1.4 }), 48);
+    this.sea = seaPlane();
+    scene.add(this.sea);
+    // a few soft cumulus over the sea far ahead (one instanced draw call)
+    this.puffs = new THREE.InstancedMesh(blob(1, 0.15, 0.5), toon(ENV_STYLE.cloudLit, { rim: 1.2 }), 24);
     this.puffs.frustumCulled = false;
     const r = mulberry32(99);
-    for (let i = 0; i < this.puffs.count; i++) this.puffData.push({ x: r() * 1400 - 200, lat: (r() < 0.5 ? -1 : 1) * (40 + r() * 520), dy: r() * 6, s: 10 + r() * 34, ph: r() * 6.28 });
+    for (let i = 0; i < this.puffs.count; i++) this.puffData.push({ x: r() * 1400 - 200, lat: 250 + r() * 500, dy: 60 + r() * 120, s: 14 + r() * 30, ph: r() * 6.28 });
     scene.add(this.puffs);
+    if (typeof document !== 'undefined' && typeof fetch !== 'undefined') {
+      TOWN_DETAIL.tex = loadTex(`${BASE}town/detail.jpg`, (t) => { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.needsUpdate = true; });
+      if (TOWN_DETAIL.tex) { TOWN_DETAIL.tex.colorSpace = THREE.NoColorSpace; TOWN_DETAIL.tex.wrapS = TOWN_DETAIL.tex.wrapT = THREE.RepeatWrapping; }
+      Kit.load(`${BASE}town/`).then((k) => this.setKit(k)).catch((e) => console.warn('town kit failed to load', e));
+    }
   }
+
+  /** Use a loaded kit (tests can inject one); rebuilds the town chunks. */
+  setKit(k: Kit): void {
+    this.kit = k;
+    for (const v of this.town.values()) this.dropTown(v);
+    this.town.clear();
+    this.lastX = NaN;
+  }
+  get kitReady(): boolean { return !!this.kit; }
 
   applyQuality(q: Quality): void {
     this.sun.castShadow = q.shadowMap > 0;
@@ -159,151 +213,144 @@ export class Environment {
       this.sun.shadow.map?.dispose();
       this.sun.shadow.map = null as unknown as THREE.WebGLRenderTarget;
     }
-    if (q.cloudOctaves !== this.octaves) {
-      this.octaves = q.cloudOctaves;
-      if (this.sea) { const y = this.sea.position.y; this.scene.remove(this.sea); (this.sea.material as THREE.Material).dispose(); this.sea = cloudSea(this.octaves); this.sea.position.y = y; this.scene.add(this.sea); }
-    }
-    this.puffs.count = q.puffs;
+    this.puffs.count = Math.min(24, q.puffs);
   }
 
   /**
-   * `heightAt(x)`: course height near x; `minY`: lowest course point for static courses
-   * (the cloud sea sits below it). `follow`: endless courses — the sea tracks the rider.
+   * `heightAt(x)`: course height near x; `minY`: lowest course point for static courses (the sea sits below it).
+   * `follow`: endless courses — the sea tracks the rider. `groundAt`: street level + gap flag; `opts`: harbour etc.
    */
-  buildScenery(seed: number, _length: number, heightAt: (x: number) => number = () => 0, minY = 0, follow = false): void {
+  buildScenery(seed: number, _length: number, heightAt: (x: number) => number = () => 0, minY = 0, follow = false, groundAt?: GroundFn, opts: ChunkOpts = {}): void {
     for (const g of this.segs.values()) { this.group.remove(g); g.geometry.dispose(); }
     this.segs.clear();
+    for (const v of this.town.values()) this.dropTown(v);
+    this.town.clear();
     this.seed = seed;
     this.heightAt = heightAt;
+    this.groundAt = groundAt ?? ((x) => ({ y: heightAt(x), gap: false }));
+    this.townOpts = opts;
     this.seaFollow = follow;
-    this.seaBase = follow ? Infinity : Math.min(ENV_STYLE.cloudSeaY, minY - 32);
+    this.seaBase = follow ? Infinity : minY - 9;
     this.seaY = follow ? heightAt(0) - 45 : this.seaBase;
-    if (!this.sea) { this.sea = cloudSea(this.octaves); this.scene.add(this.sea); }
     this.sea.position.y = this.seaY;
+    this.lastX = NaN;
   }
 
-  /** Stream scenery segments around route x (deterministic per seed and segment). */
+  private lastX = NaN;
+  /** Stream scenery around route x (deterministic per seed): far segments (200 m) and town chunks (40 m). */
   streamScenery(x: number, maxX = Infinity): void {
     const S = Environment.SEG;
     const lo = Math.floor((x - 300) / S), hi = Math.floor((Math.min(x + 1300, maxX) - S) / S);
     for (const [k, g] of this.segs) if (k < lo || k > hi) { this.group.remove(g); g.geometry.dispose(); this.segs.delete(k); }
     for (let k = lo; k <= hi; k++) if (!this.segs.has(k)) { const g = this.buildSegment(k); if (g) { this.segs.set(k, g); this.group.add(g); } }
+    // town chunks: at most one new chunk per call (spreads the merge cost over frames)
+    if (!this.kit) return;
+    const L = TOWN.chunk, T = Environment.TOWN;
+    const tlo = Math.floor((x - T.behind) / L), thi = Math.floor((Math.min(x + T.ahead, maxX + 20)) / L);
+    for (const [k, v] of this.town) if (k < tlo || k > thi) { this.dropTown(v); this.town.delete(k); }
+    let built = 0;
+    const order: number[] = [];
+    for (let k = tlo; k <= thi; k++) if (!this.town.has(k)) order.push(k);
+    order.sort((a, b) => Math.abs(a * L + L / 2 - x) - Math.abs(b * L + L / 2 - x));
+    const first = Number.isNaN(this.lastX);
+    for (const k of order) {
+      if (built >= (first ? 99 : 1)) break;
+      this.town.set(k, this.buildTown(k)); built++;
+    }
+    this.lastX = x;
   }
 
   get segmentCount(): number { return this.segs.size; }
+  get townChunkCount(): number { return this.town.size; }
+  /** Triangles in the visible town LODs (diagnostics). */
+  townTris(): number { let t = 0; for (const v of this.town.values()) t += v.near?.visible ? v.tris[0] : v.far?.visible ? v.tris[1] : 0; return t; }
 
+  private buildTown(k: number): TownView {
+    const c = buildTownChunk(this.kit!, k, this.seed, this.groundAt, this.townOpts);
+    const group = new THREE.Group();
+    const mat = townMaterial();
+    const mk = (g: THREE.BufferGeometry | null) => { if (!g) return null; const m = new THREE.Mesh(g, mat); m.receiveShadow = true; group.add(m); return m; };
+    const near = mk(c.near), far = mk(c.far);
+    if (far) far.visible = false;
+    group.position.copy(toScene(k * TOWN.chunk, c.y0));
+    this.group.add(group);
+    return { group, near, far, x0: k * TOWN.chunk, tris: [c.trisNear, c.trisFar] };
+  }
+  private dropTown(v: TownView): void { this.group.remove(v.group); v.near?.geometry.dispose(); v.far?.geometry.dispose(); }
+
+  /** Opening course: open sea on the right from the harbour on (no hill/blocks standing in the water). */
+  private seaRight(x: number): boolean { return this.townOpts.harbourFrom !== undefined && x >= this.townOpts.harbourFrom - 30; }
+
+  /** Distant hillside: impostor blocks (box + hip roof) on terraces rising to the left, a few dropping toward the sea on the right. */
   private buildSegment(k: number): THREE.Mesh | null {
     const S = Environment.SEG, E = ENV_STYLE;
     const b = new GeoBuilder();
     const rng = mulberry32((this.seed ^ 0x5eed ^ Math.imul(k + 1000003, 0x2545f491)) >>> 0);
-    for (let x = k * S + rng() * 30; x < (k + 1) * S; x += 34 + rng() * 40) {
-      const side = rng() < 0.5 ? 1 : -1;
-      const lateral = side * (48 + rng() * 360); // both sides of the route, never on it
-      const ground = this.heightAt(x);
-      const near = Math.abs(lateral) < 140;
-      const y = ground - (near ? 12 + rng() * 18 : 6 + rng() * 40);
-      const base = this.seaFollow ? ground - 45 : Math.min(this.seaBase, ground - 45);
-      const kind = rng();
-      if (kind < 0.7) this.island(b, toScene(x, y, lateral), 7 + rng() * (near ? 10 : 18), rng);
-      else if (kind < 0.88) {
-        const h = 50 + rng() * 110; // far lavender crags rising out of the clouds (rounded, not pyramids)
-        const p = toScene(x, base - h * 0.15, lateral * 1.6);
-        for (let i = 0; i < 3; i++) {
-          const s = h * (0.55 - i * 0.12);
-          b.add(blob(1, 0.3, rng()), [p.x + (rng() - 0.5) * h * 0.5, p.y + i * h * 0.28, p.z + (rng() - 0.5) * h * 0.3], E.peak, { top: E.peakTop, scale: [s * 0.8, s * 1.1, s * 0.7] });
-        }
-      } else {
-        // a cumulus tower: stacked soft lumps
-        const p = toScene(x, base + 4, lateral * 1.3);
-        const s = 14 + rng() * 18;
-        for (let i = 0; i < 4; i++) b.add(blob(1, 0.2, rng()), [p.x + (rng() - 0.5) * s, p.y + i * s * 0.55, p.z + (rng() - 0.5) * s], E.cloudShade, { scale: s * (1 - i * 0.18), top: E.cloudLit });
+    const x0 = k * S, x1 = x0 + S;
+    // hill ground (left: rises; right: a short slope down to the shore)
+    for (let x = x0; x < x1; x += 20) {
+      const y = this.heightAt(x + 10);
+      for (let r = 0; r < 4; r++) b.add(new THREE.BoxGeometry(20.5, 4, 24), toScene(x + 10, y + r * 6.5 - 0.6, -(32 + r * 22 + 8)), E.hill, { top: E.hillTop, rot: [0, ROUTE_YAW, 0] });
+      if (!this.seaRight(x + 10)) b.add(new THREE.BoxGeometry(20.5, 4, 40), toScene(x + 10, y - 5, 46), E.hill, { top: E.hillTop, rot: [0, ROUTE_YAW, 0] });
+    }
+    for (let x = x0 + rng() * 6; x < x1; x += 5 + rng() * 5) {
+      for (let row = 0; row < 5; row++) {
+        const side = row < 4 ? -1 : 1;
+        const lat = side * (32 + row * 22 + rng() * 14);
+        if (side > 0 && (rng() < 0.5 || this.seaRight(x))) continue;
+        const ground = this.heightAt(x) + (side < 0 ? 1.5 + row * 6.5 : -3) + rng() * 2;
+        const w = 4 + rng() * 4, h = 5 + rng() * 6, d = 4.5 + rng() * 2;
+        const p = toScene(x, ground + h / 2 - 1, lat);
+        const wall = E.blockWall[Math.floor(rng() * E.blockWall.length)];
+        b.add(new THREE.BoxGeometry(w, h, d), p, wall, { top: wall });
+        b.add(new THREE.ConeGeometry(Math.max(w, d) * 0.72, 2.2, 4, 1), [p.x, p.y + h / 2 + 1.1, p.z], E.blockRoof, { top: E.blockRoofTop, rot: [0, Math.PI / 4, 0], scale: [w / Math.max(w, d), 1, d / Math.max(w, d)] });
+        if (rng() < 0.18) { const th = 6 + rng() * 5; b.add(new THREE.ConeGeometry(0.9, th, 6, 1), [p.x + w * 0.7, ground + th / 2, p.z], E.cypress, { top: E.cypressTop, sway: 0.6 }); }
       }
     }
     const g = b.build();
     if (!g) return null;
     const m = new THREE.Mesh(g, this.sceneryMat);
     m.frustumCulled = true;
-    m.matrixAutoUpdate = true;
     return m;
-  }
-
-  /** A floating island: rocky underside, grassy top, and Greek ruins / trees. */
-  private island(b: GeoBuilder, p: THREE.Vector3, r: number, rng: () => number): void {
-    const E = ENV_STYLE;
-    const H = r * (1.3 + rng() * 0.9);
-    // rocky underside: a main crag plus two offset lumps so the silhouette never reads as a plain cone
-    b.add(jitter(new THREE.ConeGeometry(r, H, 10, 4), r * 0.22, rng), [p.x, p.y - H / 2, p.z], E.rockDeep, { rot: [Math.PI, rng() * 3, 0], top: E.rock });
-    for (let i = 0; i < 2; i++) {
-      const rr = r * (0.45 + rng() * 0.2), hh = H * (0.45 + rng() * 0.25);
-      b.add(jitter(new THREE.ConeGeometry(rr, hh, 7, 2), rr * 0.25, rng), [p.x + (rng() - 0.5) * r, p.y - hh / 2 - 0.3, p.z + (rng() - 0.5) * r * 0.8], E.rockDeep, { rot: [Math.PI, rng() * 3, 0], top: E.rock });
-    }
-    b.add(new THREE.CylinderGeometry(r * 1.02, r * 0.98, 1.2, 12), [p.x, p.y + 0.4, p.z], E.grass, { top: E.grassTop });
-    const top = p.y + 1.0;
-    const what = rng();
-    if (what < 0.4) {
-      // ruined colonnade on a stylobate
-      const n = 4 + Math.floor(rng() * 4), R = r * 0.55;
-      b.add(new THREE.BoxGeometry(R * 2.3, 0.6, R * 1.3), [p.x, top + 0.3, p.z], E.marbleShade, { top: E.marble });
-      for (let i = 0; i < n; i++) {
-        const a = (i / n) * Math.PI * 2, cx = p.x + Math.cos(a) * R, cz = p.z + Math.sin(a) * R * 0.5;
-        const h = rng() < 0.3 ? 1.5 + rng() * 2 : 5 + rng();
-        b.add(new THREE.CylinderGeometry(0.42, 0.5, h, 10), [cx, top + 0.6 + h / 2, cz], E.marbleShade, { top: E.marble });
-        if (h > 4) b.add(new THREE.BoxGeometry(1.2, 0.35, 1.2), [cx, top + 0.6 + h + 0.17, cz], E.marble);
-      }
-      if (rng() < 0.6) b.add(new THREE.BoxGeometry(R * 1.6, 0.5, 0.9), [p.x, top + 6.6, p.z], E.marble, { rot: [0, 0, (rng() - 0.5) * 0.15] });
-    } else if (what < 0.6) {
-      // little temple: steps, columns, pediment, terracotta roof
-      const w = r * 0.9, d = r * 0.6;
-      b.add(new THREE.BoxGeometry(w, 0.8, d), [p.x, top + 0.4, p.z], E.marbleShade, { top: E.marble });
-      for (let i = 0; i < 4; i++) for (const s of [-1, 1]) b.add(new THREE.CylinderGeometry(0.35, 0.4, 4.2, 10), [p.x - w * 0.4 + (i * w * 0.8) / 3, top + 2.9, p.z + s * d * 0.38], E.marbleShade, { top: E.marble });
-      b.add(new THREE.BoxGeometry(w * 1.02, 0.5, d * 1.02), [p.x, top + 5.25, p.z], E.marble);
-      const roof = new THREE.CylinderGeometry(0.01, d * 0.62, w * 1.05, 3, 1); // triangular prism
-      b.add(roof, [p.x, top + 6.1, p.z], E.terracotta, { rot: [0, 0, Math.PI / 2], scale: [1, 1, 0.55] });
-    }
-    // trees: cypress (tall, dark) and olive (round, silvery); foliage sways
-    const trees = 1 + Math.floor(rng() * 4);
-    for (let i = 0; i < trees; i++) {
-      const a = rng() * Math.PI * 2, rr = r * (0.3 + rng() * 0.55);
-      const tx = p.x + Math.cos(a) * rr, tz = p.z + Math.sin(a) * rr * 0.6;
-      if (rng() < 0.55) {
-        const h = 4 + rng() * 4;
-        b.add(new THREE.ConeGeometry(0.85, h, 7, 2), [tx, top + h / 2, tz], E.cypress, { top: E.cypressTop, sway: 1.2, scale: [1, 1, 1] });
-      } else {
-        b.add(new THREE.CylinderGeometry(0.18, 0.28, 1.6, 6), [tx, top + 0.8, tz], E.trunk);
-        for (let j = 0; j < 3; j++) b.add(blob(1, 0.25, rng()), [tx + (rng() - 0.5) * 1.6, top + 2.1 + rng() * 0.8, tz + (rng() - 0.5) * 1.2], E.olive, { top: E.oliveTop, scale: [1.3, 0.85, 1.1], sway: 0.6 });
-      }
-    }
   }
 
   /** Floating origin moved by `delta` (scene space): shift persistent scenery. */
   shift(delta: THREE.Vector3): void {
     for (const g of this.segs.values()) g.position.add(delta);
+    for (const v of this.town.values()) v.group.position.add(delta);
     this.seaY += delta.y;
-    if (this.sea) { const u = (this.sea.material as THREE.ShaderMaterial).uniforms.uShift.value as THREE.Vector2; u.x -= delta.x; u.y -= delta.z; }
+    const u = (this.sea.material as THREE.ShaderMaterial).uniforms.uShift.value as THREE.Vector2; u.x -= delta.x; u.y -= delta.z;
   }
 
-  /** Keep the shadow frustum, sky, sea and puffs centred on the action. */
+  /** Keep the shadow frustum, sky layers, sea and clouds centred on the action; switch town LODs. */
   follow(focus: THREE.Vector3, cameraPos: THREE.Vector3, routeX = 0, routeY = 0): void {
     this.sun.target.position.copy(focus);
     this.sun.position.copy(focus).add(this.sunOffset);
     this.dome.position.copy(cameraPos);
-    if (this.sea) {
-      if (this.seaFollow) this.seaY += (focus.y - 45 - this.seaY) * 0.02;
-      this.sea.position.set(cameraPos.x, this.seaFollow ? this.seaY : this.seaBase - ORIGIN.y, cameraPos.z);
+    this.pano.position.copy(cameraPos);
+    // the far-town layer sits at a fixed height below the horizon band (it is a hillside, not the horizon)
+    this.farTown.position.set(cameraPos.x, cameraPos.y - 40, cameraPos.z);
+    if (this.seaFollow) this.seaY += (focus.y - 45 - this.seaY) * 0.02;
+    this.sea.position.set(cameraPos.x, this.seaFollow ? this.seaY : this.seaBase - ORIGIN.y, cameraPos.z);
+    const N = Environment.TOWN.near;
+    for (const v of this.town.values()) {
+      const c = v.x0 + TOWN.chunk / 2, near = c > routeX - 30 && c < routeX + N;
+      if (v.near) v.near.visible = near || !v.far;
+      if (v.far) v.far.visible = !near;
     }
-    // puffs: recycled around the rider in route space, bobbing gently on the sea surface
-    const seaRoute = this.sea ? this.sea.position.y + ORIGIN.y : routeY - 45;
-    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), v = new THREE.Vector3();
+    const seaRoute = this.sea.position.y + ORIGIN.y;
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3();
     const t = ART_UNIFORMS.uTime.value;
     for (let i = 0; i < this.puffs.count; i++) {
       const d = this.puffData[i];
-      while (d.x < routeX - 250) d.x += 1500;
-      while (d.x > routeX + 1250) d.x -= 1500;
-      toScene(d.x, seaRoute + d.dy + Math.sin(t * 0.3 + d.ph) * 0.8, d.lat, v);
-      s.set(d.s * 1.4, d.s * 0.55, d.s);
-      m.compose(v, q, s);
+      while (d.x < routeX + 200) d.x += 1400;
+      while (d.x > routeX + 1600) d.x -= 1400;
+      toScene(d.x, seaRoute + d.dy + Math.sin(t * 0.2 + d.ph) * 2, d.lat, p);
+      s.set(d.s * 1.6, d.s * 0.7, d.s);
+      m.compose(p, q, s);
       this.puffs.setMatrixAt(i, m);
     }
     this.puffs.instanceMatrix.needsUpdate = true;
+    void routeY;
   }
 }

@@ -7,6 +7,7 @@ import { Effects, SpeedLines, Petals } from './effects';
 import { QualityManager, type Quality } from './quality';
 import { ART_UNIFORMS } from './materials';
 import { RiderView } from './riderView';
+import { PostPass } from './post';
 import { Environment } from './environment';
 import { Debris } from './debris';
 import { toScene, ORIGIN, rebaseTarget, rebaseDelta } from './space';
@@ -47,6 +48,7 @@ export class GameView {
   private arcLine: THREE.Line;
   private failMarker: THREE.Mesh;
   private edgeMarker: THREE.Mesh;
+  readonly post: PostPass;
   private streakTimer = 0;
   private contactFx = 0;
   showArc = false;
@@ -68,6 +70,8 @@ export class GameView {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 0.95;
     this.env = new Environment(this.scene);
+    this.post = new PostPass(this.renderer, new URLSearchParams(location.search).get('outline') === '0' ? 0 : 4);
+    if (new URLSearchParams(location.search).get('outline') === '0') this.post.enabled = false;
     this.scene.add(this.rider.root, this.effects.group, this.speedLines.group, this.petals.mesh);
     this.quality.onChange = (q) => this.applyQuality(q);
     this.applyQuality(this.quality.level);
@@ -107,7 +111,15 @@ export class GameView {
     const minY = streamed ? 0 : Math.min(...course.surfaces.flatMap((q) => q.points.map((pt) => pt.y)));
     let lastH = 0;
     const heightAt = (x: number) => { const g = course.groundBelow(x, 1e6); if (g) lastH = g.sample.y; else if (!streamed) lastH = course.lowestNear(x); return lastH; };
-    this.env.buildScenery(course.seed, course.finishX, heightAt, minY, streamed);
+    // past the finish the town carries on at the quay level (no cliffs/terraces from the course's lowest fallback)
+    const endY = streamed ? 0 : (course.groundBelow(course.finishX - 0.5, 1e6)?.sample.y ?? minY);
+    const groundAt = (x: number) => {
+      if (!streamed && x > course.finishX - 0.5) return { y: endY, gap: false };
+      const g = course.groundBelow(x, 1e6); return g ? { y: g.sample.y, gap: false } : { y: heightAt(x), gap: true };
+    };
+    const towers = streamed ? Array.from({ length: 200 }, (_, i) => 520 + i * 900) : [course.finishX * 0.22, course.finishX * 0.64];
+    const harbourFrom = streamed ? undefined : Math.floor((course.finishX - 220) / 40) * 40;
+    this.env.buildScenery(course.seed, course.finishX, heightAt, minY, streamed, groundAt, { harbourFrom, clockTowers: towers, endless: streamed });
     this.env.streamScenery(course.startX, streamed ? (course as unknown as { generatedTo: number }).generatedTo : Infinity);
   }
 
@@ -131,6 +143,7 @@ export class GameView {
   resize(): void {
     const w = window.innerWidth, h = window.innerHeight;
     this.renderer.setSize(w, h, false);
+    this.post?.setSize(w, h, this.renderer.getPixelRatio());
     this.rig.resize(w, h);
   }
 
@@ -294,6 +307,9 @@ export class GameView {
     this.effects.update(dt);
     this.debris.update(dt);
     if (this.failMarker.visible) this.failMarker.scale.setScalar(1 + 0.1 * Math.sin(performance.now() / 120));
-    this.renderer.render(this.scene, this.rig.camera);
+    this.post.render(this.scene, this.rig.camera);
   }
+
+  /** Draw the scene through the post pass from any camera (review/capture scripts). */
+  present(camera: THREE.Camera = this.rig.camera): void { this.post.render(this.scene, camera); }
 }
