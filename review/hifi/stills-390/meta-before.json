@@ -1,0 +1,146 @@
+[
+ {
+  "tick": 240,
+  "x": 24,
+  "mode": "grounded",
+  "canvas": [
+   390,
+   844
+  ],
+  "renderDpr": 1,
+  "frame": 62,
+  "calls": 107,
+  "triangles": 334178,
+  "points": 220,
+  "lines": 728,
+  "geometries": 88,
+  "programs": 63,
+  "quality": "medium"
+ },
+ {
+  "tick": 720,
+  "x": 102,
+  "mode": "grounded",
+  "canvas": [
+   390,
+   844
+  ],
+  "renderDpr": 1,
+  "frame": 132,
+  "calls": 111,
+  "triangles": 323794,
+  "points": 220,
+  "lines": 728,
+  "geometries": 90,
+  "programs": 63,
+  "quality": "medium"
+ },
+ {
+  "tick": 1200,
+  "x": 174,
+  "mode": "airborne",
+  "canvas": [
+   390,
+   844
+  ],
+  "renderDpr": 1,
+  "frame": 202,
+  "calls": 109,
+  "triangles": 315756,
+  "points": 220,
+  "lines": 728,
+  "geometries": 92,
+  "programs": 63,
+  "quality": "medium"
+ },
+ {
+  "tick": 1680,
+  "x": 239,
+  "mode": "grounded",
+  "canvas": [
+   390,
+   844
+  ],
+  "renderDpr": 1,
+  "frame": 272,
+  "calls": 105,
+  "triangles": 313940,
+  "points": 220,
+  "lines": 728,
+  "geometries": 90,
+  "programs": 63,
+  "quality": "medium"
+ },
+ {
+  "tick": 2160,
+  "x": 298,
+  "mode": "grounded",
+  "canvas": [
+   390,
+   844
+  ],
+  "renderDpr": 1,
+  "frame": 342,
+  "calls": 101,
+  "triangles": 334512,
+  "points": 220,
+  "lines": 728,
+  "geometries": 92,
+  "programs": 63,
+  "quality": "medium"
+ },
+ {
+  "tick": 2640,
+  "x": 367,
+  "mode": "grounded",
+  "canvas": [
+   390,
+   844
+  ],
+  "renderDpr": 1,
+  "frame": 412,
+  "calls": 105,
+  "triangles": 306460,
+  "points": 220,
+  "lines": 728,
+  "geometries": 91,
+  "programs": 63,
+  "quality": "medium"
+ },
+ {
+  "tick": 3120,
+  "x": 433,
+  "mode": "grinding",
+  "canvas": [
+   390,
+   844
+  ],
+  "renderDpr": 1,
+  "frame": 482,
+  "calls": 101,
+  "triangles": 295036,
+  "points": 220,
+  "lines": 728,
+  "geometries": 90,
+  "programs": 63,
+  "quality": "medium"
+ },
+ {
+  "tick": 3600,
+  "x": 497,
+  "mode": "grounded",
+  "canvas": [
+   390,
+   844
+  ],
+  "renderDpr": 1,
+  "frame": 552,
+  "calls": 109,
+  "triangles": 278426,
+  "points": 220,
+  "lines": 728,
+  "geometries": 95,
+  "programs": 65,
+  "quality": "medium"
+ }
+]
