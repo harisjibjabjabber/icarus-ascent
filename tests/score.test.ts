@@ -3,6 +3,7 @@ import { ScoreKeeper, SCORE } from '../src/score/score';
 import { EndlessCourse } from '../src/course/endless';
 import { Simulation } from '../src/sim/simulation';
 import { Autopilot } from '../src/diag/autopilot';
+import { PROFILES } from './endlessHelpers';
 import { TUNING } from '../src/tuning';
 import type { RiderState, SimEvent } from '../src/sim/types';
 
@@ -196,3 +197,65 @@ describe('score keeper: air, banking and re-ridden ground', () => {
   });
 });
 
+describe('near misses', () => {
+  it('fire on roughly 5-15% of the relevant events over autopilot rides (14 seeds x 4 km), each kind at least once', () => {
+    let landings = 0, walls = 0, pots = 0, pillars = 0;
+    const kinds: Record<string, number> = {};
+    for (let seed = 1; seed <= 14; seed++) {
+      const c = new EndlessCourse(seed);
+      const sim = new Simulation(c);
+      const ap = new Autopilot(PROFILES[seed % PROFILES.length]);
+      const k = new ScoreKeeper();
+      let prevX = sim.state.x, takeoffX = -Infinity, wasAir = false;
+      for (let i = 0; i < 4000 / 6 / dt && sim.state.x < 4000 && sim.state.mode !== 'failed'; i++) {
+        for (const a of ap.next(sim)) sim.enqueue(a);
+        sim.step();
+        const s = sim.state, ev = sim.drainEvents();
+        if (s.mode === 'airborne' && !wasAir) takeoffX = prevX;
+        for (const e of ev) {
+          if (e.type === 'wall-start') walls++;
+          if (e.type === 'break' && e.kind === 'pillar') pillars++;
+          if (e.type === 'land' && c.gaps.some((g) => g.requires === 'jump' && g.x1 <= e.x && g.x0 >= takeoffX - 0.5)) landings++;
+        }
+        if (s.mode === 'airborne') for (const o of c.obstacles) if (o.kind === 'pot' && !s.broken.includes(o.id) && prevX < o.x && s.x >= o.x) pots++;
+        k.update(dt, s, ev, c);
+        for (const p of k.drainPopups()) if (p.kind === 'near') kinds[p.text] = (kinds[p.text] ?? 0) + 1;
+        wasAir = s.mode === 'airborne'; prevX = s.x;
+      }
+      expect(sim.state.mode, `seed ${seed}`).not.toBe('failed');
+    }
+    const total = Object.values(kinds).reduce((a, b) => a + b, 0), relevant = landings + walls + pots + pillars;
+    expect(total / relevant).toBeGreaterThanOrEqual(0.05);
+    expect(total / relevant).toBeLessThanOrEqual(0.15);
+    for (const [kind, n] of [['Close call!', landings], ['Late catch!', walls], ['Close!', pots]] as const) {
+      expect(kinds[kind] ?? 0, kind).toBeGreaterThan(0);
+      expect((kinds[kind] ?? 0) / n, kind).toBeLessThan(0.2);
+    }
+  }, 60000);
+
+  it('clipping a pillar edge: a trick that comes on with the rider already inside the smash reach is a near miss, one on time is not', () => {
+    const smash = (lateGrab: boolean) => {
+      const c = new EndlessCourse(1, { script: ['start', 'recovery', 'crest-pillar'], d: 0.5 });
+      const p = c.obstacles.find((o) => o.kind === 'pillar')!;
+      const sim = new Simulation(c, TUNING, { x: p.x - 30, speed: 14 });
+      const k = new ScoreKeeper();
+      let jumped = false, grabbed = false, id = 1;
+      const near: string[] = [];
+      for (let i = 0; i < 6 / dt && !sim.state.broken.includes(p.id) && sim.state.mode !== 'failed'; i++) {
+        const s = sim.state;
+        if (!jumped && s.mode === 'grounded' && s.x > p.x - Math.max(1.5, s.speed * 0.3)) { sim.enqueue({ type: 'up', strokeId: ++id, source: 'test' }); jumped = true; }
+        const grabAt = lateGrab ? p.x - p.halfWidth - 0.3 : p.x - 4;
+        if (jumped && !grabbed && s.mode === 'airborne' && s.x + s.vx * dt >= grabAt) { sim.enqueue({ type: 'side', side: 'left', held: true, strokeId: ++id, source: 'test' }); grabbed = true; }
+        sim.step();
+        k.update(dt, sim.state, sim.drainEvents(), c);
+        for (const q of k.drainPopups()) if (q.kind === 'near') near.push(q.text);
+      }
+      return { broken: sim.state.broken.includes(p.id), mode: sim.state.mode, near };
+    };
+    const late = smash(true), onTime = smash(false);
+    expect(late.broken).toBe(true);
+    expect(late.near).toEqual(['Clipped it!']);
+    expect(onTime.broken).toBe(true);
+    expect(onTime.near).toEqual([]);
+  });
+});

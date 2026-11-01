@@ -13,8 +13,8 @@ import type { Course } from '../course/course';
  *   the sim already makes a bad landing cost speed).
  * - Air: points per second of real airborne time (a flight that ends in a landing; grind / wall / skim time
  *   is not air). Not a combo link: see `update`.
- * - Near misses (links, with a pop-up): landing right at a gap's far lip, catching a wall late over the gap,
- *   clearing a pot by a hair.
+ * - Near misses (links, with a pop-up): landing just past a gap's far lip, catching a wall late (at the
+ *   kicker's lip or over the gap), clearing a pot by a hair, smashing a pillar at its very edge.
  * - Re-ridden ground (a checkpoint retry behind the furthest point already reached) pays nothing again:
  *   no distance, tricks, air, near misses or set-piece bonus.
  * - Distance: SCORE.perMetre per metre of new ground.
@@ -28,9 +28,20 @@ export const SCORE = {
   skim: 60, skimPerSec: 120,
   pot: 200, pillar: 600,
   airMin: 0.7, airPerSec: 150,
-  edge: 300, edgeWithin: 0.9,
-  lateWall: 300, lateWallOver: 1.0,
+  // Near-miss thresholds, tuned against autopilot rides (tests/score.test.ts: 14 seeds x 4 km fire on
+  // ~5-15% of the relevant events, not never and not constantly).
+  /** Landing within this far past a jump gap's far lip (m). Gap landings fall 0.1-6 m past the lip. */
+  edge: 300, edgeWithin: 1.8,
+  /** Wall caught later than this relative to the takeoff lip (m; negative = before it). A right held
+   *  into the kicker catches as the rider leaves it, 0.47-0.65 m before the lip: a catch from the
+   *  lip's last half metre on, or over the gap, came late. */
+  lateWall: 300, lateWallOver: -0.48,
+  /** Pot cleared in the air with less than this under the board (m). Jumps clear by 0.25-0.55 m. */
   closePot: 200, closePotClearance: 0.35,
+  /** Pillar smashed within this of its real face or of its top (m): the trick came on with the rider
+   *  already inside the smash reach (TUNING.obstacles.pillarBreakReach), or the rider barely
+   *  reached the top. A smash started on time hits the reach boundary, 0.8 m before the face. */
+  pillarEdge: 300, pillarEdgeWithin: 0.35,
   setPiece: 1000,
   /** Seconds of plain rolling (no trick, not airborne) that bank the combo. */
   idle: 2.5,
@@ -128,12 +139,14 @@ export class ScoreKeeper {
           if (!fresh) break;
           this.link(SCORE.wall);
           const w = course.walls.find((q) => q.id === e.wallId);
-          if (w && e.x > w.x0 + 4 + SCORE.lateWallOver) this.near('Late catch!', SCORE.lateWall);
+          if (w && e.x > w.x0 + 4 + SCORE.lateWallOver) this.near('Late catch!', SCORE.lateWall); // walls start 4 m before the takeoff lip
           break;
         }
         case 'break': {
           if (!fresh) break;
           this.link(e.kind === 'pillar' ? SCORE.pillar : SCORE.pot);
+          const o = e.kind === 'pillar' ? course.obstacle(e.obstacleId) : undefined;
+          if (o && (e.x >= o.x - o.halfWidth - SCORE.pillarEdgeWithin || e.y >= o.baseY + o.height - SCORE.pillarEdgeWithin)) this.near('Clipped it!', SCORE.pillarEdge);
           break;
         }
         case 'land': {
