@@ -1,7 +1,14 @@
-html, body { margin: 0; height: 100%; overflow: hidden; background: #e9d6d4; overscroll-behavior: none; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #d9e7ee; overscroll-behavior: none; }
 body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; touch-action: none; font-family: system-ui, -apple-system, sans-serif; }
-#app { position: fixed; inset: 0; }
-#app canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+/* the sky behind the canvas: what shows if the WebGL context is lost or a frame is dropped (never a white/black flash) */
+#app { position: fixed; inset: 0; background: linear-gradient(to bottom, #9fc6e6, #d9e7ee 60%, #efe4d0); }
+#app canvas { display: block; width: 100%; height: 100%; touch-action: none; background: linear-gradient(to bottom, #9fc6e6, #d9e7ee 60%, #efe4d0); }
+/* a lost context paints the canvas white in some browsers: make it see-through (opacity keeps touch input working) */
+#app canvas.gfx-lost { opacity: 0; }
+/* WebGL context lost: a quiet note while the GPU recovers (the run keeps going underneath) */
+.gfx-hint { position: absolute; left: 50%; bottom: calc(max(14px, env(safe-area-inset-bottom)) + 26px); transform: translateX(-50%); z-index: 40; pointer-events: none;
+  font: 600 12px system-ui, sans-serif; color: #4b3f5c; background: #fff8f2b3; border-radius: 10px; padding: 5px 10px; opacity: 0; transition: opacity .3s; }
+.gfx-hint.show { opacity: .9; }
 .hud { position: absolute; inset: 0; pointer-events: none; color: #4b3f5c; }
 .hint { position: absolute; left: 0; right: 0; bottom: 12%; text-align: center; font-size: 14px; line-height: 1.45; padding: 0 14px; transition: opacity .6s; opacity: .9; text-shadow: 0 1px 0 #fff8; }
 .hint span { font-size: 13px; opacity: .7; }

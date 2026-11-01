@@ -4,7 +4,8 @@ import type { RiderState, SimEvent } from '../sim/types';
 import { CameraRig } from './cameraRig';
 import { CourseView } from './courseView';
 import { Effects, SpeedLines, Petals } from './effects';
-import { QualityManager, type Quality } from './quality';
+import { QualityManager, QUALITY, ORDER, deviceAnisotropy, type Quality } from './quality';
+import { loadLoss, recordLoss, saveLoss } from './gfxHistory';
 import { ART_UNIFORMS } from './materials';
 import { RiderView } from './riderView';
 import { PostPass } from './post';
@@ -55,11 +56,20 @@ export class GameView {
   private failCam: { x: number; y: number } | null = null;
 
   constructor(container: HTMLElement) {
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance', preserveDrawingBuffer: true });
+    const qs0 = new URLSearchParams(location.search);
+    const postOn = qs0.get('outline') !== '0';
+    // GPU memory: the post pass renders the scene into its own MSAA target + depth texture, so the canvas only ever
+    // receives one full-screen quad and needs neither MSAA nor a depth buffer of its own (same image; on a 390x844
+    // phone that is ~60 MB less at DPR 2.5, ~85 MB at DPR 3). The drawing buffer is preserved only for capture
+    // scripts (headless automation or ?capture=1; ?capture=0 forces it off).
+    const capture = qs0.get('capture') === '1' || (qs0.get('capture') !== '0' && navigator.webdriver === true);
+    this.renderer = new THREE.WebGLRenderer({ antialias: !postOn, depth: !postOn, powerPreference: 'high-performance', preserveDrawingBuffer: capture });
     const mobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || Math.min(window.innerWidth, window.innerHeight) < 600;
-    this.quality = new QualityManager(location.search, mobile);
+    this.quality = new QualityManager(location.search, mobile, loadLoss());
+    this.aniso = deviceAnisotropy(this.renderer.capabilities.getMaxAnisotropy(), mobile);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     container.appendChild(this.renderer.domElement);
+    this.watchContext(container);
     // colour grade: a soft warm vignette in CSS (free on the GPU, never covers the route centre)
     const grade = document.createElement('div');
     grade.className = 'grade';
@@ -70,8 +80,9 @@ export class GameView {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 0.95;
     this.env = new Environment(this.scene);
-    this.post = new PostPass(this.renderer, new URLSearchParams(location.search).get('outline') === '0' ? 0 : 4);
-    if (new URLSearchParams(location.search).get('outline') === '0') this.post.enabled = false;
+    this.env.setAnisotropy(this.aniso); // once, before any texture is on the GPU (tier switches never change it)
+    this.post = new PostPass(this.renderer, postOn ? 4 : 0);
+    if (!postOn) this.post.enabled = false;
     this.scene.add(this.rider.root, this.effects.group, this.speedLines.group, this.petals.mesh);
     this.quality.onChange = (q) => this.applyQuality(q);
     this.quality.onScale = () => this.applyResolution();
@@ -89,6 +100,8 @@ export class GameView {
       try { this.renderer.compile(this.scene, this.rig.camera); } catch { /* precompile is best-effort */ }
       requestAnimationFrame(() => veil.classList.add('gone'));
       setTimeout(() => veil.remove(), 1500);
+      // the post variants a later tier switch can reach compile in the background now, not in the switch frame
+      setTimeout(() => void this.post.prewarm(this.postCombos()), 2000);
     });
 
     this.trailLine = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineDashedMaterial({ color: '#c8553d', dashSize: 0.5, gapSize: 0.35, fog: false }));
@@ -106,18 +119,100 @@ export class GameView {
   /** Apply a render quality level (pixel ratio, shadows, textures, post effects, LOD, particle counts). */
   applyQuality(q: Quality): void {
     this.renderer.shadowMap.enabled = q.shadowMap > 0;
-    const maxAniso = this.renderer.capabilities.getMaxAnisotropy();
-    this.env.applyQuality(q, maxAniso);
+    this.env.applyQuality(q);
     this.post.configure({ bloom: q.bloom, ao: q.ao, grade: q.name !== 'low' });
     this.petals.count = q.petals;
-    this.rider.setQuality(q.name, Math.min(maxAniso, q.anisotropy));
+    this.rider.setQuality(q.name, this.aniso);
     this.applyResolution();
+    this.watchHitch();
   }
 
   /** Render resolution: the tier's (dynamic) pixel ratio, never above the device's own. */
   applyResolution(): void {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this.quality.scale));
     this.resize();
+    this.watchHitch();
+  }
+
+  /** Texture anisotropy for this device (set once; see deviceAnisotropy). */
+  private readonly aniso: number;
+  /** Every bloom/AO combination of the tiers (prewarmed composite programs). */
+  private postCombos(): { bloom: boolean; ao: boolean }[] {
+    const seen = new Map<string, { bloom: boolean; ao: boolean }>();
+    for (const n of ORDER) { const t = QUALITY[n]; seen.set(`${t.bloom}${t.ao}`, { bloom: t.bloom, ao: t.ao }); }
+    return [...seen.values()];
+  }
+
+  // ---- switch hitch diagnostics: the longest frame interval among the few frames after a tier/resolution change ----
+  private lastFrameAt = 0;
+  private hitchFrames = 0;
+  private hitchMax = 0;
+  /** Diagnostics: duration (ms) of the last switch hitch, and of the last context-loss blackout. */
+  lastHitchMs = 0;
+  lastBlackoutMs = 0;
+  private watchHitch(): void { if (this.lastFrameAt) { this.hitchFrames = 3; this.hitchMax = 0; } }
+  private frameTiming(): void {
+    const now = performance.now();
+    if (this.lastFrameAt && this.hitchFrames > 0) {
+      this.hitchMax = Math.max(this.hitchMax, now - this.lastFrameAt);
+      if (--this.hitchFrames === 0) this.lastHitchMs = this.hitchMax;
+    }
+    this.lastFrameAt = now;
+  }
+
+  // ---- WebGL context loss: keep playing (the sim never depends on the GPU), show a quiet hint, come back a tier lower ----
+  /** True while the WebGL context is lost (nothing renders; the CSS sky shows through). */
+  contextLost = false;
+  private lostAt = 0;
+  private lostCounts = true;
+  private visAt = 0;
+  private restoredAt = 0;
+  private gfxHint: HTMLDivElement | null = null;
+  private gfxHintTimer = 0;
+  private watchContext(container: HTMLElement): void {
+    const canvas = this.renderer.domElement;
+    document.addEventListener('visibilitychange', () => { this.visAt = performance.now(); });
+    // three registers its own handlers first (preventDefault on loss -> the browser may restore; re-init on restore)
+    canvas.addEventListener('webglcontextlost', (e) => {
+      e.preventDefault();
+      if (this.contextLost) return;
+      this.contextLost = true;
+      this.lostAt = performance.now();
+      // a background tab (or one just brought back) can lose its context to the OS: not this tier's fault
+      this.lostCounts = document.visibilityState === 'visible' && this.lostAt - this.visAt > 1000;
+      this.quality.contextLost();
+      canvas.classList.add('gfx-lost'); // the CSS sky shows instead of whatever the browser paints for a lost canvas
+      clearTimeout(this.gfxHintTimer);
+      this.gfxHintTimer = window.setTimeout(() => this.showGfxHint(container, true), 400);
+    }, false);
+    canvas.addEventListener('webglcontextrestored', () => {
+      if (!this.contextLost) return;
+      this.contextLost = false;
+      this.restoredAt = performance.now();
+      const tier = this.quality.contextRestored(this.lostCounts); // steps the tier down (re-applies it) when it counts
+      if (tier) saveLoss(recordLoss(loadLoss(), tier, Date.now()));
+      else this.applyQuality(this.quality.level);
+      void this.post.prewarm(this.postCombos());
+    }, false);
+  }
+  private showGfxHint(container: HTMLElement, on: boolean): void {
+    if (on && !this.gfxHint) {
+      const d = document.createElement('div');
+      d.className = 'gfx-hint';
+      d.textContent = 'graphics recovering…';
+      container.appendChild(d);
+      this.gfxHint = d;
+    }
+    if (this.gfxHint) this.gfxHint.classList.toggle('show', on);
+  }
+  /** First frame drawn after a restore: hide the hint, note how long the screen had nothing new. */
+  private afterRestoreFrame(): void {
+    if (!this.restoredAt) return;
+    this.lastBlackoutMs = performance.now() - this.lostAt;
+    this.restoredAt = 0;
+    this.renderer.domElement.classList.remove('gfx-lost');
+    clearTimeout(this.gfxHintTimer);
+    this.showGfxHint(document.body, false);
   }
 
   // ---- on-screen perf readout (?fps=1, or whenever a tier is pinned with ?q=): fps, tier, resolution, cost ----
@@ -140,7 +235,9 @@ export class GameView {
     const fps = (this.hudFrames * 1000) / this.hudT;
     this.hudFrames = 0; this.hudLast = now;
     const i = this.renderer.info.render, q = this.quality, c = this.renderer.domElement;
-    this.hud.textContent = `${fps.toFixed(0)} fps  ${q.level.name}${q.pinned ? ' (pinned)' : ''}\n${this.renderer.getPixelRatio().toFixed(2)}x  ${c.width}x${c.height}\n${i.calls} calls  ${(i.triangles / 1000).toFixed(0)}k tris`;
+    this.hud.textContent = `${fps.toFixed(0)} fps  ${q.level.name}${q.pinned ? ' (pinned)' : ''}\n${this.renderer.getPixelRatio().toFixed(2)}x  ${c.width}x${c.height}\n${i.calls} calls  ${(i.triangles / 1000).toFixed(0)}k tris`
+      + `\ntiers ${q.tierChanges}  lost ${q.losses}${q.pastLosses ? `+${q.pastLosses} before` : ''}  hitch ${this.lastHitchMs.toFixed(0)}ms`
+      + (this.lastBlackoutMs ? `\nblackout ${this.lastBlackoutMs.toFixed(0)}ms` : '');
   }
 
   setCourse(course: Course): void {
@@ -353,7 +450,13 @@ export class GameView {
     this.effects.update(dt);
     this.debris.update(dt);
     if (this.failMarker.visible) this.failMarker.scale.setScalar(1 + 0.1 * Math.sin(performance.now() / 120));
-    this.post.render(this.scene, this.rig.camera);
+    // mid-jump: resolution changes and promotions wait for the landing (a resize there is the most visible hitch)
+    this.quality.busy = airborne;
+    if (!this.contextLost) {
+      this.post.render(this.scene, this.rig.camera);
+      this.afterRestoreFrame();
+    }
+    this.frameTiming();
     this.updateHud();
   }
 

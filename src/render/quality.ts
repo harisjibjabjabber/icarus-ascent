@@ -12,7 +12,14 @@
  *  - fps below `AUTO.minFps` for `AUTO.strikes` windows steps the tier down (a real deficit, not a dip);
  *  - fps at the refresh cap for `AUTO.upWindows` windows raises the resolution back a notch (never above the tier);
  *  - a phone that holds the cap at the tier's full resolution for `AUTO.promoteWindows` windows (~20 s) earns the next
- *    tier up (high -> ultra on flagships). Never again once the tier has had to step down (no ping-pong).
+ *    tier up (high -> ultra on flagships). Never again once the tier has had to step down (no ping-pong), and never on
+ *    a device with a WebGL context-loss history (see gfxHistory.ts): such a device also starts one tier below the tier
+ *    that lost the context.
+ *
+ * Switch hygiene (the "blank for a few seconds" fix): resolution changes are applied at most every `AUTO.scaleGap`
+ * seconds and, like promotions, are held while `busy` (the rider is in the air); a tier step-down is never held.
+ * Phones run ultra at a phone-safe budget (`PHONE_ULTRA`: same shadow map as high, pixel ratio <= 2.5), so a
+ * promotion reallocates no shadow map and adds ~25% more pixels instead of ~80%.
  */
 export type QualityName = 'low' | 'medium' | 'high' | 'ultra';
 
@@ -33,7 +40,7 @@ export interface Quality {
   cloudOctaves: number;
   puffs: number;
   petals: number;
-  /** Texture anisotropy for ground/walls (clamped to the GPU's max). */
+  /** Anisotropy the tier is designed for; textures use `deviceAnisotropy` (set once at load, never per switch). */
   anisotropy: number;
   /** Town surfaces: 0 = flat palette + brush, 1 = painted texture detail, 2 = + normal maps. */
   textures: 0 | 1 | 2;
@@ -56,37 +63,95 @@ export const QUALITY: Record<QualityName, Quality> = {
 
 export const ORDER: QualityName[] = ['low', 'medium', 'high', 'ultra'];
 
-export const AUTO = { minFps: 45, softFps: 55, capFps: 58, window: 2.0, strikes: 2, warmup: 3.0, step: 0.25, upWindows: 4, promoteWindows: 10 };
+/**
+ * Ultra on a phone: everything ultra adds (AO, longer LOD reach, more petals) at a phone-safe GPU budget. The shadow
+ * map stays at high's 2048 (4096 is 64 MB of colour + 64 MB of depth, reallocated on every switch) with a box a
+ * little bigger than high's at the same softness in metres, and the pixel ratio stops at 2.5 (DPR 3 on a 390x844
+ * phone is 2.96 MP per buffer, 2.5 is 2.06 MP). Desktops keep `QUALITY.ultra` unchanged.
+ */
+export const PHONE_ULTRA: Quality = { ...QUALITY.ultra, pixelRatio: 2.5, shadowMap: 2048, shadowRange: 48, shadowSoft: 3 };
+
+/** The tier as this device runs it (phones: ultra at PHONE_ULTRA). A `?q=` pin is the tier exactly as defined. */
+export function tierFor(name: QualityName, mobile: boolean, pinned = false): Quality {
+  return name === 'ultra' && mobile && !pinned ? PHONE_ULTRA : QUALITY[name];
+}
+
+/**
+ * Texture anisotropy, set once at load and never changed by a tier switch (a change re-uploads every texture: ~200 MB
+ * with the hi-fi texture set). Phones get high's value, desktops ultra's, both clamped to the GPU's maximum.
+ */
+export function deviceAnisotropy(gpuMax: number, mobile: boolean): number {
+  return Math.max(1, Math.min(gpuMax, (mobile ? QUALITY.high : QUALITY.ultra).anisotropy));
+}
+
+export const AUTO = {
+  minFps: 45, softFps: 55, capFps: 58, window: 2.0, strikes: 2, warmup: 3.0, step: 0.25, upWindows: 4, promoteWindows: 10,
+  /** Minimum seconds (of sampled play) between two render-resolution changes; requests in between merge. */
+  scaleGap: 4,
+};
+
+/** Context-loss history as QualityManager needs it (see gfxHistory.ts). */
+export interface LossHistory { tier: QualityName; count: number }
 
 export class QualityManager {
   level: Quality;
   readonly pinned: boolean;
-  /** Current render pixel ratio before the device cap (dynamic resolution). */
+  readonly mobile: boolean;
+  /** Applied render pixel ratio before the device cap (dynamic resolution). */
   scale: number;
+  /** Requested pixel ratio; copied to `scale` when the debounce and `busy` allow. */
+  private target: number;
+  /** Presentation hint from the view: the rider is airborne. Resolution changes and promotions wait. */
+  busy = false;
   private acc = 0;
   private frames = 0;
   private strikes = 0;
   private good = 0;
   private promote = 0;
-  /** Set once the tier has stepped down: no more automatic promotion. */
+  private promotePending = false;
+  /** Set once the tier has stepped down (or the device has lost a context): no more automatic promotion. */
   private noPromote = false;
   private warm = AUTO.warmup;
+  /** Seconds of sampled (unpaused) time; drives the resolution debounce. */
+  private clock = 0;
+  private lastScaleAt = -Infinity;
+  private suspended = false;
+  private lostTier: QualityName | null = null;
   lastFps = 0;
+  /** Diagnostics: tier changes and counted context losses this session; losses recorded on this device before. */
+  tierChanges = 0;
+  losses = 0;
+  readonly pastLosses: number;
   /** Called when the tier changes (apply to renderer/env/effects). */
   onChange: ((q: Quality) => void) | null = null;
   /** Called when only the render resolution changes. */
   onScale: ((pixelRatio: number) => void) | null = null;
 
-  constructor(search = '', mobile = false) {
+  constructor(search = '', mobile = false, history: LossHistory | null = null) {
     const q = new URLSearchParams(search).get('q') as QualityName | null;
     this.pinned = !!q && q in QUALITY;
-    this.level = QUALITY[this.pinned ? q! : mobile ? 'high' : 'ultra'];
-    this.scale = this.level.pixelRatio;
+    this.mobile = mobile;
+    let name: QualityName = this.pinned ? q! : mobile ? 'high' : 'ultra';
+    if (history && !this.pinned) {
+      // start at most one tier below the one that lost the context; never promote on this device again
+      const cap = ORDER[Math.max(0, ORDER.indexOf(history.tier) - 1)];
+      if (ORDER.indexOf(name) > ORDER.indexOf(cap)) name = cap;
+      this.noPromote = true;
+    }
+    this.pastLosses = history?.count ?? 0;
+    this.level = tierFor(name, mobile, this.pinned);
+    this.scale = this.target = this.level.pixelRatio;
   }
 
-  /** Feed a real frame time (seconds). Ignored while paused or for huge hitches (tab switches). */
+  /** May this manager still raise the tier on its own? */
+  get canPromote(): boolean { return !this.pinned && !this.noPromote && this.level.name !== 'ultra'; }
+
+  /** Feed a real frame time (seconds). Ignored while paused, while the context is lost, or for huge hitches. */
   sample(dt: number, paused: boolean): void {
-    if (paused || dt <= 0 || dt > 0.25) return;
+    if (paused || this.suspended || dt <= 0 || dt > 0.25) return;
+    this.clock += dt;
+    if (this.promotePending && !this.busy) { this.promotePending = false; this.step(1); return; }
+    this.flushScale();
     if (this.warm > 0) { this.warm -= dt; return; }
     this.acc += dt; this.frames++;
     if (this.acc < AUTO.window) return;
@@ -98,33 +163,69 @@ export class QualityManager {
       this.good = 0;
       if (++this.strikes >= AUTO.strikes) { this.strikes = 0; this.step(-1); return; }
     } else this.strikes = 0;
-    if (this.lastFps >= AUTO.capFps && this.scale >= L.pixelRatio && !this.noPromote && L.name !== 'ultra') {
-      if (++this.promote >= AUTO.promoteWindows) { this.promote = 0; this.step(1); return; }
+    if (this.lastFps >= AUTO.capFps && this.target >= L.pixelRatio && this.scale >= L.pixelRatio && this.canPromote) {
+      if (++this.promote >= AUTO.promoteWindows) {
+        this.promote = 0;
+        if (this.busy) this.promotePending = true; else { this.step(1); return; }
+      }
     } else this.promote = 0;
     if (this.lastFps < AUTO.softFps) {
       this.good = -AUTO.upWindows; // after a drop, wait twice as long before trying more pixels again
-      this.setScale(Math.max(L.minPixelRatio, this.scale - AUTO.step));
-    } else if (this.lastFps >= AUTO.capFps && this.scale < L.pixelRatio) {
-      if (++this.good >= AUTO.upWindows) { this.good = 0; this.setScale(Math.min(L.pixelRatio, this.scale + AUTO.step)); }
+      this.setScale(Math.max(L.minPixelRatio, this.target - AUTO.step));
+    } else if (this.lastFps >= AUTO.capFps && this.target < L.pixelRatio) {
+      if (++this.good >= AUTO.upWindows) { this.good = 0; this.setScale(Math.min(L.pixelRatio, this.target + AUTO.step)); }
     }
   }
 
   private setScale(s: number): void {
-    if (Math.abs(s - this.scale) < 1e-6) return;
-    this.scale = s;
-    this.onScale?.(s);
+    this.target = s;
+    this.flushScale();
+  }
+
+  /** Apply a pending resolution change if the debounce allows and the rider is not mid-jump. */
+  private flushScale(): void {
+    if (Math.abs(this.target - this.scale) < 1e-6 || this.busy || this.clock - this.lastScaleAt < AUTO.scaleGap) return;
+    this.scale = this.target;
+    this.lastScaleAt = this.clock;
+    this.onScale?.(this.scale);
   }
 
   step(dir: -1 | 1): void {
     const i = ORDER.indexOf(this.level.name) + dir;
     if (i < 0 || i >= ORDER.length) return;
-    this.level = QUALITY[ORDER[i]];
+    this.level = tierFor(ORDER[i], this.mobile, this.pinned);
     if (dir < 0) this.noPromote = true;
-    this.promote = 0;
+    this.promote = 0; this.promotePending = false;
     // stepping down: start the lower tier at its full resolution (it is cheaper per pixel already)
-    this.scale = this.level.pixelRatio;
+    this.scale = this.target = this.level.pixelRatio;
+    this.lastScaleAt = this.clock; // the tier change resized: the debounce counts from here
     this.warm = AUTO.warmup;
     this.good = 0; this.strikes = 0;
+    this.tierChanges++;
     this.onChange?.(this.level);
   }
+
+  /** The WebGL context is gone: stop judging fps (frames are free while nothing renders). */
+  contextLost(): void {
+    this.suspended = true;
+    this.lostTier = this.level.name;
+  }
+
+  /**
+   * The context is back. `counts`: the loss happened while the page was visible (a real GPU failure, not the OS
+   * reclaiming a background tab). Then the tier steps down one level (unless pinned) and promotion is off for good.
+   * Returns the tier that lost the context when it counts (for the per-device history), else null.
+   */
+  contextRestored(counts = true): QualityName | null {
+    this.suspended = false;
+    this.acc = 0; this.frames = 0; this.warm = AUTO.warmup;
+    const tier = this.lostTier ?? this.level.name;
+    this.lostTier = null;
+    if (!counts) return null;
+    this.losses++;
+    this.noPromote = true;
+    if (!this.pinned && this.level.name !== 'low') this.step(-1);
+    return tier;
+  }
 }
+

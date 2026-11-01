@@ -42,7 +42,6 @@ export class PostPass {
   private cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   private size = new THREE.Vector2();
   private bloomOn = false;
-  private aoOn = false;
   private bA: THREE.WebGLRenderTarget;
   private bB: THREE.WebGLRenderTarget;
   private brightMat: THREE.ShaderMaterial;
@@ -172,20 +171,56 @@ export class PostPass {
       depthTest: false, depthWrite: false, toneMapped: true,
     }));
     this.quad.frustumCulled = false;
+    this.variants.set('00', this.quad.material);
+  }
+
+  /**
+   * One composite material per bloom/AO combination, all sharing one uniforms object: a tier switch swaps the
+   * material (a program that `prewarm` already compiled) instead of changing defines (a synchronous recompile).
+   */
+  private variants = new Map<string, THREE.ShaderMaterial>();
+  private variant(bloom: boolean, ao: boolean): THREE.ShaderMaterial {
+    const key = `${+bloom}${+ao}`;
+    let m = this.variants.get(key);
+    if (!m) {
+      const base = this.variants.get('00')!;
+      const defines: Record<string, string> = {};
+      if (bloom) defines.USE_BLOOM = '';
+      if (ao) defines.USE_AO = '';
+      m = new THREE.ShaderMaterial({ uniforms: base.uniforms, vertexShader: base.vertexShader, fragmentShader: base.fragmentShader, defines, depthTest: false, depthWrite: false, toneMapped: true });
+      this.variants.set(key, m);
+    }
+    return m;
   }
 
   /** Tier switches: bloom (high/ultra), AO (ultra), split-tone grade + contrast (medium and up). */
   configure(opts: { bloom: boolean; ao: boolean; grade: boolean }): void {
-    const m = this.quad.material;
-    if (opts.bloom !== this.bloomOn || opts.ao !== this.aoOn) {
-      this.bloomOn = opts.bloom; this.aoOn = opts.ao;
-      m.defines = {};
-      if (opts.bloom) m.defines.USE_BLOOM = '';
-      if (opts.ao) m.defines.USE_AO = '';
-      m.needsUpdate = true;
-    }
+    this.bloomOn = opts.bloom;
+    const m = this.quad.material = this.variant(opts.bloom, opts.ao);
     m.uniforms.uSplit.value = opts.grade ? POST_STYLE.split : 0;
     m.uniforms.uContrast.value = opts.grade ? POST_STYLE.contrast : 0;
+  }
+
+  /**
+   * Compile the given composite variants (and the bloom passes) off the critical path: `compileAsync` uses
+   * KHR_parallel_shader_compile where available, so a later tier switch finds its program ready. Best-effort.
+   */
+  prewarm(combos: { bloom: boolean; ao: boolean }[]): Promise<void> {
+    const r = this.renderer;
+    if (r.getContext().isContextLost()) return Promise.resolve();
+    const prev = r.getRenderTarget();
+    const mk = (mat: THREE.Material) => { const o = new THREE.Mesh(this.quad.geometry, mat); o.frustumCulled = false; return o; };
+    const jobs: Promise<unknown>[] = [];
+    const compile = (g: THREE.Object3D) => jobs.push(typeof r.compileAsync === 'function' ? r.compileAsync(g, this.cam) : Promise.resolve(r.compile(g, this.cam)));
+    try {
+      // programs depend on the target (tone mapping / output transfer only on screen): compile each where it renders
+      const onScreen = new THREE.Group();
+      for (const c of combos) onScreen.add(mk(this.variant(c.bloom, c.ao)));
+      r.setRenderTarget(null); compile(onScreen);
+      if (combos.some((c) => c.bloom)) { const off = new THREE.Group(); off.add(mk(this.brightMat), mk(this.blurMat)); r.setRenderTarget(this.bA); compile(off); }
+    } catch { /* precompile is best-effort */ }
+    r.setRenderTarget(prev);
+    return Promise.all(jobs).then(() => {}, () => {});
   }
 
   setSize(w: number, h: number, dpr: number): void {
@@ -235,6 +270,6 @@ export class PostPass {
 
   dispose(): void {
     this.rt.dispose(); this.bA.dispose(); this.bB.dispose();
-    this.quad.geometry.dispose(); this.quad.material.dispose(); this.fsq.geometry.dispose(); this.brightMat.dispose(); this.blurMat.dispose();
+    this.quad.geometry.dispose(); for (const m of this.variants.values()) m.dispose(); this.fsq.geometry.dispose(); this.brightMat.dispose(); this.blurMat.dispose();
   }
 }

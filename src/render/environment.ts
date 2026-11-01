@@ -137,7 +137,7 @@ function seaPlane(): THREE.Mesh {
   return m;
 }
 
-interface TownView { group: THREE.Group; near: THREE.Mesh | null; far: THREE.Mesh | null; nearMat: TownMaterial; farMat: TownMaterial; x0: number; tris: [number, number]; born: number }
+interface TownView { group: THREE.Group; near: THREE.Mesh | null; far: THREE.Mesh | null; nearMat: TownMaterial; farMat: TownMaterial; x0: number; tris: [number, number]; born: number; gen: number }
 
 /**
  * Town LOD/streaming distances (route metres, measured from the rider to a chunk's centre) and fade times.
@@ -245,7 +245,16 @@ export class Environment {
   }
   get kitReady(): boolean { return !!this.kit; }
 
-  applyQuality(q: Quality, maxAniso = 16): void {
+  /**
+   * Anisotropy for every texture we own, set once at load (before the textures reach the GPU). Changing it later
+   * re-uploads each texture (two 4096x2304 panoramas + the texture array), so tier switches never touch it.
+   */
+  setAnisotropy(a: number): void {
+    TEX_ANISO.value = Math.max(1, a);
+    for (const t of TEX_ANISO.list) if (t.anisotropy !== TEX_ANISO.value) { t.anisotropy = TEX_ANISO.value; if (t.image) t.needsUpdate = true; }
+  }
+
+  applyQuality(q: Quality): void {
     this.sun.castShadow = q.shadowMap > 0;
     if (q.shadowMap > 0 && this.sun.shadow.mapSize.x !== q.shadowMap) {
       this.sun.shadow.mapSize.set(q.shadowMap, q.shadowMap);
@@ -266,15 +275,16 @@ export class Environment {
     this.puffs.count = Math.min(24, q.puffs);
     TOWN_TEX.enabled = q.textures > 0;
     TOWN_TEX.nrm.value = q.textures > 1 ? 1 : 0;
-    TEX_ANISO.value = Math.max(1, Math.min(q.anisotropy, maxAniso));
-    for (const t of TEX_ANISO.list) if (t.anisotropy !== TEX_ANISO.value) { t.anisotropy = TEX_ANISO.value; if (t.image) t.needsUpdate = true; }
     TOWN_LOD.nearFull = TOWN_LOD_BASE.nearFull * q.lodScale;
     TOWN_LOD.nearFadeEnd = TOWN_LOD_BASE.nearFadeEnd * q.lodScale;
     if (TOWN_GEO.fullRoofs !== q.fullRoofs) {
+      // the other roof set: chunks are rebuilt one per frame by streamScenery (nearest first), not all in this frame
       TOWN_GEO.fullRoofs = q.fullRoofs;
-      if (this.kit) this.setKit(this.kit); // rebuild the chunks with the other roof set
+      this.roofGen++;
     }
   }
+  /** Bumped when the roof set changes; chunks built under an older value are rebuilt gradually. */
+  private roofGen = 0;
 
   /**
    * `heightAt(x)`: course height near x; `minY`: lowest course point for static courses (the sea sits below it).
@@ -317,6 +327,15 @@ export class Environment {
       if (built >= (first ? 99 : 1)) break;
       this.town.set(k, this.buildTown(k)); built++;
     }
+    if (built === 0) {
+      // roof set changed (tier switch): swap one stale chunk per call, nearest first, keeping its age (no re-dissolve)
+      let stale: number | null = null, best = Infinity;
+      for (const [k, v] of this.town) { const d = Math.abs(k * L + L / 2 - x); if (v.gen !== this.roofGen && d < best) { best = d; stale = k; } }
+      if (stale !== null) {
+        const old = this.town.get(stale)!, v = this.buildTown(stale);
+        v.born = old.born; this.dropTown(old); this.town.set(stale, v);
+      }
+    }
     this.lastX = x;
   }
 
@@ -336,7 +355,7 @@ export class Environment {
     const o = toSceneRaw(k * TOWN.chunk, c.y0), wrapOf = (v: number) => ((v % TEX_WRAP) + TEX_WRAP) % TEX_WRAP;
     nearMat.wrap.set(wrapOf(o.x), wrapOf(o.y), wrapOf(o.z)); farMat.wrap.copy(nearMat.wrap);
     this.group.add(group);
-    return { group, near, far, nearMat, farMat, x0: k * TOWN.chunk, tris: [c.trisNear, c.trisFar], born: ART_UNIFORMS.uTime.value };
+    return { group, near, far, nearMat, farMat, x0: k * TOWN.chunk, tris: [c.trisNear, c.trisFar], born: ART_UNIFORMS.uTime.value, gen: this.roofGen };
   }
   private dropTown(v: TownView): void { this.group.remove(v.group); v.near?.geometry.dispose(); v.far?.geometry.dispose(); v.nearMat.dispose(); v.farMat.dispose(); }
 
