@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 
 /**
- * Course props baked by art/pipeline/bake_props.py: a hanging lantern, the high-line rail panel
+ * Course props baked by art/pipeline/bake_props.py: the high-line rail panel
  * and the choice-point beacon. Vertex colours are the witch-town palette; `tuv` + `tl` sample the
  * same painted detail array as the town (rock / wood), so they pick up that grain at runtime.
  * One download, shared geometries. Callers that stamp a piece into a chunk must copy the geometry —

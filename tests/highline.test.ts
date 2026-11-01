@@ -2,11 +2,12 @@ import { describe, it, expect } from 'vitest';
 import { EndlessCourse } from '../src/course/endless';
 import { Simulation } from '../src/sim/simulation';
 import { Autopilot } from '../src/diag/autopilot';
-import { ScoreKeeper, SCORE, charmTouched } from '../src/score/score';
+import { ScoreKeeper, SCORE, orbTouched } from '../src/score/score';
+import { ORB } from '../src/course/orbs';
 import { TUNING } from '../src/tuning';
 import type { SimEvent } from '../src/sim/types';
 
-/** Ride the high-line phrase from its checkpoint. Collects lanterns the way the game does. */
+/** Ride the high-line phrase from its checkpoint. Collects orbs the way the game does. */
 function ride(opts: ConstructorParameters<typeof Autopilot>[0], speed = 14) {
   const course = new EndlessCourse(1, { script: ['high-line'], d: 0 });
   const chunk = course.chunks[0];
@@ -22,7 +23,7 @@ function ride(opts: ConstructorParameters<typeof Autopilot>[0], speed = 14) {
     const ev = sim.drainEvents();
     events.push(...ev);
     score.update(sim.dt, sim.state, ev, course);
-    for (const c of course.charms) if (!score.tookCharm(c.id) && charmTouched(c, prev, sim.state)) score.collectCharm(c);
+    for (const o of course.orbs) if (!score.tookOrb(o.id) && orbTouched(o, prev, sim.state)) score.collectOrb(o);
     prev = sim.state.x;
   }
   return { sim, course, chunk, events, score };
@@ -36,7 +37,7 @@ describe('risky high line', () => {
     expect(events.some((e) => e.type === 'grind-start')).toBe(false);
   });
 
-  it('a timed high line grinds to the end, pays a line link and the lantern', () => {
+  it('a timed high line grinds to the end, pays a line link and the rare orb', () => {
     const course = new EndlessCourse(1, { script: ['high-line'], d: 0 });
     const chunk = course.chunks[0];
     const sim = new Simulation(course, TUNING, { x: chunk.cpX, speed: 14 });
@@ -52,7 +53,7 @@ describe('risky high line', () => {
       score.update(sim.dt, sim.state, ev, course);
       peakKinds = Math.max(peakKinds, score.comboTrickKinds);
       peakPoints = Math.max(peakPoints, score.comboPoints);
-      for (const c of course.charms) if (!score.tookCharm(c.id) && charmTouched(c, prev, sim.state)) score.collectCharm(c);
+      for (const o of course.orbs) if (!score.tookOrb(o.id) && orbTouched(o, prev, sim.state)) score.collectOrb(o);
       prev = sim.state.x;
     }
     expect(sim.state.mode, sim.state.fail?.message).not.toBe('failed');
@@ -60,8 +61,8 @@ describe('risky high line', () => {
     // the grind link plus the high-line link: a new kind, so the combo is wider than a plain grind
     expect(peakKinds).toBeGreaterThanOrEqual(2);
     expect(peakPoints).toBeGreaterThanOrEqual(SCORE.grind + SCORE.line);
-    expect(score.charmRisk).toBe(1);
-    expect(score.drainPopups().some((p) => p.text === 'High line' && p.pts === SCORE.charmRisk)).toBe(true);
+    expect(score.orbRare).toBe(1);
+    expect(score.drainPopups().some((p) => p.text === 'Rare orb' && p.pts === ORB.rare)).toBe(true);
   });
 
   it('a jump with no down-swipe misses, and the message names the street', () => {

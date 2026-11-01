@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { ScoreKeeper, SCORE, charmTouched, type TrickKind } from '../src/score/score';
+import { ScoreKeeper, SCORE, orbTouched, type TrickKind } from '../src/score/score';
+import { ORB, orbPoints } from '../src/course/orbs';
 import { Challenges, CHALLENGE_STALL, challengeOrder } from '../src/score/challenges';
 import { failHeadline, retryNote } from '../src/score/run';
 import { EndlessCourse } from '../src/course/endless';
@@ -8,7 +9,7 @@ import { Autopilot, type AutopilotOptions } from '../src/diag/autopilot';
 import { PROFILES } from './endlessHelpers';
 import { TUNING } from '../src/tuning';
 import type { RiderState, SimEvent } from '../src/sim/types';
-import type { Charm } from '../src/course/course';
+import type { Orb } from '../src/course/orbs';
 
 const course = new EndlessCourse(1, { script: ['recovery'], d: 0 });
 const dt = TUNING.sim.dt;
@@ -81,31 +82,33 @@ describe('trick variety and flow', () => {
   });
 });
 
-describe('lanterns', () => {
-  const charm = (line: Charm['line'], y: number): Charm => ({ id: 1, x: 10, y, lateral: line === 'rail' ? 1.2 : 0, line });
+describe('orbs', () => {
+  const orb = (pickup: Orb['pickup'], y: number, tier: Orb['tier'] = 'common'): Orb => ({
+    id: 1, x: 10, y, lateral: pickup === 'grind' ? 1.2 : 0, tier, pickup,
+  });
 
-  it('a crest lantern needs the air arc, a rail lantern needs a grind, and a teleport collects nothing', () => {
-    const pop = charm('pop', 5);
-    const rail = charm('rail', 1);
+  it('an air orb needs the arc, a grind orb needs a grind, and a teleport collects nothing', () => {
+    const airOrb = orb('air', 5);
+    const grindOrb = orb('grind', 1);
     const air = st({ x: 10.2, y: 5.2, mode: 'airborne' });
     const low = st({ x: 10.2, y: 2, mode: 'airborne' });
     const ground = st({ x: 10.2, y: 5.2, mode: 'grounded' });
     const grind = st({ x: 10.2, y: 1, mode: 'grinding' });
-    expect(charmTouched(pop, 9.9, air)).toBe(true);
-    expect(charmTouched(pop, 9.9, low)).toBe(false);
-    expect(charmTouched(pop, 9.9, ground)).toBe(false);
-    expect(charmTouched(rail, 9.9, grind)).toBe(true);
-    expect(charmTouched(rail, 9.9, air)).toBe(false);
-    expect(charmTouched(pop, 0, air)).toBe(false); // jumped the whole course
+    expect(orbTouched(airOrb, 9.9, air)).toBe(true);
+    expect(orbTouched(airOrb, 9.9, low)).toBe(false);
+    expect(orbTouched(airOrb, 9.9, ground)).toBe(false);
+    expect(orbTouched(grindOrb, 9.9, grind)).toBe(true);
+    expect(orbTouched(grindOrb, 9.9, air)).toBe(false);
+    expect(orbTouched(airOrb, 0, air)).toBe(false); // jumped the whole course
   });
 
-  it('pays a lantern once, and a scripted line puts crest and rail lanterns where a real ride can take them', () => {
+  it('pays an orb once, and a scripted line puts crest and rail orbs where a real ride can take them', () => {
     const k = new ScoreKeeper();
-    const c = charm('pop', 5);
-    expect(k.collectCharm(c)).toBe(true);
-    expect(k.collectCharm(c)).toBe(false);
-    expect(k.charmPop).toBe(1);
-    expect(k.banked).toBe(SCORE.charmPop);
+    const o = orb('air', 5);
+    expect(k.collectOrb(o)).toBe(true);
+    expect(k.collectOrb(o)).toBe(false);
+    expect(k.orbCommon).toBe(1);
+    expect(k.banked).toBe(ORB.common);
 
     const ride = (id: string, profile: AutopilotOptions) => {
       const course = new EndlessCourse(4, { script: ['start', id], d: 0.7 });
@@ -119,22 +122,23 @@ describe('lanterns', () => {
         sim.step();
         const s = sim.state;
         score.update(dt, s, sim.drainEvents(), course);
-        for (const lantern of course.charms) if (charmTouched(lantern, prevX, s)) score.collectCharm(lantern);
+        for (const q of course.orbs) if (orbTouched(q, prevX, s)) score.collectOrb(q);
       }
-      const here = course.charms.filter((q) => q.x >= chunk.x0 && q.x <= chunk.x1);
+      const here = course.orbs.filter((q) => q.x >= chunk.x0 && q.x <= chunk.x1);
       return { sim, score, here };
     };
     const kicker = ride('big-kicker', { minSpeed: 16, styleFlips: true });
-    expect(kicker.here.some((c) => c.line === 'pop')).toBe(true);
-    expect(kicker.here.some((c) => c.line === 'rail')).toBe(true);
+    expect(kicker.here.some((c) => c.pickup === 'air')).toBe(true);
+    expect(kicker.here.some((c) => c.pickup === 'grind')).toBe(true);
     expect(kicker.sim.state.mode).not.toBe('failed');
-    expect(kicker.score.charmPop).toBeGreaterThan(0);
+    expect(kicker.score.orbCommon).toBeGreaterThan(0);
     const grind = ride('crest-pop', { minSpeed: 14, optionalRail: true, pots: 'jump' });
     const plain = ride('crest-pop', { minSpeed: 12 });
     expect(grind.sim.state.mode).not.toBe('failed');
     expect(plain.sim.state.mode).not.toBe('failed');
-    expect(grind.score.charmRail).toBeGreaterThan(0);
-    expect(plain.score.charmRail).toBe(0);
+    expect(grind.score.orbCommon).toBeGreaterThan(0);
+    expect(plain.score.orbCommon).toBeGreaterThan(0);
+    expect(grind.score.orbCommon).toBeGreaterThan(plain.score.orbCommon);
     const rollers = ride('rollers', PROFILES[0]);
     expect(rollers.here).toHaveLength(0);
     expect(rollers.sim.state.mode).not.toBe('failed');
@@ -145,12 +149,16 @@ describe('lanterns', () => {
     let max = 0;
     for (let x = 0; x <= 20000; x += 25) {
       c.stream(x);
-      max = Math.max(max, c.charms.length);
-      const ids = new Set(c.chunks.flatMap((k) => k.charms ?? []));
-      for (const q of c.charms) expect(ids.has(q.id)).toBe(true);
+      max = Math.max(max, c.orbs.length);
+      const ids = new Set(c.chunks.flatMap((k) => k.orbs ?? []));
+      for (const q of c.orbs) expect(ids.has(q.id)).toBe(true);
     }
     expect(max).toBeGreaterThan(0);
     expect(max).toBeLessThan(40);
+  });
+
+  it('rare orbs pay more than common ones', () => {
+    expect(orbPoints('rare')).toBeGreaterThan(orbPoints('common'));
   });
 });
 

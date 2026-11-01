@@ -1,4 +1,8 @@
-import { Course, type Charm, type Chunk, type Feature, type Gap, type Obstacle, type Rail, type Surface, type Vec2, type Wall } from './course';
+import { Course, type Chunk, type Feature, type Gap, type Obstacle, type OrbPlacement, type Rail, type Surface, type Vec2, type Wall } from './course';
+import type { Orb } from './orbs';
+import {
+  placementCommonAir, placementCommonGrind, placementCommonRoute, placementRareGrind,
+} from './orbs';
 import { extend, kicker, smooth, easeOut, linear, crestPop, rollingHills, type Ease } from './shapes';
 import { TUNING } from '../tuning';
 import { mulberry32 } from '../rng';
@@ -62,8 +66,8 @@ export class PhraseBuilder {
   readonly rails: Omit<Rail, 'id'>[] = [];
   readonly walls: Omit<Wall, 'id'>[] = [];
   readonly obstacles: { kind: Obstacle['kind']; x: number }[] = [];
-  /** Optional lanterns. `pop` is in the air past a crest; `rail` sits on a handrail; `risk` sits on a high line. */
-  readonly charms: Omit<Charm, 'id'>[] = [];
+  /** Optional orbs (see src/course/orbs.ts). */
+  readonly orbs: OrbPlacement[] = [];
   readonly requires: [number, Gap['requires']][] = [];
   readonly features: Feature[] = [];
   /** Where the run-in for the next compulsory feature begins. */
@@ -78,13 +82,13 @@ export class PhraseBuilder {
   flat(len: number): this { extend(this.pts, this.cur().x + len, this.cur().y, linear, 4); return this; }
   slope(len: number, dy: number, ease: Ease = smooth): this { extend(this.pts, this.cur().x + len, this.cur().y + dy, ease, 1.5); return this; }
   kicker(len: number, rise: number): this { extend(this.pts, this.cur().x + len, this.cur().y + rise, kicker, 0.8); return this; }
-  /** Crest pop on continuous ground (style air, no gap). `charm`: a lantern in the launch arc. */
-  crest(rise: number, len: number, drop: number, backLen: number, charm = false): this {
+  /** Crest pop on continuous ground (style air, no gap). `orb`: common air orb in the launch arc. */
+  crest(rise: number, len: number, drop: number, backLen: number, orb = false): this {
     const baseY = this.cur().y;
     const top = this.cur().x + len;
     crestPop(this.pts, rise, len, drop, backLen);
     this.features.push({ x: top, kind: 'crest', required: false });
-    if (charm) this.charms.push({ x: top + 1.6, y: baseY + rise + 0.55, lateral: 0, line: 'pop' });
+    if (orb) this.orbs.push(placementCommonAir(top + 1.6, baseY + rise + 0.55, 0));
     return this;
   }
   /** Rolling hills: a pop chain for fast riders (style air), calm for slow ones. */
@@ -119,12 +123,12 @@ export class PhraseBuilder {
     }
     return this.cur().y;
   }
-  /** Optional handrail (right of the route) following the ground just built from x0 to x1: something to grind on descents. `charm`: a lantern on the rail. */
-  handrail(x0: number, x1: number, h = 0.95, charm = false): this {
+  /** Optional handrail (right of the route) following the ground just built from x0 to x1. `orb`: common grind orb on the rail. */
+  handrail(x0: number, x1: number, h = 0.95, orb = false): this {
     const n = Math.max(2, Math.ceil((x1 - x0) / 3) + 1);
     this.rails.push({ points: Array.from({ length: n }, (_, i) => { const x = x0 + ((x1 - x0) * i) / (n - 1); return { x, y: this.yAt(x) + h }; }), lateral: 1.2, required: false });
     this.features.push({ x: x0, kind: 'rail-optional', required: false });
-    if (charm) { const x = x0 + (x1 - x0) * 0.72; this.charms.push({ x, y: this.yAt(x) + h, lateral: 1.2, line: 'rail' }); }
+    if (orb) { const x = x0 + (x1 - x0) * 0.72; this.orbs.push(placementCommonGrind(x, this.yAt(x) + h, 1.2)); }
     return this;
   }
   /**
@@ -142,11 +146,17 @@ export class PhraseBuilder {
     this.rails.push({ points, lateral: 1.15, required: false, risky: true, voidX0: x0 + 0.45, voidX1: x0 + len - 5.2 });
     this.features.push({ x: x0, kind: 'rail-risky', required: false });
     const cx = x0 + len * 0.7;
-    this.charms.push({ x: cx, y: this.yAt(cx) + h0 + (h1 - h0) * 0.7, lateral: 1.15, line: 'risk' });
+    this.orbs.push(placementRareGrind(cx, this.yAt(cx) + h0 + (h1 - h0) * 0.7, 1.15));
     return this;
   }
   /** Descent with an optional handrail along most of it. */
-  railSlope(len: number, dy: number, charm = false): this { const a = this.cur().x; this.slope(len, dy); return this.handrail(a + 3, a + len - 4, 0.95, charm); }
+  railSlope(len: number, dy: number, orb = false): this { const a = this.cur().x; this.slope(len, dy); return this.handrail(a + 3, a + len - 4, 0.95, orb); }
+  /** A common orb over a calm straight (reachable on the ground). */
+  routeOrb(back = 8, height = 1.15): this {
+    const x = Math.max(this.x0 + 2, this.cur().x - back);
+    this.orbs.push(placementCommonRoute(x, this.yAt(x) + height, 0));
+    return this;
+  }
   wall(w: Omit<Wall, 'id'>): void { this.walls.push(w); }
   /** `cluster`: a second pot right behind the first, cleared or skimmed together with it. */
   pot(x: number, cluster = false): void {
@@ -184,7 +194,7 @@ export const PHRASES: PhraseSpec[] = [
   },
   {
     id: 'recovery', title: 'Recovery', tier: 0, style: false, required: false, entry: [6, HC], exit: [8, HC], airtime: 0, receiving: 'flat', cpSpeed: 13,
-    build: (b) => { b.flat(10).rollers(2, 0.7, 22).flat(10); },
+    build: (b) => { b.flat(10).routeOrb(6).rollers(2, 0.7, 22).flat(10); },
   },
   {
     // zone gate: a calm, readable run between zones (rendered as an arch + fog wall; see src/zones/scenery.ts)
@@ -264,7 +274,7 @@ export const PHRASES: PhraseSpec[] = [
       b.flat(4).runIn().slope(46, 2, linear); b.gap(5, -0.3); b.slope(10, -0.6, easeOut).flat(6);
       const x = b.cur().x, y = b.cur().y;
       b.flat(30); b.rail(x, 22, y + 0.95, y + 0.6, 1.2, false);
-      b.charms.push({ x: x + 16, y: y + 0.95 + (0.6 - 0.95) * (16 / 22), lateral: 1.2, line: 'rail' });
+      b.orbs.push(placementCommonGrind(x + 16, y + 0.95 + (0.6 - 0.95) * (16 / 22), 1.2));
       b.crest(1.6, 9, 1.6, 14, true).flat(22);
     },
   },
@@ -653,7 +663,7 @@ export class EndlessCourse extends Course {
       id: this.ids.o++, kind: q.kind, x: q.x, baseY: ground(q.x),
       halfWidth: q.kind === 'pot' ? O.potHalfWidth : O.pillarHalfWidth, height: q.kind === 'pot' ? O.potHeight : O.pillarHeight,
     }));
-    const charms: Charm[] = b.charms.map((q) => ({ id: this.ids.h++, ...q }));
+    const orbs: Orb[] = b.orbs.map((q) => ({ id: this.ids.h++, ...q }));
     const gaps: Gap[] = [];
     for (let k = 0; k + 1 < surfaces.length; k++) {
       const a = surfaces[k].points[surfaces[k].points.length - 1], c = surfaces[k + 1].points[0];
@@ -666,9 +676,9 @@ export class EndlessCourse extends Course {
       id: this.ids.c++, x0: this.endX, x1: end.x, y0: this.endY, y1: end.y, title: plan.spec.title, spec: plan.spec.id, tier: plan.spec.tier,
       difficulty: plan.d, connector: plan.connector, zone: plan.zone, gate: plan.gate, setPiece: plan.setPiece, wave: this.waveLabel(this.endX), cpX: this.endX + 2, cpSpeed: plan.spec.cpSpeed, features: b.features,
       surfaces: surfaces.map((q) => q.id), rails: rails.map((q) => q.id), walls: walls.map((q) => q.id), obstacles: obstacles.map((q) => q.id), markers: [],
-      charms: charms.map((q) => q.id),
+      orbs: orbs.map((q) => q.id),
     };
-    this.addChunk(chunk, surfaces, rails, walls, obstacles, gaps, charms);
+    this.addChunk(chunk, surfaces, rails, walls, obstacles, gaps, orbs);
     this.lastSurface = last;
     this.material = last.material;
     this.endX = end.x; this.endY = end.y;

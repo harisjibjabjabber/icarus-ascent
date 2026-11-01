@@ -23,7 +23,11 @@ export interface RunSummary {
   newDistanceBest: boolean;
   /** Trick kinds whose combo was banked. */
   kinds: number;
-  charms: number;
+  orbs: number;
+  orbCommon: number;
+  orbRare: number;
+  orbBest: number;
+  newOrbBest: boolean;
   challenges: number;
   /** One or two short sentences: why the run ended, and why to ride it again. */
   note: string;
@@ -98,16 +102,20 @@ export function updateBest(score: number, best: number): { best: number; isNew: 
 }
 
 /** End the run: record its summary (the caller persists `newBest` / `newDistanceBest`). */
-export function endRun(run: RunState, score: ScoreKeeper, distance: number, personalBest: number, seed: number, extra?: { distanceBest?: number; failText?: string; challengeText?: string; challenges?: number }): RunSummary {
+export function endRun(run: RunState, score: ScoreKeeper, distance: number, personalBest: number, seed: number, extra?: { distanceBest?: number; orbBest?: number; failText?: string; challengeText?: string; challenges?: number }): RunSummary {
   run.over = true;
   const pb = updateBest(score.banked, personalBest);
   const db = updateBest(distance, extra?.distanceBest ?? 0);
+  const ob = updateBest(score.orbCount, extra?.orbBest ?? 0);
   const challenge = extra?.challengeText ?? '';
   run.summary = {
     score: score.banked, best: { ...score.best }, distance, tricks: score.tricks, nearMisses: score.nearMisses,
     personalBest: pb.best, newBest: pb.isNew, seed,
     distanceBest: db.best, newDistanceBest: db.isNew,
-    kinds: score.runKindCount, charms: score.charmCount, challenges: extra?.challenges ?? 0,
+    kinds: score.runKindCount,
+    orbs: score.orbCount, orbCommon: score.orbCommon, orbRare: score.orbRare,
+    orbBest: ob.best, newOrbBest: ob.isNew,
+    challenges: extra?.challenges ?? 0,
     note: retryNote({ newBest: pb.isNew, personalBest: pb.best, score: score.banked, newDistanceBest: db.isNew, bailedMult: score.lastBail?.mult ?? 0, fail: extra?.failText ?? '', challenge }),
   };
   return run.summary;

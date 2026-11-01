@@ -116,7 +116,7 @@ export class Sfx {
   }
 
   /** Score moments that aren't sim events: a close call, a multiplier step, a lantern, a goal, a banked combo. */
-  cue(kind: 'near' | 'rank' | 'charm' | 'challenge' | 'bank'): void {
+  cue(kind: 'near' | 'rank' | 'orb' | 'challenge' | 'bank'): void {
     if (!this.ctx || this.muted) return;
     const t = this.ctx.currentTime;
     switch (kind) {
@@ -127,7 +127,7 @@ export class Sfx {
       case 'rank':
         this.tone(t, 0.1, 'sine', 660, 990, 0.07);
         break;
-      case 'charm':
+      case 'orb':
         this.tone(t, 0.09, 'sine', 740, 740, 0.07);
         this.tone(t + 0.07, 0.12, 'sine', 988, 988, 0.06);
         this.tone(t + 0.13, 0.16, 'sine', 1318, 1318, 0.05);

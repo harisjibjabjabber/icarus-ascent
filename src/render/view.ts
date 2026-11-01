@@ -490,12 +490,12 @@ export class GameView {
 
   /** Restrained camera punch. Does not change the frame step. */
   punch(amount: number): void { this.rig.jolt(amount); }
-  /** Lantern pickup: a ring at the lantern and a small punch. */
-  burst(x: number, y: number, lateral = 0): void {
-    this.effects.ring(x, y + 0.3, lateral, '#ffd36b');
+  /** Orb pickup: a ring at the orb and a small punch. */
+  burst(x: number, y: number, lateral = 0, color = '#ffd36b'): void {
+    this.effects.ring(x, y + 0.3, lateral, color);
     this.rig.jolt(TUNING.feedback.charmShake);
   }
-  hideCharm(id: number): void { this.courseView?.hideCharm(id); }
+  hideOrb(id: number): void { this.courseView?.hideOrb(id); }
 
   /** Draw the scene through the post pass from any camera (review/capture scripts). */
   present(camera: THREE.Camera = this.rig.camera): void { this.post.render(this.scene, camera); }

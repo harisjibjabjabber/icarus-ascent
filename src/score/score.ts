@@ -1,5 +1,9 @@
 import type { RiderState, SimEvent } from '../sim/types';
-import type { Charm, Course } from '../course/course';
+import type { Course } from '../course/course';
+import type { Orb } from '../course/orbs';
+import { orbPoints, orbPopup } from '../course/orbs';
+
+export { orbTouched } from '../course/orbs';
 
 /**
  * Endless scoring (pure, deterministic: sim state + events in, numbers and pop-ups out). Lives outside the sim.
@@ -15,7 +19,7 @@ import type { Charm, Course } from '../course/course';
  *   It scales the combo when it banks (and the live total), never the distance.
  * - Air: points per second of real airborne time. Not a combo link: see `update`.
  * - Near misses (links, with a pop-up). Closer to the line pays more; the trigger windows are unchanged.
- * - Lanterns: optional crest / rail pickups, banked at once, never a failure. See `charmTouched`.
+ * - Orbs: optional pickups along the route, banked at once, never a failure. See `orbTouched`.
  * - Re-ridden ground pays nothing again: no distance, tricks, air, near misses or set-piece bonus.
  * - Distance: SCORE.perMetre per metre of new ground.
  */
@@ -67,38 +71,16 @@ export const SCORE = {
   flowSpeedMin: 14,
   /** Combo bank (and the live total) is multiplied by 1 + flowBank * flow. */
   flowBank: 0.4,
-  /** Optional lanterns. Rail is the detour; crest is the launch. */
-  charmPop: 450,
-  charmRail: 700,
-  charmRisk: 1200,
-  /** A step longer than this (m) is a teleport, not a pickup. */
-  charmStepMax: 4,
-  /** Feet may be this far below / above a crest lantern (m). */
-  popBelow: 1.15,
-  popAbove: 2.4,
-  /** Grind lock vs the rail lantern (m). */
-  railBand: 0.85,
 };
 
 export type PopupKind = 'near' | 'bank' | 'bail' | 'bonus';
 export interface Popup { text: string; pts: number; kind: PopupKind }
-export type Cue = 'near' | 'rank' | 'charm' | 'bank';
+export type Cue = 'near' | 'rank' | 'orb' | 'bank';
 const TRICK_KINDS = ['flip', 'double', 'grab', 'grind', 'line', 'wall', 'skim', 'pot', 'pillar', 'near'] as const;
 export type TrickKind = typeof TRICK_KINDS[number];
 export interface BailInfo { mult: number; chain: number; points: number }
 
 function isKind(v: unknown): v is TrickKind { return typeof v === 'string' && (TRICK_KINDS as readonly string[]).includes(v); }
-
-/**
- * Did this tick pass a lantern? Only a real launch (airborne, in the arc) takes a crest lantern,
- * and only a grind takes a rail lantern. A step that teleports across the course collects nothing.
- */
-export function charmTouched(c: Charm, prevX: number, st: RiderState): boolean {
-  if (!(st.x > prevX) || st.x - prevX > SCORE.charmStepMax) return false;
-  if (c.x <= prevX - 0.05 || c.x > st.x + 0.2) return false;
-  if (c.line === 'rail' || c.line === 'risk') return st.mode === 'grinding' && Math.abs(st.y - c.y) <= SCORE.railBand;
-  return st.mode === 'airborne' && st.y >= c.y - SCORE.popBelow && st.y <= c.y + SCORE.popAbove;
-}
 
 /** Everything a ScoreKeeper needs to carry a run across a page reload (JSON-safe). */
 export interface ScoreSnapshot {
@@ -116,10 +98,9 @@ export interface ScoreSnapshot {
   lastKind?: TrickKind | null;
   comboKinds?: TrickKind[];
   runKinds?: TrickKind[];
-  charmIds?: number[];
-  charmPop?: number;
-  charmRail?: number;
-  charmRisk?: number;
+  orbIds?: number[];
+  orbCommon?: number;
+  orbRare?: number;
   lastBail?: BailInfo | null;
 }
 
@@ -158,10 +139,9 @@ export class ScoreKeeper {
   private rankShown = 0;
   flow = 0;
   flowPeak = 0;
-  private charmIds: number[] = [];
-  charmPop = 0;
-  charmRail = 0;
-  charmRisk = 0;
+  private orbIds: number[] = [];
+  orbCommon = 0;
+  orbRare = 0;
   lastBail: BailInfo | null = null;
 
   /** Chain length only, before variety. */
@@ -186,8 +166,8 @@ export class ScoreKeeper {
   get flowPay(): number { return 1 + SCORE.flowBank * this.flow; }
   /** Banked + what the current combo would bank now (the HUD's score). */
   get total(): number { return this.banked + Math.round(this.comboPoints * this.mult * this.flowPay); }
-  get charmCount(): number { return this.charmPop + this.charmRail + this.charmRisk; }
-  tookCharm(id: number): boolean { return this.charmIds.includes(id); }
+  get orbCount(): number { return this.orbCommon + this.orbRare; }
+  tookOrb(id: number): boolean { return this.orbIds.includes(id); }
   /** Furthest x reached this run (-Infinity before the first update). */
   get furthestX(): number { return this.maxX; }
 
@@ -202,7 +182,7 @@ export class ScoreKeeper {
     this.tricks = 0; this.nearMisses = 0; this.comboTricks = 0; this.comboNear = 0; this.idle = 0;
     this.maxX = -Infinity; this.bonusKeys = []; this.popups = []; this.cues = [];
     this.comboKinds.clear(); this.runKinds.clear(); this.lastKind = null; this.rankShown = 0;
-    this.flow = 0; this.flowPeak = 0; this.charmIds = []; this.charmPop = 0; this.charmRail = 0; this.charmRisk = 0; this.lastBail = null;
+    this.flow = 0; this.flowPeak = 0; this.orbIds = []; this.orbCommon = 0; this.orbRare = 0; this.lastBail = null;
     this.respawn();
   }
 
@@ -348,15 +328,15 @@ export class ScoreKeeper {
     this.endFlight();
   }
 
-  /** A lantern, banked at once. Paying twice for the same id is refused. */
-  collectCharm(c: Charm): boolean {
-    if (this.charmIds.includes(c.id)) return false;
-    this.charmIds.push(c.id);
-    const pts = c.line === 'risk' ? SCORE.charmRisk : c.line === 'rail' ? SCORE.charmRail : SCORE.charmPop;
-    if (c.line === 'risk') this.charmRisk++; else if (c.line === 'rail') this.charmRail++; else this.charmPop++;
+  /** An orb, banked at once. Paying twice for the same id is refused. */
+  collectOrb(o: Orb): boolean {
+    if (this.orbIds.includes(o.id)) return false;
+    this.orbIds.push(o.id);
+    const pts = orbPoints(o.tier);
+    if (o.tier === 'rare') this.orbRare++; else this.orbCommon++;
     this.banked += pts;
-    this.popups.push({ text: c.line === 'risk' ? 'High line' : c.line === 'rail' ? 'Rail lantern' : 'Crest lantern', pts, kind: 'bonus' });
-    this.cues.push('charm');
+    this.popups.push({ text: orbPopup(o.tier), pts, kind: 'bonus' });
+    this.cues.push('orb');
     return true;
   }
 
@@ -381,7 +361,7 @@ export class ScoreKeeper {
       tricks: this.tricks, nearMisses: this.nearMisses, comboTricks: this.comboTricks, comboNear: this.comboNear,
       maxX: Number.isFinite(this.maxX) ? this.maxX : null, bonusKeys: [...this.bonusKeys],
       flow: this.flow, flowPeak: this.flowPeak, lastKind: this.lastKind, comboKinds: [...this.comboKinds], runKinds: [...this.runKinds],
-      charmIds: [...this.charmIds], charmPop: this.charmPop, charmRail: this.charmRail, charmRisk: this.charmRisk, lastBail: this.lastBail ? { ...this.lastBail } : null,
+      orbIds: [...this.orbIds], orbCommon: this.orbCommon, orbRare: this.orbRare, lastBail: this.lastBail ? { ...this.lastBail } : null,
     };
   }
 
@@ -404,10 +384,9 @@ export class ScoreKeeper {
     this.lastKind = isKind(q.lastKind) ? q.lastKind : null;
     for (const k of q.comboKinds ?? []) if (isKind(k)) this.comboKinds.add(k);
     for (const k of q.runKinds ?? []) if (isKind(k)) this.runKinds.add(k);
-    this.charmIds = Array.isArray(q.charmIds) ? q.charmIds.filter(num) : [];
-    if (num(q.charmPop)) this.charmPop = q.charmPop;
-    if (num(q.charmRail)) this.charmRail = q.charmRail;
-    if (num(q.charmRisk)) this.charmRisk = q.charmRisk;
+    this.orbIds = Array.isArray(q.orbIds) ? q.orbIds.filter(num) : [];
+    if (num(q.orbCommon)) this.orbCommon = q.orbCommon;
+    if (num(q.orbRare)) this.orbRare = q.orbRare;
     const bail = q.lastBail;
     if (bail && num(bail.mult) && num(bail.chain) && num(bail.points)) this.lastBail = { mult: bail.mult, chain: bail.chain, points: bail.points };
     this.rankShown = this.mult;

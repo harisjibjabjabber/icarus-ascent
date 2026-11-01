@@ -1,6 +1,7 @@
 import { TEX_ANISO } from './environment';
 import * as THREE from 'three';
-import { Course, type Charm, type Chunk, type Obstacle, type Rail, type Surface } from '../course/course';
+import { Course, type Chunk, type Obstacle, type Rail, type Surface } from '../course/course';
+import { OrbView } from '../course/orbs';
 import { toScene, toSceneRaw, ROUTE_DIR, ROUTE_RIGHT, ROUTE_YAW } from './space';
 import { loadProps, type PropSet } from './props';
 import { townMaterial } from './town/kit';
@@ -120,17 +121,13 @@ export class CourseView {
   readonly group = new THREE.Group();
   private views = new Map<number, ChunkView>();
   private obstacleMeshes = new Map<number, THREE.Group>();
-  private takenCharms = new Set<number>();
-  /** Painted CC0 props (hanging lantern, high-line rail, beacon). Null until the bake loads. */
+  /** Painted CC0 props (high-line rail, beacon). Null until the bake loads. */
   private props: PropSet | null = null;
   private propsGen = 0;
-  /** Shared with every high line and the instanced collectibles. */
+  /** Shared with every high line. */
   private iron = townMaterial();
-  private glowMat = toon('#fff6d4', { vertexColors: true, emissive: '#ff8a2a', emissiveIntensity: 1.15, side: THREE.DoubleSide });
-  private charmBody: THREE.InstancedMesh | null = null;
-  private charmGlow: THREE.InstancedMesh | null = null;
-  private charmList: { id: number; x: number; y: number; lat: number; line: Charm['line'] }[] = [];
-  private charmDummy = new THREE.Object3D();
+  private beaconGlow = toon('#fff6d4', { vertexColors: true, emissive: '#ff8a2a', emissiveIntensity: 1.15, side: THREE.DoubleSide });
+  private readonly orbView: OrbView;
   private pool: Record<'pot' | 'pillar', THREE.Group[]> = { pot: [], pillar: [] };
   private bx = 0;
   private by = 0;
@@ -143,12 +140,14 @@ export class CourseView {
 
   /** Hide a broken obstacle (debris takes over). */
   setBroken(id: number, broken: boolean): void { const m = this.obstacleMeshes.get(id); if (m) m.visible = !broken; }
-  /** A lantern was taken. Stays hidden if its chunk is rebuilt. */
-  hideCharm(id: number): void { this.takenCharms.add(id); this.layoutCharms(); }
+  /** An orb was taken. Stays hidden if its chunk is rebuilt. */
+  hideOrb(id: number): void { this.orbView.hide(id); }
   resetObstacles(): void { for (const m of this.obstacleMeshes.values()) m.visible = true; }
 
   constructor(readonly course: Course) {
     this.iron.side = THREE.DoubleSide;
+    this.beaconGlow.side = THREE.DoubleSide;
+    this.orbView = new OrbView(this.group, course);
     loadProps().then((p) => {
       this.props = p;
       this.propsGen++;
@@ -171,27 +170,11 @@ export class CourseView {
     const live = new Set(cs.map((c) => c.id));
     for (const [id, v] of this.views) if (!live.has(id)) this.drop(v);
     for (const c of cs) if (!this.views.has(c.id)) this.build(c);
-    this.layoutCharms();
+    this.orbView.sync();
   }
 
-  /** Float the collectible lanterns. Called every frame; positions go through toScene so a rebase just works. */
-  animate(time: number): void {
-    if (!this.charmBody) return;
-    this.glowMat.emissiveIntensity = 1.05 + Math.sin(time * 5.5) * 0.22;
-    for (let i = 0; i < this.charmList.length; i++) {
-      const c = this.charmList[i];
-      const bob = Math.sin(time * 2.3 + c.id) * 0.1;
-      const s = c.line === 'risk' ? 1.95 : c.line === 'pop' ? 1.7 : 1.55;
-      this.charmDummy.position.copy(toScene(c.x, c.y + bob, c.lat));
-      this.charmDummy.quaternion.identity();
-      this.charmDummy.scale.setScalar(s * (1 + Math.sin(time * 5.5 + c.id) * 0.035));
-      this.charmDummy.updateMatrix();
-      this.charmBody.setMatrixAt(i, this.charmDummy.matrix);
-      this.charmGlow?.setMatrixAt(i, this.charmDummy.matrix);
-    }
-    this.charmBody.instanceMatrix.needsUpdate = true;
-    if (this.charmGlow) this.charmGlow.instanceMatrix.needsUpdate = true;
-  }
+  /** Bob / pulse collectible orbs. */
+  animate(time: number): void { this.orbView.animate(time); }
 
   /** The floating origin moved: re-place every chunk. */
   rebase(): void { for (const v of this.views.values()) v.group.position.copy(toScene(v.chunk.x0, v.chunk.y0)); }
@@ -240,10 +223,9 @@ export class CourseView {
     for (const v of [...this.views.values()]) this.drop(v);
     for (const k of ['pot', 'pillar'] as const) for (const m of this.pool[k]) disposeTree(m);
     this.pool = { pot: [], pillar: [] };
-    this.charmBody?.dispose();
-    this.charmGlow?.dispose();
+    this.orbView.dispose();
     this.iron.dispose();
-    this.glowMat.dispose();
+    this.beaconGlow.dispose();
   }
 
   private obstacleMesh(o: Obstacle): THREE.Group {
@@ -480,7 +462,7 @@ export class CourseView {
     }
     const im = mergeAttrs(ironParts), gm = mergeAttrs(glowParts);
     if (im) { const mesh = new THREE.Mesh(im, this.iron); mesh.castShadow = true; g.add(mesh); }
-    if (gm) { const mesh = new THREE.Mesh(gm, this.glowMat); mesh.castShadow = false; g.add(mesh); }
+    if (gm) { const mesh = new THREE.Mesh(gm, this.beaconGlow); mesh.castShadow = false; g.add(mesh); }
     return g;
   }
 
@@ -512,44 +494,6 @@ export class CourseView {
     g.setAttribute('tl', new THREE.BufferAttribute(tl, 1));
     g.setIndex(new THREE.BufferAttribute(I.array.slice(0), 1));
     return g;
-  }
-
-  /** One instanced hanging lantern per streamed charm. Shared geometry, two draw calls (iron + flame). */
-  private layoutCharms(): void {
-    const piece = this.props?.piece('lantern');
-    const list: CourseView['charmList'] = [];
-    if (piece) for (const c of this.course.chunks) for (const id of c.charms ?? []) {
-      if (this.takenCharms.has(id)) continue;
-      const ch = this.course.charm(id);
-      if (ch) list.push({ id, x: ch.x, y: ch.y, lat: ch.lateral, line: ch.line });
-    }
-    this.charmList = list;
-    const n = Math.max(1, list.length);
-    const make = (geo: THREE.BufferGeometry, mat: THREE.Material, prev: THREE.InstancedMesh | null) => {
-      prev?.dispose();
-      const m = new THREE.InstancedMesh(geo, mat, n);
-      m.count = list.length;
-      m.frustumCulled = false;
-      m.castShadow = true;
-      return m;
-    };
-    if (!piece || !list.length) {
-      if (this.charmBody) this.group.remove(this.charmBody);
-      if (this.charmGlow) this.group.remove(this.charmGlow);
-      this.charmBody?.dispose(); this.charmGlow?.dispose();
-      this.charmBody = this.charmGlow = null;
-      return;
-    }
-    if (this.charmBody) this.group.remove(this.charmBody);
-    if (this.charmGlow) this.group.remove(this.charmGlow);
-    this.charmBody = make(piece.body, this.iron, this.charmBody);
-    this.group.add(this.charmBody);
-    if (piece.glow) {
-      this.charmGlow = make(piece.glow, this.glowMat, this.charmGlow);
-      this.charmGlow.castShadow = false;
-      this.group.add(this.charmGlow);
-    }
-    this.animate(performance.now() / 1000);
   }
 
   private marker(x: number, label: string): THREE.Sprite {

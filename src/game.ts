@@ -16,7 +16,8 @@ import { newSeed } from './rng';
 import { Autopilot } from './diag/autopilot';
 import { Sfx } from './audio/sfx';
 import { LOOKS, nextLook } from './render/heroine/looks';
-import { ScoreKeeper, SCORE, charmTouched } from './score/score';
+import { ScoreKeeper, SCORE, orbTouched } from './score/score';
+import { orbBurstColor } from './course/orbs';
 import { EndlessHud } from './score/hud';
 import { Challenges } from './score/challenges';
 import { SET_PIECES } from './course/setpieces';
@@ -59,6 +60,7 @@ const BEST_KEY = 'icarus.endless.bestClean';
 const BEST_SCORE_KEY = 'icarus.endless.bestScore';
 /** Furthest distance of a finished or abandoned endless run. */
 const BEST_DISTANCE_KEY = 'icarus.endless.bestDistance';
+const BEST_ORBS_KEY = 'icarus.endless.bestOrbs';
 /** Checkpoint carried across an update reload (sessionStorage). */
 const RESUME_KEY = 'icarus.resume';
 
@@ -80,6 +82,7 @@ export class Game {
   get runOver(): boolean { return this.run.over; }
   private bestScore = 0;
   private bestDistance = 0;
+  private bestOrbs = 0;
   private challenges = new Challenges(1);
   /** The line that cost the latest life, shown on the summary if that life was the last. */
   private lastFailMessage = '';
@@ -149,6 +152,7 @@ export class Game {
     try { this.best = Number(localStorage.getItem(BEST_KEY)) || 0; } catch { this.best = 0; }
     try { this.bestScore = Number(localStorage.getItem(BEST_SCORE_KEY)) || 0; } catch { this.bestScore = 0; }
     try { this.bestDistance = Number(localStorage.getItem(BEST_DISTANCE_KEY)) || 0; } catch { this.bestDistance = 0; }
+    try { this.bestOrbs = Number(localStorage.getItem(BEST_ORBS_KEY)) || 0; } catch { this.bestOrbs = 0; }
     this.ui.version.textContent = `v ${BUILD_VERSION}`;
     for (const b of hud.querySelectorAll('button')) {
       b.addEventListener('pointerdown', (e) => e.stopPropagation());
@@ -196,7 +200,7 @@ export class Game {
       /** dev/review: autopilot off (e.g. to lose a life on purpose) */
       autopilotOff: () => { this.autopilot = null; },
       retry: () => this.retry(),
-      score: () => ({ total: this.score.total, chain: this.score.chain, mult: this.score.mult, flow: this.score.flow, kinds: this.score.comboTrickKinds, charms: this.score.charmCount, lives: this.lives, runOver: this.runOver, best: this.score.best, goal: this.challenges.current }),
+      score: () => ({ total: this.score.total, chain: this.score.chain, mult: this.score.mult, flow: this.score.flow, kinds: this.score.comboTrickKinds, orbs: this.score.orbCount, lives: this.lives, runOver: this.runOver, best: this.score.best, goal: this.challenges.current }),
       /** dev: jump to an opening lesson's checkpoint */
       lesson: (i: number) => { this.cpIndex = Math.max(0, Math.min(i, this.course.lessons.length - 1)); this.startRun(); },
       // dev: freeze the real-time loop and drive the sim deterministically (screenshots, debugging)
@@ -437,6 +441,7 @@ export class Game {
   private showSummary(): void {
     const s = endRun(this.run, this.score, this.runDistance(), this.bestScore, this.seed, {
       distanceBest: this.bestDistance,
+      orbBest: this.bestOrbs,
       failText: this.lastFailMessage,
       challengeText: this.challenges.current.text,
       challenges: this.challenges.done,
@@ -445,6 +450,10 @@ export class Game {
     if (s.newDistanceBest) {
       this.bestDistance = s.distanceBest;
       try { localStorage.setItem(BEST_DISTANCE_KEY, String(Math.round(s.distanceBest))); } catch { /* private mode */ }
+    }
+    if (s.newOrbBest) {
+      this.bestOrbs = s.orbBest;
+      try { localStorage.setItem(BEST_ORBS_KEY, String(s.orbBest)); } catch { /* private mode */ }
     }
     this.ui.fail.classList.remove('show');
     this.hud.summary(s);
@@ -501,14 +510,17 @@ export class Game {
     const events: SimEvent[] = this.sim.drainEvents();
     if (this.mode === 'endless' && !this.replayer && !this.run.over) {
       this.score.update(TUNING.sim.dt, st, events, this.course);
-      for (const c of this.course.charms) {
-        if (this.score.tookCharm(c.id) || !charmTouched(c, prevX, st)) continue;
-        if (this.score.collectCharm(c)) { this.view.hideCharm(c.id); this.view.burst(c.x, c.y, c.lateral); }
+      for (const o of this.course.orbs) {
+        if (this.score.tookOrb(o.id) || !orbTouched(o, prevX, st)) continue;
+        if (this.score.collectOrb(o)) {
+          this.view.hideOrb(o.id);
+          this.view.burst(o.x, o.y, o.lateral, orbBurstColor(o.tier));
+        }
       }
       const goal = this.challenges.update(st, events, { nearMisses: this.score.nearMisses, comboTrickKinds: this.score.comboTrickKinds, distance: this.runDistance() });
       if (goal) { this.score.bonus(goal.text, goal.pts); this.view.punch(TUNING.feedback.challengeShake); this.sfx.cue('challenge'); }
       for (const cue of this.score.drainCues()) {
-        if (cue === 'charm') { this.sfx.cue('charm'); continue; } // the burst already punched
+        if (cue === 'orb') { this.sfx.cue('orb'); continue; } // the burst already punched
         this.sfx.cue(cue);
         const shake = cue === 'near' ? TUNING.feedback.nearShake : cue === 'rank' ? TUNING.feedback.rankShake : cue === 'bank' ? TUNING.feedback.bankShake : 0;
         if (shake) this.view.punch(shake);
@@ -604,7 +616,7 @@ export class Game {
     if (this.startScreen && this.sim.state.x > this.course.startX + 3) { this.startScreen = false; this.ui.start.classList.remove('show'); }
     if (this.mode === 'endless') {
       const idle = this.sim.state.mode === 'grounded' ? Math.min(1, this.score.idleTime / SCORE.idle) : 0;
-      this.hud.update(dt, this.score, this.runDistance(), this.bestScore, idle, this.run.over ? null : this.challenges.current);
+      this.hud.update(dt, this.score, this.runDistance(), this.bestScore, idle, this.run.over ? null : this.challenges.current, this.bestOrbs);
     }
   }
 

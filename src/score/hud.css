@@ -4,6 +4,8 @@
 .eh.on { display: block; }
 .eh-score { position: absolute; left: 12px; top: var(--ui-hud-top, calc(max(10px, env(safe-area-inset-top)) + 50px)); font: 800 26px/1 var(--ui-font, system-ui, sans-serif); font-variant-numeric: tabular-nums; letter-spacing: .01em; text-shadow: 0 2px 0 #fff, 0 0 10px #fff8; }
 .eh-sub { position: absolute; left: 13px; top: calc(var(--ui-hud-top, 50px) + 30px); font: 600 12px var(--ui-font, system-ui, sans-serif); font-variant-numeric: tabular-nums; opacity: .62; text-shadow: 0 1px 0 #fff9; }
+.eh-orbs { position: absolute; right: 12px; top: calc(var(--ui-hud-top, 50px) + 48px); font: 700 12px var(--ui-font, system-ui, sans-serif); font-variant-numeric: tabular-nums; opacity: 0; text-shadow: 0 1px 0 #fff, 0 0 8px #fff; color: #9a6b12; }
+.eh-orbs.show { opacity: .82; }
 .eh-lives { position: absolute; left: 12px; top: calc(var(--ui-hud-top, 50px) + 48px); display: flex; gap: 4px; }
 .eh-goal { position: absolute; left: 13px; top: calc(var(--ui-hud-top, 50px) + 70px); max-width: min(68%, 240px); font: 700 12px/1.3 var(--ui-font, system-ui, sans-serif); opacity: 0; text-shadow: 0 1px 0 #fff, 0 0 8px #fff; }
 .eh-goal.show { opacity: .78; }
