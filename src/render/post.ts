@@ -202,6 +202,16 @@ export class PostPass {
   }
 
   /**
+   * Colour grade warmth / saturation (time of day). Writes the uniforms every composite variant shares: no recompile,
+   * no material swap. Defaults are POST_STYLE's.
+   */
+  setGrade(warm: readonly [number, number, number] = POST_STYLE.warm, sat = POST_STYLE.saturation): void {
+    const u = this.quad.material.uniforms;
+    (u.uWarm.value as THREE.Vector3).set(warm[0], warm[1], warm[2]);
+    u.uSat.value = sat;
+  }
+
+  /**
    * Compile the given composite variants (and the bloom passes) off the critical path: `compileAsync` uses
    * KHR_parallel_shader_compile where available, so a later tier switch finds its program ready. Best-effort.
    */

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { toon } from '../materials';
+import { TOD_UNIFORMS } from '../timeOfDay';
 
 /**
  * The witch-town kit: premade CC0 pieces (Quaternius Medieval Village MegaKit, Kenney Fantasy Town + Pirate kits),
@@ -180,13 +181,13 @@ export function townMaterial(): TownMaterial {
     uDetail.value = TOWN_DETAIL.tex;
     Object.assign(sh.uniforms, {
       uDetail, uDetailStrength: TOWN_DETAIL.strength, uFade, uWrap,
-      uTownTex: TOWN_TEX.tex, uTexOn: TOWN_TEX.on, uNrmOn: TOWN_TEX.nrm, uTexStr: TOWN_TEX.str, uTexNrm: TOWN_TEX.nrmStr, uTexTile: TOWN_TEX.tile,
+      uNight: TOD_UNIFORMS.night, uTownTex: TOWN_TEX.tex, uTexOn: TOWN_TEX.on, uNrmOn: TOWN_TEX.nrm, uTexStr: TOWN_TEX.str, uTexNrm: TOWN_TEX.nrmStr, uTexTile: TOWN_TEX.tile,
     });
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vWPos; varying vec3 vWNrm; varying vec3 vTPos; varying vec2 vTuv; varying float vTl;\nattribute vec2 tuv; attribute float tl; uniform vec3 uWrap;')
       .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvWPos = (modelMatrix * vec4(transformed, 1.0)).xyz; vWNrm = normalize(mat3(modelMatrix) * objectNormal); vTPos = transformed + uWrap; vTuv = tuv; vTl = tl;');
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
         varying vec3 vWPos; varying vec3 vWNrm; varying vec3 vTPos; varying vec2 vTuv; varying float vTl;
-        uniform sampler2D uDetail; uniform float uDetailStrength; uniform vec2 uFade;
+        uniform sampler2D uDetail; uniform float uDetailStrength; uniform vec2 uFade; uniform float uNight;
         uniform highp sampler2DArray uTownTex; uniform float uTexOn; uniform float uNrmOn; uniform float uTexStr[${TEX_LAYERS}]; uniform float uTexNrm[${TEX_LAYERS}]; uniform float uTexTile[${TEX_LAYERS}];
         float townDither(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
         mat3 townFrame(vec3 N, vec3 p, vec2 uv) {
@@ -224,11 +225,22 @@ export function townMaterial(): TownMaterial {
           tn.z = sqrt(max(0.0, 1.0 - dot(tn.xy, tn.xy)));
           normal = normalize(townFrame(normal, -vViewPosition, townUv) * tn);
         }`)
+      // time of day (dusk/night): window glass and the dark interiors glow warm (HDR: the bloom picks it up);
+      // ~1 in 4 windows stays dark (keyed on origin-free chunk space: stable across rebases). uNight = 0 by day, so the branch is skipped and the shipped look is untouched.
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+        if (uNight > 0.0) {
+          // exact (unshaded) vertex colours: helper interiors T.interior #3a3442 (not the near-identical iron #3b3440 of
+          // wires/railings: 0.0035 apart in linear) and the kit's baked window glass #4a6a80 (bake_town.py)
+          float tw = max(1.0 - step(0.0015, distance(vColor.rgb, vec3(0.04231, 0.03434, 0.05448))),
+                         1.0 - smoothstep(0.015, 0.04, distance(vColor.rgb, vec3(0.0685, 0.1441, 0.2159))));
+          float lit = step(0.27, fract(sin(dot(floor(vTPos.xz * 0.45) + floor(vTPos.y * 0.33), vec2(12.9898, 78.233))) * 43758.5453));
+          totalEmissiveRadiance += vec3(1.0, 0.6, 0.25) * tw * lit * uNight * 3.0;
+        }`)
       // tag dissolving pixels (alpha 0.5 in the HDR target) so the outline pass doesn't ink the dither pattern
       .replace('#include <dithering_fragment>', `#include <dithering_fragment>
         if (uFade.x > 0.001 || uFade.y < 0.999) gl_FragColor.a = 0.5;`);
   };
-  m.customProgramCacheKey = () => 'town-detail-fade-tex';
+  m.customProgramCacheKey = () => 'town-detail-fade-tex-tod';
   return m;
 }
 

@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { mulberry32 } from '../rng';
-import { toon, ART_UNIFORMS } from './materials';
+import { toon, ART, ART_UNIFORMS } from './materials';
+import { TOD_UNIFORMS, type TimeOfDay } from './timeOfDay';
+import { buildHillsTerrain, buildHillsProps } from './biomeHills';
 import { toScene, toSceneRaw, ORIGIN, ROUTE_DIR, ROUTE_RIGHT, ROUTE_YAW } from './space';
 import { GeoBuilder, blob } from './geo';
 import type { Quality } from './quality';
@@ -59,15 +61,17 @@ function skyDome(): THREE.Mesh {
     uniforms: {
       top: { value: new THREE.Color(ENV_STYLE.skyTop) }, mid: { value: new THREE.Color(ENV_STYLE.skyMid) },
       horizon: { value: new THREE.Color(ENV_STYLE.skyHorizon) }, below: { value: new THREE.Color(ENV_STYLE.skyBelow) },
-      glow: { value: new THREE.Color(ENV_STYLE.sunGlow) }, sunDir: { value: ENV_STYLE.sunSky.clone().normalize() },
+      glow: { value: new THREE.Color(ENV_STYLE.sunGlow) }, sunDir: { value: ENV_STYLE.sunSky.clone().normalize() }, uStars: TOD_UNIFORMS.stars,
     },
     vertexShader: `varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
-    fragmentShader: `uniform vec3 top; uniform vec3 mid; uniform vec3 horizon; uniform vec3 below; uniform vec3 glow; uniform vec3 sunDir; varying vec3 vDir;
+    fragmentShader: `uniform vec3 top; uniform vec3 mid; uniform vec3 horizon; uniform vec3 below; uniform vec3 glow; uniform vec3 sunDir; uniform float uStars; varying vec3 vDir;
       void main(){
         vec3 d = normalize(vDir); float h = d.y;
         vec3 c = h > 0.0 ? mix(horizon, mix(mid, top, smoothstep(0.15, 0.6, h)), smoothstep(0.0, 0.2, h)) : mix(horizon, below, smoothstep(0.0, 0.08, -h));
         float s = max(dot(d, sunDir), 0.0);
         c += glow * (pow(s, 8.0) * 0.25 + pow(s, 80.0) * 0.5);
+        // time of day (dusk/night): a sparse star field (0 by day: the branch is skipped)
+        if (uStars > 0.0 && h > 0.05) { vec2 g = floor(vec2(atan(d.z, d.x), asin(h)) * 260.0); float r = fract(sin(dot(g, vec2(12.9898, 78.233))) * 43758.5453); c += vec3(0.9, 0.93, 1.0) * step(0.9965, r) * uStars * smoothstep(0.05, 0.3, h); }
         gl_FragColor = vec4(c, 1.0);
         #include <colorspace_fragment>
       }`,
@@ -88,15 +92,15 @@ function paintedBand(url: string, radius: number, arcDeg: number, horizon: numbe
   const tex = loadTex(url);
   const mat = new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false, fog: false, transparent: true,
-    uniforms: { map: { value: tex }, keyed: { value: keyed ? 1 : 0 } },
+    uniforms: { map: { value: tex }, keyed: { value: keyed ? 1 : 0 }, tint: TOD_UNIFORMS.bandTint },
     vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
-    fragmentShader: `uniform sampler2D map; uniform float keyed; varying vec2 vUv;
+    fragmentShader: `uniform sampler2D map; uniform float keyed; uniform vec3 tint; varying vec2 vUv;
       void main(){
         vec2 uv = vec2(1.0 - vUv.x, vUv.y);
         vec4 c = texture2D(map, uv);
         float edge = smoothstep(0.0, 0.12, uv.x) * smoothstep(1.0, 0.88, uv.x);
         float a = (keyed > 0.5 ? c.a : 1.0) * edge * smoothstep(1.0, 0.94, uv.y);
-        gl_FragColor = vec4(c.rgb, a);
+        gl_FragColor = vec4(c.rgb * tint, a);
         #include <colorspace_fragment>
       }`,
   });
@@ -112,11 +116,11 @@ function seaPlane(): THREE.Mesh {
   const mat = new THREE.ShaderMaterial({
     fog: false, transparent: true, depthWrite: true,
     uniforms: {
-      uTime: ART_UNIFORMS.uTime, uShift: { value: new THREE.Vector2() },
+      uTime: ART_UNIFORMS.uTime, uShift: { value: new THREE.Vector2() }, uTint: TOD_UNIFORMS.seaTint,
       sea: { value: new THREE.Color(ENV_STYLE.sea) }, deep: { value: new THREE.Color(ENV_STYLE.seaDeep) }, foam: { value: new THREE.Color(ENV_STYLE.seaFoam) },
     },
     vertexShader: `varying vec3 vW; void main(){ vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`,
-    fragmentShader: `uniform float uTime; uniform vec2 uShift; uniform vec3 sea; uniform vec3 deep; uniform vec3 foam; varying vec3 vW;
+    fragmentShader: `uniform float uTime; uniform vec2 uShift; uniform vec3 uTint; uniform vec3 sea; uniform vec3 deep; uniform vec3 foam; varying vec3 vW;
       float h21(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
       float n2(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f); return mix(mix(h21(i),h21(i+vec2(1,0)),f.x), mix(h21(i+vec2(0,1)),h21(i+vec2(1,1)),f.x), f.y); }
       void main(){
@@ -127,7 +131,7 @@ function seaPlane(): THREE.Mesh {
         float g = smoothstep(0.82, 0.9, n2(w * vec2(0.18, 0.6) + uTime * vec2(0.2, 0.05)));
         c = mix(c, foam, g * 0.5 * (1.0 - smoothstep(150.0, 600.0, dist)));
         float a = 1.0 - smoothstep(700.0, 1350.0, dist);
-        gl_FragColor = vec4(c, a);
+        gl_FragColor = vec4(c * uTint, a);
         #include <colorspace_fragment>
       }`,
   });
@@ -160,6 +164,9 @@ export function townFade(d: number, age: number): { near: [number, number]; far:
   return { near: [0, cut], far: [cut, present] };
 }
 
+/** The toon rim colour as shipped (time of day scales ART.rimColor, the uniform every toon material shares). */
+const RIM_BASE = ART.rimColor.clone();
+
 export class Environment {
   readonly group = new THREE.Group();
   readonly sun: THREE.DirectionalLight;
@@ -167,6 +174,8 @@ export class Environment {
   private pano: THREE.Mesh;
   private farTown: THREE.Mesh;
   private sunOffset: THREE.Vector3;
+  private hemi: THREE.HemisphereLight;
+  private fog: THREE.Fog;
   private sea: THREE.Mesh;
   private puffs: THREE.InstancedMesh;
   private puffData: { x: number; lat: number; dy: number; s: number; ph: number }[] = [];
@@ -190,7 +199,7 @@ export class Environment {
   ready: Promise<void> = Promise.resolve();
 
   constructor(scene: THREE.Scene) {
-    scene.fog = new THREE.Fog(ENV_STYLE.fog, ENV_STYLE.fogNear, ENV_STYLE.fogFar);
+    this.fog = scene.fog = new THREE.Fog(ENV_STYLE.fog, ENV_STYLE.fogNear, ENV_STYLE.fogFar);
     this.dome = skyDome();
     scene.add(this.dome);
     this.pano = paintedBand(`${BASE}town/sky-sea.webp`, 1400, ENV_STYLE.panoArc, ENV_STYLE.panoHorizon, ROUTE_DIR, false, -90);
@@ -199,7 +208,8 @@ export class Environment {
     const left = ROUTE_DIR.clone().multiplyScalar(0.8).addScaledVector(ROUTE_RIGHT, -0.6).normalize();
     this.farTown = paintedBand(`${BASE}town/far-town.webp`, 1100, 58, 0.62, left, true, -80);
     scene.add(this.farTown);
-    scene.add(new THREE.HemisphereLight(ENV_STYLE.hemiSky, ENV_STYLE.hemiGround, ENV_STYLE.hemiIntensity));
+    this.hemi = new THREE.HemisphereLight(ENV_STYLE.hemiSky, ENV_STYLE.hemiGround, ENV_STYLE.hemiIntensity);
+    scene.add(this.hemi);
     this.sun = new THREE.DirectionalLight(ENV_STYLE.sun, ENV_STYLE.sunIntensity);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(1024, 1024);
@@ -231,6 +241,24 @@ export class Environment {
       const kit = Kit.load(`${BASE}town/`).then((k) => this.setKit(k)).catch((e) => console.warn('town kit failed to load', e));
       this.ready = Promise.all([kit, ...PENDING.map((p) => p.then((t) => { if (t && this.renderer) this.renderer.initTexture(t); }))]).then(() => {});
     }
+  }
+
+  /**
+   * Time of day (see timeOfDay.ts): sky, fog, lights, band/sea/cloud tint, stars, window glow, rim. Values and shared
+   * uniforms only: no new draw calls, programs or texture uploads. The sun keeps its tier-set shadow distance.
+   */
+  applyTime(t: TimeOfDay): void {
+    const u = (this.dome.material as THREE.ShaderMaterial).uniforms;
+    u.top.value.set(t.skyTop); u.mid.value.set(t.skyMid); u.horizon.value.set(t.skyHorizon); u.below.value.set(t.skyBelow); u.glow.value.set(t.sunGlow);
+    u.sunDir.value.set(...t.sunSky).normalize();
+    this.fog.color.set(t.fog); this.fog.near = t.fogNear; this.fog.far = t.fogFar;
+    this.hemi.color.set(t.hemiSky); this.hemi.groundColor.set(t.hemiGround); this.hemi.intensity = t.hemiIntensity;
+    this.sun.color.set(t.sun); this.sun.intensity = t.sunIntensity;
+    this.sunOffset.set(...t.sunFrom).normalize().multiplyScalar(this.sunOffset.length());
+    TOD_UNIFORMS.bandTint.value.set(t.bandTint); TOD_UNIFORMS.seaTint.value.set(t.seaTint);
+    TOD_UNIFORMS.stars.value = t.stars; TOD_UNIFORMS.night.value = t.windows;
+    (this.puffs.material as THREE.MeshToonMaterial).color.set(ENV_STYLE.cloudLit).multiply(TOD_UNIFORMS.bandTint.value);
+    ART.rimColor.copy(RIM_BASE).multiplyScalar(t.rim);
   }
 
   /** Renderer for pre-uploading textures as they arrive (no first-view upload hitch / late texture). */
@@ -300,15 +328,49 @@ export class Environment {
     this.groundAt = groundAt ?? ((x) => ({ y: heightAt(x), gap: false }));
     this.townOpts = opts;
     this.seaFollow = follow;
+    this.dropHills();
+    if (this.biome === 'hills' && !follow) { this.buildHills(_length); return; }
     this.seaBase = follow ? Infinity : minY - 9;
     this.seaY = follow ? heightAt(0) - 45 : this.seaBase;
     this.sea.position.y = this.seaY;
     this.lastX = NaN;
   }
 
+  /**
+   * Biome mock (`?biome=hills`, see biomeHills.ts): one procedural terrain mesh + instanced CC0 props instead of the
+   * town, built once for a static course (endless courses keep the town). Set before buildScenery.
+   */
+  biome: 'town' | 'hills' = 'town';
+  private hills: THREE.Object3D[] = [];
+  private hillsGen = 0;
+  private buildHills(length: number): void {
+    this.pano.visible = false; this.farTown.visible = false; this.sea.visible = false;
+    const t = buildHillsTerrain(this.groundAt, -80, length + 400);
+    this.hills = [t];
+    this.group.add(t);
+    if (typeof document !== 'undefined') {
+      const gen = ++this.hillsGen;
+      const props = buildHillsProps(BASE, this.groundAt, -40, length + 300).then((g) => {
+        if (gen !== this.hillsGen) return;
+        this.hills.push(g); this.group.add(g);
+        if (this.renderer) g.traverse((o) => { const m = (o as THREE.Mesh).material as THREE.MeshToonMaterial | undefined; if (m?.map) this.renderer!.initTexture(m.map); });
+      }).catch((e) => console.warn('hills props failed', e));
+      this.ready = Promise.all([this.ready, props]).then(() => {});
+    }
+  }
+  private dropHills(): void {
+    this.hillsGen++;
+    for (const o of this.hills) { this.group.remove(o); o.traverse((c) => (c as THREE.Mesh).geometry?.dispose()); }
+    this.hills = [];
+    this.pano.visible = true; this.farTown.visible = true; this.sea.visible = true;
+  }
+  /** Hills mock props loaded (diagnostics / review scripts). */
+  get hillsReady(): boolean { return this.hills.length > 1; }
+
   private lastX = NaN;
   /** Stream scenery around route x (deterministic per seed): far segments (200 m) and town chunks (40 m). */
   streamScenery(x: number, maxX = Infinity): void {
+    if (this.hills.length) return;
     const S = Environment.SEG;
     const lo = Math.floor((x - 300) / S), hi = Math.floor((Math.min(x + 1300, maxX) - S) / S);
     for (const [k, g] of this.segs) if (k < lo || k > hi) { this.group.remove(g); g.geometry.dispose(); this.segs.delete(k); }
@@ -399,6 +461,7 @@ export class Environment {
   shift(delta: THREE.Vector3): void {
     for (const g of this.segs.values()) g.position.add(delta);
     for (const v of this.town.values()) v.group.position.add(delta);
+    for (const o of this.hills) o.position.add(delta);
     this.seaY += delta.y;
     const u = (this.sea.material as THREE.ShaderMaterial).uniforms.uShift.value as THREE.Vector2; u.x -= delta.x; u.y -= delta.z;
   }

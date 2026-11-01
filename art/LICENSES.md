@@ -68,3 +68,10 @@ Content rule kept: Ao is an adult-presenting character; animations are playful b
 | Cobble street texture (1024², was 512²), bloom / AO / grade shaders | procedural, written for this project | project code | — | yes (branch only) |
 
 No new third-party downloads, accounts or purchases.
+
+## Vision presets (time of day + hills biome mock, ported from `spike/vision`, 2026-11-01)
+
+| Asset | Where | Licence | Evidence | Ships? |
+|---|---|---|---|---|
+| `public/spike-biome/*.gltf/.bin/.png` (CommonTree_1/3, TwistedTree_1, Pine_1/3, Bush_Common_Flowers, Flower_3_Group, Rock_Medium_1 + their textures, downscaled to 512 px) | Quaternius – Stylized Nature MegaKit (Standard/free), https://quaternius.com/packs/stylizednaturemegakit.html (also opengameart.org/content/stylized-nature-megakit) | **CC0 1.0** | `public/spike-biome/LICENSE-Quaternius-CC0.txt` (the pack's own licence file) | yes, loaded only with `?biome=hills` (~3.4 MB) |
+| Time-of-day presets, star field, window glow, hills terrain (`src/render/timeOfDay.ts`, `src/render/biomeHills.ts`) | procedural, written for this project | project code | — | yes (behind `?tod=` / `?biome=`) |

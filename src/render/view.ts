@@ -13,6 +13,8 @@ import { Environment } from './environment';
 import { Debris } from './debris';
 import { toScene, ORIGIN, rebaseTarget, rebaseDelta } from './space';
 import { TUNING } from '../tuning';
+import { TIMES, DEFAULT_TOD, todName, type TodName } from './timeOfDay';
+import { biomeName } from './biomeHills';
 
 /** Interpolatable slice of sim state. */
 export interface Snapshot {
@@ -83,6 +85,10 @@ export class GameView {
     this.env.setAnisotropy(this.aniso); // once, before any texture is on the GPU (tier switches never change it)
     this.post = new PostPass(this.renderer, postOn ? 4 : 0);
     if (!postOn) this.post.enabled = false;
+    // vision presets: ?tod= (lighting/grade only) and ?biome=hills (mock). Without them nothing here runs.
+    const tod = todName(location.search);
+    if (tod !== DEFAULT_TOD) this.setTimeOfDay(tod);
+    this.env.biome = biomeName(location.search);
     this.scene.add(this.rider.root, this.effects.group, this.speedLines.group, this.petals.mesh);
     this.quality.onChange = (q) => this.applyQuality(q);
     this.quality.onScale = () => this.applyResolution();
@@ -114,6 +120,14 @@ export class GameView {
     this.edgeMarker.visible = false;
     this.scene.add(this.trailLine, this.arcLine, this.failMarker, this.edgeMarker, this.debris.group);
     this.resize();
+  }
+
+  /** Time-of-day preset: uniforms, light and fog values only (no new draw calls, programs or texture uploads). */
+  setTimeOfDay(name: TodName): void {
+    const t = TIMES[name];
+    this.env.applyTime(t);
+    this.renderer.toneMappingExposure = t.exposure;
+    this.post.setGrade(t.warm, t.sat);
   }
 
   /** Apply a render quality level (pixel ratio, shadows, textures, post effects, LOD, particle counts). */
