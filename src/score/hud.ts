@@ -1,10 +1,11 @@
 import './hud.css';
 import type { Popup, ScoreKeeper } from './score';
+import type { RunSummary } from './run';
 
 const fmt = (n: number) => Math.round(n).toLocaleString('en-GB');
 const fmtKm = (m: number) => (m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(2)} km`);
 
-export interface RunSummary { score: number; best: { points: number; chain: number; mult: number }; distance: number; tricks: number; nearMisses: number; personalBest: number; newBest: boolean; seed: number }
+export type { RunSummary };
 
 /** Endless HUD (DOM): score, lives, combo bubble, trick pop-ups, wave / zone banners, run summary. */
 export class EndlessHud {

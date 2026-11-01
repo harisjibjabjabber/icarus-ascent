@@ -13,14 +13,16 @@ export interface Trace {
   seed: number;
   /** Checkpoint start (opening retries), if not the course start. */
   start?: { x: number; speed: number };
+  /** Endless zone order the run was generated with (absent in older traces: the default order). */
+  zones?: string[];
   entries: { tick: number; action: Action }[];
   endTick: number;
 }
 
 export class Recorder {
   trace: Trace;
-  constructor(seed: number, course: 'lab' | 'opening' | 'endless' = 'lab', start?: { x: number; speed: number }) {
-    this.trace = { version: 1, course, seed, entries: [], endTick: 0, ...(start ? { start } : {}) };
+  constructor(seed: number, course: 'lab' | 'opening' | 'endless' = 'lab', start?: { x: number; speed: number }, zones?: string[]) {
+    this.trace = { version: 1, course, seed, entries: [], endTick: 0, ...(start ? { start } : {}), ...(course === 'endless' && zones ? { zones: [...zones] } : {}) };
   }
   record(tick: number, action: Action): void { this.trace.entries.push({ tick, action: { ...action } }); }
   finish(tick: number): Trace { this.trace.endTick = tick; return this.trace; }
@@ -51,6 +53,6 @@ export function replayHeadless(trace: Trace, extraTicks = 0): RiderState {
   return sim.state;
 }
 
-export function buildCourseFor(t: { course: Trace['course']; seed: number }): Course {
-  return t.course === 'opening' ? buildOpeningCourse() : t.course === 'endless' ? buildEndlessCourse(t.seed) : buildLabCourse(t.seed);
+export function buildCourseFor(t: { course: Trace['course']; seed: number; zones?: string[] }): Course {
+  return t.course === 'opening' ? buildOpeningCourse() : t.course === 'endless' ? buildEndlessCourse(t.seed, t.zones) : buildLabCourse(t.seed);
 }
