@@ -91,10 +91,11 @@ function ballistic(x0: number, y0: number, x1: number, speed: number, floorAt: (
   return pts;
 }
 
-function blocked(ctx: OrbTrailContext, x: number, y: number): boolean {
+function blocked(ctx: OrbTrailContext, x: number, y: number, lat = 0): boolean {
   for (const o of ctx.obstacles) {
-    if (Math.abs(o.x - x) > o.halfWidth + 0.5) continue;
-    if (y < o.baseY + o.height + 0.2 && y > o.baseY - 0.3) return true;
+    if (Math.abs(o.x - x) > o.halfWidth + 0.45) continue;
+    if (Math.abs(lat) > 0.85) continue;
+    if (y < o.baseY + o.height + 0.15 && y > o.baseY - 0.3) return true;
   }
   return false;
 }
@@ -150,30 +151,103 @@ function potHop(ctx: OrbTrailContext): Line | null {
   const b = pots[pots.length - 1].x + 1.3;
   const y0 = yAtSurfaces(ctx.surfaces, a);
   const pts = ballistic(a, y0, b, cruise(ctx), (x) => yAtSurfaces(ctx.surfaces, x));
-  if (!pts || pts.some((p) => blocked(ctx, p.x, p.y))) return null;
+  if (!pts || pts.some((p) => blocked(ctx, p.x, p.y, p.lat))) return null;
   return { purpose: 'pot-hop', pickup: 'air', pts, score: 80 };
 }
 
-/** Safe street: grounded, centre line, clear of props. Slides forward to a clean pocket. */
-function streetLine(ctx: OrbTrailContext): Line | null {
-  if (ctx.connector || ctx.breather) return null;
+/** Heel line through a pot row: beside the props, not inside them. */
+function potSmash(ctx: OrbTrailContext): Line | null {
+  const pots = ctx.obstacles.filter((o) => o.kind === 'pot').sort((a, b) => a.x - b.x);
+  if (pots.length < 1) return null;
+  const x0 = Math.max(ctx.chunkX0 + 2, ctx.rhythm.quietUntil, pots[0].x - 2);
+  const x1 = Math.min(ctx.chunkX1 - 2, pots[pots.length - 1].x + 2.5);
+  const span = x1 - x0;
+  if (span < 8) return null;
+  const n = clamp(Math.round(span / (cruise(ctx) * STAR_DT)), 5, 8);
+  const pts: Pt[] = [];
+  for (let i = 0; i < n; i++) {
+    const t = (i + 0.5) / n;
+    const x = x0 + span * t;
+    const y = yAtSurfaces(ctx.surfaces, x) + 0.32;
+    const lat = 0.62 * Math.sin(Math.PI * t);
+    if (blocked(ctx, x, y, lat)) return null;
+    pts.push({ x, y, lat });
+  }
+  return { purpose: 'pot-smash', pickup: 'route', pts, score: 72 };
+}
+
+const RAMP_IDS = new Set(['big-kicker', 'ramp-flip', 'crest-pop', 'valley-launch', 'double-pop', 'pop-chain']);
+
+/** Grounded lead-in that points at a kicker or crest. */
+function rampApproach(ctx: OrbTrailContext): Line | null {
+  if (!RAMP_IDS.has(ctx.phraseId) && !ctx.setPiece) return null;
   const v = cruise(ctx);
-  const dur = 1.65;
+  const span = v * 1.5;
+  const lip = ctx.gaps.length ? Math.min(...ctx.gaps.map((g) => g.x0)) : ctx.chunkX1 - 3;
+  const x1 = Math.min(lip - 1.2, ctx.chunkX1 - 2);
+  const x0 = Math.max(ctx.chunkX0 + 3, ctx.rhythm.quietUntil, x1 - span);
+  if (x1 - x0 < v * 1.15) return null;
+  const n = countFor((x1 - x0) / v);
+  const pts: Pt[] = [];
+  for (let i = 0; i < n; i++) {
+    const t = (i + 0.5) / n;
+    const x = x0 + (x1 - x0) * t;
+    const y = yAtSurfaces(ctx.surfaces, x) + 0.28 + t * 0.15;
+    if (blocked(ctx, x, y, 0)) return null;
+    pts.push({ x, y, lat: 0.12 * (t - 0.5) });
+  }
+  return { purpose: 'ramp-approach', pickup: 'route', pts, score: 66 };
+}
+
+/** Short street line that aims at an optional rail too brief for its own grind trail. */
+function railBreadcrumb(ctx: OrbTrailContext): Line | null {
+  const rails = ctx.rails.filter((r) => !r.risky && !railLine(r, ctx));
+  const r = rails.sort((a, b) => (b.points[b.points.length - 1].x - b.points[0].x) - (a.points[a.points.length - 1].x - a.points[0].x))[0];
+  if (!r) return null;
+  const v = cruise(ctx);
+  const x1 = r.points[0].x - 0.8;
+  const x0 = Math.max(ctx.chunkX0 + 2, ctx.rhythm.quietUntil, x1 - v * 1.45);
+  if (x1 - x0 < v * 1.05) return null;
+  const n = 5;
+  const pts: Pt[] = [];
+  for (let i = 0; i < n; i++) {
+    const t = (i + 0.5) / n;
+    const x = x0 + (x1 - x0) * t;
+    const y = yAtSurfaces(ctx.surfaces, x) + 0.3;
+    const lat = r.lateral * t * 0.55;
+    if (blocked(ctx, x, y, lat)) return null;
+    pts.push({ x, y, lat });
+  }
+  return { purpose: 'rail-breadcrumb', pickup: 'route', pts, score: 63 };
+}
+
+/** Safe street, or a single gentle weave when props sit on the centre line. */
+function streetLine(ctx: OrbTrailContext): Line | null {
+  if (ctx.connector) return null;
+  if (ctx.breather && ctx.chunkX1 - ctx.chunkX0 < 48) return null;
+  const v = cruise(ctx);
+  const dur = 1.55;
   const span = v * dur;
-  let x0 = Math.max(ctx.chunkX0 + 4, ctx.rhythm.quietUntil);
+  let x0 = Math.max(ctx.chunkX0 + 3, ctx.rhythm.quietUntil);
   const limit = ctx.chunkX1 - 2 - span;
   while (x0 <= limit) {
-    const pts: Pt[] = [];
-    let clear = true;
+    const straight: Pt[] = [];
+    const weave: Pt[] = [];
+    let straightOk = true;
+    let weaveOk = true;
     const n = countFor(dur);
     for (let i = 0; i < n; i++) {
       const t = (i + 0.5) / n;
       const x = x0 + span * t;
-      const y = yAtSurfaces(ctx.surfaces, x) + 0.22;
-      if (blocked(ctx, x, y)) { clear = false; break; }
-      pts.push({ x, y, lat: 0 });
+      const y = yAtSurfaces(ctx.surfaces, x) + 0.26;
+      const lat = 0.7 * Math.sin(Math.PI * t);
+      if (blocked(ctx, x, y, 0)) straightOk = false;
+      else straight.push({ x, y, lat: 0 });
+      if (blocked(ctx, x, y, lat)) weaveOk = false;
+      else weave.push({ x, y, lat });
     }
-    if (clear && pts.length >= TRAIL_ORBS.min) return { purpose: 'safe-street', pickup: 'route', pts, score: 46 };
+    if (straightOk && straight.length >= TRAIL_ORBS.min) return { purpose: 'safe-street', pickup: 'route', pts: straight, score: ctx.breather ? 40 : 48 };
+    if (weaveOk && weave.length >= TRAIL_ORBS.min) return { purpose: 'street-weave', pickup: 'route', pts: weave, score: 58 };
     x0 += 8;
   }
   return null;
@@ -195,40 +269,46 @@ function goldCandidates(ctx: OrbTrailContext): Line[] {
   }
   const hop = potHop(ctx);
   if (hop) lines.push(hop);
+  const smash = potSmash(ctx);
+  if (smash) lines.push(smash);
+  const ramp = rampApproach(ctx);
+  if (ramp) lines.push(ramp);
+  const crumb = railBreadcrumb(ctx);
+  if (crumb) lines.push(crumb);
   const street = streetLine(ctx);
   if (street) lines.push(street);
   return lines;
 }
 
-function mastery(ctx: OrbTrailContext): { pickup: OrbPickup; pt: Pt } | null {
-  const risky = ctx.rails.find((r) => r.risky);
-  if (risky) {
-    const q = railSample(risky, 0.86);
-    return { pickup: 'grind', pt: { x: q.x, y: q.y, lat: risky.lateral } };
+function masteryOptions(ctx: OrbTrailContext): { score: number; pickup: OrbPickup; pt: Pt }[] {
+  const out: { score: number; pickup: OrbPickup; pt: Pt }[] = [];
+  for (const r of ctx.rails) {
+    if (!r.risky) continue;
+    const q = railSample(r, 0.86);
+    out.push({ score: 100, pickup: 'grind', pt: { x: q.x, y: q.y, lat: r.lateral } });
   }
-  const wall = [...ctx.walls].filter((w) => w.required || w.x1 - w.x0 >= 22).sort((a, b) => (b.x1 - b.x0) - (a.x1 - a.x0))[0];
-  if (wall) {
-    const len = wall.x1 - wall.x0;
-    const y = wall.yBottom + (wall.yTop - wall.yBottom) * 0.42;
-    return { pickup: 'wall', pt: { x: wall.x0 + len * 0.88, y, lat: wall.lateral - 0.35 } };
+  for (const w of ctx.walls) {
+    const len = w.x1 - w.x0;
+    if (!w.required && len < 22) continue;
+    const y = w.yBottom + (w.yTop - w.yBottom) * 0.42;
+    out.push({ score: 90, pickup: 'wall', pt: { x: w.x0 + len * 0.88, y, lat: w.lateral - 0.35 } });
   }
-  const gap = [...ctx.gaps].filter((g) => g.requires === 'jump').sort((a, b) => (b.x1 - b.x0) - (a.x1 - a.x0))[0];
-  if (gap && gap.x1 - gap.x0 > 5) {
+  for (const g of ctx.gaps) {
+    if (g.requires !== 'jump' || g.x1 - g.x0 < 4.5) continue;
     const v = cruise(ctx);
-    const t = (gap.x1 - gap.x0) / v * 0.5;
-    const x = gap.x0 + v * t;
-    const y = gap.yTakeoff + JUMP_VY * t - 0.5 * AIR_G * t * t;
-    if (y > gap.yTakeoff + 0.4) return { pickup: 'air', pt: { x, y, lat: 0 } };
+    const t = (g.x1 - g.x0) / v * 0.5;
+    const x = g.x0 + v * t;
+    const y = g.yTakeoff + JUMP_VY * t - 0.5 * AIR_G * t * t;
+    if (y > g.yTakeoff + 0.35) out.push({ score: 80, pickup: 'air', pt: { x, y, lat: 0 } });
   }
-  const rail = [...ctx.rails].sort((a, b) => (b.points[b.points.length - 1].x - b.points[0].x) - (a.points[a.points.length - 1].x - a.points[0].x))[0];
-  if (rail) {
-    const len = rail.points[rail.points.length - 1].x - rail.points[0].x;
-    if (len > 8) {
-      const q = railSample(rail, 0.9);
-      return { pickup: 'grind', pt: { x: q.x, y: q.y, lat: rail.lateral } };
-    }
+  for (const r of ctx.rails) {
+    if (r.risky) continue;
+    const len = r.points[r.points.length - 1].x - r.points[0].x;
+    if (len < 8) continue;
+    const q = railSample(r, 0.9);
+    out.push({ score: 60, pickup: 'grind', pt: { x: q.x, y: q.y, lat: r.lateral } });
   }
-  return null;
+  return out;
 }
 
 function dedupe(placements: OrbPlacement[]): void {
@@ -246,21 +326,34 @@ export function stampOrbTrails(out: OrbPlacement[], ctx: OrbTrailContext): void 
   out.length = 0;
   const tid = () => ctx.nextTrailId();
 
-  const lines = goldCandidates(ctx).filter((l) => l.pts[0].x >= ctx.rhythm.quietUntil - 1);
-  lines.sort((a, b) => b.score - a.score);
-  const best = lines[0];
-  if (best) {
+  for (let n = 0; n < 2; n++) {
+    if (ctx.rhythm.quietUntil > ctx.chunkX1 - 16) break;
+    const lines = goldCandidates(ctx).filter((l) => l.pts[0].x >= ctx.rhythm.quietUntil - 1);
+    const free = lines.filter((l) => !out.some((o) => o.tier === 'common' && Math.abs(o.x - l.pts[0].x) < 12));
+    free.sort((a, b) => b.score - a.score);
+    const best = free[0];
+    if (!best) break;
     pushTrail(out, tid(), 'common', best.pickup, best.pts);
     const end = best.pts[best.pts.length - 1].x;
-    ctx.rhythm.quietUntil = end + 36 + ctx.rng() * 22;
+    ctx.rhythm.quietUntil = end + 30 + ctx.rng() * 14;
+    if (ctx.chunkX1 - ctx.rhythm.quietUntil < 34) break;
   }
 
-  const rareAt = mastery(ctx);
   const earlyHigh = ctx.phraseId === 'high-line' && ctx.chunkX1 < 120 && ctx.chunkX0 < ctx.nextRareX.at;
-  if (rareAt && (earlyHigh || rareAt.pt.x >= ctx.nextRareX.at - 12)) {
-    const clash = out.some((q) => Math.hypot(q.x - rareAt.pt.x, q.y - rareAt.pt.y) < MIN_ORB_GAP && Math.abs(q.lateral - rareAt.pt.lat) < 0.7);
+  const due = masteryOptions(ctx)
+    .filter((o) => o.pt.x >= ctx.nextRareX.at - 25 && o.pt.x <= ctx.chunkX1 + 0.5)
+    .sort((a, b) => a.pt.x - b.pt.x || b.score - a.score);
+  let rareAt = earlyHigh
+    ? masteryOptions(ctx).find((o) => o.pickup === 'grind' && o.score === 100) ?? null
+    : due[0] ?? null;
+  if (!rareAt && ctx.chunkX0 >= ctx.nextRareX.at - 8) {
+    const late = masteryOptions(ctx).filter((o) => o.pt.x >= ctx.chunkX0).sort((a, b) => b.score - a.score);
+    rareAt = late[0] ?? null;
+  }
+  if (rareAt && (earlyHigh || rareAt.pt.x >= ctx.nextRareX.at - 25 || ctx.chunkX0 >= ctx.nextRareX.at - 8)) {
+    const clash = out.some((q) => Math.hypot(q.x - rareAt!.pt.x, q.y - rareAt!.pt.y) < MIN_ORB_GAP && Math.abs(q.lateral - rareAt!.pt.lat) < 0.7);
     if (!clash) pushTrail(out, tid(), 'rare', rareAt.pickup, [rareAt.pt]);
-    ctx.nextRareX.at = rareAt.pt.x + 200 + ctx.rng() * 100;
+    ctx.nextRareX.at = rareAt.pt.x + 160 + ctx.rng() * 50;
   }
 
   dedupe(out);

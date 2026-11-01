@@ -39,7 +39,7 @@ function ride(seed: number) {
     g.push(o);
     groups.set(id, g);
   }
-  const gold = [...groups.values()].filter((g) => g.length >= 5 && g[0].tier === 'common');
+  const gold = [...groups.values()].filter((g) => g[0].tier === 'common' && g.length >= (g[0].pickup === 'wall' ? 4 : 5));
   const full = gold.filter((g) => g.every((o) => got.has(o.id))).length;
   const rares = orbs.filter((o) => o.tier === 'rare').sort((a, b) => a.x - b.x);
   const gaps: number[] = [];
