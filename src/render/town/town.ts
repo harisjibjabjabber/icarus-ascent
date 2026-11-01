@@ -283,9 +283,16 @@ function clockTower(kit: Kit, near: MergeBuffer, far: MergeBuffer, base: THREE.M
       fb.add(new THREE.BoxGeometry(4, H, 4), [0, H / 2, 0], lin('#e9dcc4'), { top: lin('#f3e6cf') });
       fb.add(new THREE.ConeGeometry(Math.SQRT1_2, 1, 4, 1).rotateY(Math.PI / 4), [0, H + 2.2, 0], new THREE.Color(T.terracotta), { scale: [4.6, 4.4, 4.6] });
       mb.geometry(fb.build()!, base);
-    } else box(mb, base, 3.6, H, 3.6, 0, H / 2, 0, T.interior);
+    } else {
+      // near: same plain plaster shaft as the far LOD for the lower floors (cheaper, and no change at the LOD blend);
+      // kit window pieces only on the top two floors, under the clock and the tiled cap
+      const lowH = (floors - 2) * T.storey, nb = new GeoBuilder();
+      nb.add(new THREE.BoxGeometry(4, lowH, 4), [0, lowH / 2, 0], lin('#e9dcc4'), { top: lin('#f3e6cf') });
+      mb.geometry(nb.build()!, base);
+      box(mb, base, 3.6, H - lowH, 3.6, 0, lowH + (H - lowH) / 2, 0, T.interior);
+    }
     if (mb !== far) {
-      for (let s = 0; s < 4; s++) for (let f = 0; f < floors; f++) for (let i = 0; i < 2; i++) {
+      for (let s = 0; s < 4; s++) for (let f = floors - 2; f < floors; f++) for (let i = 0; i < 2; i++) {
         const piece = f === floors - 1 ? 'wallWinThin' : f % 2 ? 'wallWinFlat' : 'wall';
         mb.piece(kit, piece, local(base, 0, 0, 0, s * Math.PI / 2).multiply(_m.makeTranslation(-1 + i * 2, f * T.storey, 2 - 0.09)), t);
       }
