@@ -287,6 +287,13 @@ export const TUNING = {
     breakShakePillar: 0.18,
     breakShakeTime: 0.22,
     breakFovPunch: 1.6,
+    /** Presentation punches. Smaller than a pillar smash, so the smash still reads heaviest. */
+    nearShake: 0.1,
+    rankShake: 0.045,
+    charmShake: 0.07,
+    challengeShake: 0.06,
+    bankShake: 0.05,
+    flipLandShake: 0.05,
     /** Fragments thrown per break. */
     potFragments: 14,
     pillarFragments: 26,

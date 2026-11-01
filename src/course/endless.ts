@@ -1,4 +1,4 @@
-import { Course, type Chunk, type Feature, type Gap, type Obstacle, type Rail, type Surface, type Vec2, type Wall } from './course';
+import { Course, type Charm, type Chunk, type Feature, type Gap, type Obstacle, type Rail, type Surface, type Vec2, type Wall } from './course';
 import { extend, kicker, smooth, easeOut, linear, crestPop, rollingHills, type Ease } from './shapes';
 import { TUNING } from '../tuning';
 import { mulberry32 } from '../rng';
@@ -62,6 +62,8 @@ export class PhraseBuilder {
   readonly rails: Omit<Rail, 'id'>[] = [];
   readonly walls: Omit<Wall, 'id'>[] = [];
   readonly obstacles: { kind: Obstacle['kind']; x: number }[] = [];
+  /** Optional lanterns. `pop` is in the air past a crest; `rail` sits on a handrail. */
+  readonly charms: Omit<Charm, 'id'>[] = [];
   readonly requires: [number, Gap['requires']][] = [];
   readonly features: Feature[] = [];
   /** Where the run-in for the next compulsory feature begins. */
@@ -76,11 +78,13 @@ export class PhraseBuilder {
   flat(len: number): this { extend(this.pts, this.cur().x + len, this.cur().y, linear, 4); return this; }
   slope(len: number, dy: number, ease: Ease = smooth): this { extend(this.pts, this.cur().x + len, this.cur().y + dy, ease, 1.5); return this; }
   kicker(len: number, rise: number): this { extend(this.pts, this.cur().x + len, this.cur().y + rise, kicker, 0.8); return this; }
-  /** Crest pop on continuous ground (style air, no gap). */
-  crest(rise: number, len: number, drop: number, backLen: number): this {
+  /** Crest pop on continuous ground (style air, no gap). `charm`: a lantern in the launch arc. */
+  crest(rise: number, len: number, drop: number, backLen: number, charm = false): this {
+    const baseY = this.cur().y;
     const top = this.cur().x + len;
     crestPop(this.pts, rise, len, drop, backLen);
     this.features.push({ x: top, kind: 'crest', required: false });
+    if (charm) this.charms.push({ x: top + 1.6, y: baseY + rise + 0.55, lateral: 0, line: 'pop' });
     return this;
   }
   /** Rolling hills: a pop chain for fast riders (style air), calm for slow ones. */
@@ -107,8 +111,8 @@ export class PhraseBuilder {
     this.rails.push({ points, lateral, required });
     if (!required) this.features.push({ x, kind: 'rail-optional', required: false });
   }
-  /** Optional handrail (right of the route) following the ground just built from x0 to x1: something to grind on descents. */
-  handrail(x0: number, x1: number, h = 0.95): this {
+  /** Optional handrail (right of the route) following the ground just built from x0 to x1: something to grind on descents. `charm`: a lantern on the rail. */
+  handrail(x0: number, x1: number, h = 0.95, charm = false): this {
     const yAt = (x: number) => {
       for (let i = 1; i < this.pts.length; i++) if (this.pts[i].x >= x) { const a = this.pts[i - 1], b = this.pts[i]; return a.y + ((b.y - a.y) * (x - a.x)) / Math.max(1e-6, b.x - a.x); }
       return this.cur().y;
@@ -116,10 +120,11 @@ export class PhraseBuilder {
     const n = Math.max(2, Math.ceil((x1 - x0) / 3) + 1);
     this.rails.push({ points: Array.from({ length: n }, (_, i) => { const x = x0 + ((x1 - x0) * i) / (n - 1); return { x, y: yAt(x) + h }; }), lateral: 1.2, required: false });
     this.features.push({ x: x0, kind: 'rail-optional', required: false });
+    if (charm) { const x = x0 + (x1 - x0) * 0.72; this.charms.push({ x, y: yAt(x) + h, lateral: 1.2, line: 'rail' }); }
     return this;
   }
   /** Descent with an optional handrail along most of it. */
-  railSlope(len: number, dy: number): this { const a = this.cur().x; this.slope(len, dy); return this.handrail(a + 3, a + len - 4); }
+  railSlope(len: number, dy: number, charm = false): this { const a = this.cur().x; this.slope(len, dy); return this.handrail(a + 3, a + len - 4, 0.95, charm); }
   wall(w: Omit<Wall, 'id'>): void { this.walls.push(w); }
   /** `cluster`: a second pot right behind the first, cleared or skimmed together with it. */
   pot(x: number, cluster = false): void {
@@ -171,7 +176,7 @@ export const PHRASES: PhraseSpec[] = [
   // ------------------------------------------------------------------ style air (no gaps)
   {
     id: 'crest-pop', title: 'Descent → crest pop', tier: 1, style: true, required: false, entry: [6, HC], exit: [14, HC], airtime: 0.8, receiving: 'downslope', cpSpeed: 11,
-    build: (b, d) => { b.flat(4).railSlope(40, -(9 + 3 * d)).flat(6).crest(2.0 + 0.6 * d, 10, 2.2, 18).flat(14); },
+    build: (b, d) => { b.flat(4).railSlope(40, -(9 + 3 * d), true).flat(6).crest(2.0 + 0.6 * d, 10, 2.2, 18, true).flat(14); },
   },
   {
     id: 'rollers', title: 'Rolling hills', tier: 1, style: true, required: false, entry: [6, HC], exit: [11, HC], airtime: 0.4, receiving: 'downslope', cpSpeed: 14,
@@ -179,7 +184,7 @@ export const PHRASES: PhraseSpec[] = [
   },
   {
     id: 'valley-launch', title: 'Valley launch', tier: 1, style: true, required: false, entry: [6, HC], exit: [16, HC], airtime: 0.9, receiving: 'downslope', cpSpeed: 11,
-    build: (b, d) => { b.flat(4).railSlope(36, -(10 + 2 * d)).flat(4).crest(3.2, 18, 4.5, 24).flat(12); },
+    build: (b, d) => { b.flat(4).railSlope(36, -(10 + 2 * d), true).flat(4).crest(3.2, 18, 4.5, 24, true).flat(12); },
   },
   {
     id: 'pop-chain', title: 'Rolling hills pop chain', tier: 2, style: true, required: false, entry: [6, HC], exit: [14, HC], airtime: 0.6, receiving: 'downslope', cpSpeed: 12,
@@ -187,11 +192,11 @@ export const PHRASES: PhraseSpec[] = [
   },
   {
     id: 'big-kicker', title: 'Big kicker', tier: 2, style: true, required: false, entry: [6, HC], exit: [15, HC], airtime: 1.2, receiving: 'downslope', cpSpeed: 11,
-    build: (b, d) => { b.flat(4).railSlope(44, -(13 + 3 * d)).flat(8).crest(3.0, 12, 3.6, 24).flat(16); },
+    build: (b, d) => { b.flat(4).railSlope(44, -(13 + 3 * d), true).flat(8).crest(3.0, 12, 3.6, 24, true).flat(16); },
   },
   {
     id: 'double-pop', title: 'Double crest', tier: 2, style: true, required: false, entry: [6, HC], exit: [12, HC], airtime: 0.7, receiving: 'downslope', cpSpeed: 11,
-    build: (b) => { b.flat(4).railSlope(36, -9).flat(4).crest(1.8, 9, 1.6, 14).flat(12).crest(2.0, 10, 2.2, 16).flat(12); },
+    build: (b) => { b.flat(4).railSlope(36, -9).flat(4).crest(1.8, 9, 1.6, 14).flat(12).crest(2.0, 10, 2.2, 16, true).flat(12); },
   },
   // ------------------------------------------------------------------ compulsory actions
   {
@@ -228,7 +233,8 @@ export const PHRASES: PhraseSpec[] = [
       b.flat(4).runIn().slope(46, 2, linear); b.gap(5, -0.3); b.slope(10, -0.6, easeOut).flat(6);
       const x = b.cur().x, y = b.cur().y;
       b.flat(30); b.rail(x, 22, y + 0.95, y + 0.6, 1.2, false);
-      b.crest(1.6, 9, 1.6, 14).flat(22);
+      b.charms.push({ x: x + 16, y: y + 0.95 + (0.6 - 0.95) * (16 / 22), lateral: 1.2, line: 'rail' });
+      b.crest(1.6, 9, 1.6, 14, true).flat(22);
     },
   },
   {
@@ -572,7 +578,7 @@ export const STREAM = {
  */
 export class EndlessCourse extends Course {
   private asm: Assembler;
-  private ids = { s: 0, r: 0, w: 0, o: 0, c: 0 };
+  private ids = { s: 0, r: 0, w: 0, o: 0, c: 0, h: 0 };
   private endX = -10;
   private endY = 0;
   private lastSurface: Surface | null = null;
@@ -618,6 +624,7 @@ export class EndlessCourse extends Course {
       id: this.ids.o++, kind: q.kind, x: q.x, baseY: ground(q.x),
       halfWidth: q.kind === 'pot' ? O.potHalfWidth : O.pillarHalfWidth, height: q.kind === 'pot' ? O.potHeight : O.pillarHeight,
     }));
+    const charms: Charm[] = b.charms.map((q) => ({ id: this.ids.h++, ...q }));
     const gaps: Gap[] = [];
     for (let k = 0; k + 1 < surfaces.length; k++) {
       const a = surfaces[k].points[surfaces[k].points.length - 1], c = surfaces[k + 1].points[0];
@@ -630,8 +637,9 @@ export class EndlessCourse extends Course {
       id: this.ids.c++, x0: this.endX, x1: end.x, y0: this.endY, y1: end.y, title: plan.spec.title, spec: plan.spec.id, tier: plan.spec.tier,
       difficulty: plan.d, connector: plan.connector, zone: plan.zone, gate: plan.gate, setPiece: plan.setPiece, wave: this.waveLabel(this.endX), cpX: this.endX + 2, cpSpeed: plan.spec.cpSpeed, features: b.features,
       surfaces: surfaces.map((q) => q.id), rails: rails.map((q) => q.id), walls: walls.map((q) => q.id), obstacles: obstacles.map((q) => q.id), markers: [],
+      charms: charms.map((q) => q.id),
     };
-    this.addChunk(chunk, surfaces, rails, walls, obstacles, gaps);
+    this.addChunk(chunk, surfaces, rails, walls, obstacles, gaps, charms);
     this.lastSurface = last;
     this.material = last.material;
     this.endX = end.x; this.endY = end.y;

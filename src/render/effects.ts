@@ -147,9 +147,9 @@ export class SpeedLines {
     return Math.min(1, Math.max(0, (speed - start) / (M.hardCap - start)));
   }
 
-  update(dt: number, x: number, y: number, speed: number): void {
+  update(dt: number, x: number, y: number, speed: number, flow = 0): void {
     const F = TUNING.speedFx;
-    const k = SpeedLines.intensity(speed);
+    const k = Math.min(1, SpeedLines.intensity(speed) + Math.max(0, flow) * 0.28);
     this.acc += dt * F.linesRate * k;
     while (this.acc >= 1) {
       this.acc -= 1;

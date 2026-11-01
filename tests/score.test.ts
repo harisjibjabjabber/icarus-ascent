@@ -13,7 +13,7 @@ const base = (): RiderState => ({ ...new Simulation(course).state });
 const st = (o: Partial<RiderState>): RiderState => ({ ...base(), ...o });
 
 describe('score keeper', () => {
-  it('chains tricks into a combo whose multiplier grows x1 -> x5, banks after plain rolling, and pays distance', () => {
+  it('chains tricks into a combo, banks after plain rolling, and pays distance (a repeated flip cannot hold ×5)', () => {
     const k = new ScoreKeeper();
     k.update(dt, st({ x: 0, mode: 'grounded' }), [], course);
     const air = st({ x: 10, mode: 'airborne', tick: 10 });
@@ -22,16 +22,18 @@ describe('score keeper', () => {
     k.update(dt, st({ x: 11, mode: 'airborne', tick: 11 }), [{ type: 'grab-start', side: 'right' }, { type: 'grab-end', side: 'right', held: 0.5 }], course);
     expect(k.mult).toBe(2);
     for (let i = 0; i < 12; i++) k.update(dt, st({ x: 12 + i, mode: 'airborne', tick: 12 + i }), [{ type: 'flip-complete', x: 0, y: 0 }], course);
-    expect(k.mult).toBe(SCORE.maxMult); // capped
+    expect(k.mult).toBeLessThan(SCORE.maxMult); // a repeated flip cannot hold the cap
+    expect(k.mult).toBeGreaterThanOrEqual(2);
     const pending = k.comboPoints;
-    expect(k.total).toBe(k.banked + Math.round(pending * SCORE.maxMult));
+    const mult = k.mult;
+    expect(k.total).toBe(k.banked + Math.round(pending * mult * k.flowPay));
     // land and roll plain: the combo banks after SCORE.idle seconds
     let x = 30;
     k.update(dt, st({ x, mode: 'grounded', tick: 100 }), [{ type: 'land', x, y: 0, impact: 1, speedBefore: 10, speedAfter: 10, material: 'stone', flipped: false }], course);
     for (let i = 0; i < SCORE.idle / dt + 2; i++) k.update(dt, st({ x: (x += 0.1), mode: 'grounded', tick: 101 + i }), [], course);
     expect(k.chain).toBe(0);
-    expect(k.best.mult).toBe(SCORE.maxMult);
-    expect(k.best.points).toBeGreaterThanOrEqual(Math.round(pending * SCORE.maxMult));
+    expect(k.best.mult).toBe(mult);
+    expect(k.best.points).toBeGreaterThanOrEqual(Math.round(pending * mult));
     expect(k.banked).toBeGreaterThan(k.best.points); // + distance
     expect(k.drainPopups().some((p) => p.kind === 'bank')).toBe(true);
   });

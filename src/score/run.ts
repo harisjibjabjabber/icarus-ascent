@@ -1,4 +1,5 @@
 import type { ScoreKeeper, ScoreSnapshot } from './score';
+import type { ChallengeSnapshot } from './challenges';
 
 /**
  * Endless run flow, pure (no DOM, no storage): lives, the run ending, the personal best, and the
@@ -8,7 +9,54 @@ import type { ScoreKeeper, ScoreSnapshot } from './score';
 /** Lives per run. */
 export const MAX_LIVES = 3;
 
-export interface RunSummary { score: number; best: { points: number; chain: number; mult: number }; distance: number; tricks: number; nearMisses: number; personalBest: number; newBest: boolean; seed: number }
+export interface RunSummary {
+  score: number;
+  best: { points: number; chain: number; mult: number };
+  distance: number;
+  tricks: number;
+  nearMisses: number;
+  personalBest: number;
+  newBest: boolean;
+  seed: number;
+  /** Furthest distance saved on this device, after this run. */
+  distanceBest: number;
+  newDistanceBest: boolean;
+  /** Trick kinds whose combo was banked. */
+  kinds: number;
+  charms: number;
+  challenges: number;
+  /** One or two short sentences: why the run ended, and why to ride it again. */
+  note: string;
+}
+
+/** The sim's fail text, cut at the teaching dash so the summary stays one line. */
+export function failHeadline(message: string): string {
+  const cut = message.split('—')[0].trim();
+  if (!cut) return '';
+  return cut.length > 84 ? `${cut.slice(0, 82)}…` : cut;
+}
+
+/** Why to press Same route. Pure. */
+export function retryNote(o: {
+  newBest: boolean;
+  personalBest: number;
+  score: number;
+  newDistanceBest: boolean;
+  bailedMult: number;
+  fail: string;
+  challenge: string;
+}): string {
+  const fail = failHeadline(o.fail);
+  const loss = [fail, o.bailedMult >= 2 ? `bailed a ×${o.bailedMult} combo` : ''].filter(Boolean).join(', ');
+  const lead = loss ? `${loss[0].toUpperCase()}${loss.slice(1)}. ` : '';
+  if (o.newBest) return `${lead}New best score. A mixed combo still scores more than repeating one trick.`.trim();
+  const short = Math.round(o.personalBest - o.score);
+  if (short > 0 && o.personalBest > 0 && short / o.personalBest <= 0.1) return `${lead}${short.toLocaleString('en-GB')} short of your best — same route.`.trim();
+  if (o.challenge) return `${lead}Still open: ${o.challenge}.`.trim();
+  if (loss) return `${lead}Same route.`.trim();
+  if (o.newDistanceBest) return 'Furthest you have been. A mixed combo scores more than a repeated one.';
+  return 'Same route. A mixed combo scores more than repeating one trick.';
+}
 
 export interface RunState {
   lives: number;
@@ -49,11 +97,19 @@ export function updateBest(score: number, best: number): { best: number; isNew: 
   return s > best ? { best: s, isNew: true } : { best, isNew: false };
 }
 
-/** End the run: record its summary (the personal best is updated by the caller from `newBest`). */
-export function endRun(run: RunState, score: ScoreKeeper, distance: number, personalBest: number, seed: number): RunSummary {
+/** End the run: record its summary (the caller persists `newBest` / `newDistanceBest`). */
+export function endRun(run: RunState, score: ScoreKeeper, distance: number, personalBest: number, seed: number, extra?: { distanceBest?: number; failText?: string; challengeText?: string; challenges?: number }): RunSummary {
   run.over = true;
   const pb = updateBest(score.banked, personalBest);
-  run.summary = { score: score.banked, best: { ...score.best }, distance, tricks: score.tricks, nearMisses: score.nearMisses, personalBest: pb.best, newBest: pb.isNew, seed };
+  const db = updateBest(distance, extra?.distanceBest ?? 0);
+  const challenge = extra?.challengeText ?? '';
+  run.summary = {
+    score: score.banked, best: { ...score.best }, distance, tricks: score.tricks, nearMisses: score.nearMisses,
+    personalBest: pb.best, newBest: pb.isNew, seed,
+    distanceBest: db.best, newDistanceBest: db.isNew,
+    kinds: score.runKindCount, charms: score.charmCount, challenges: extra?.challenges ?? 0,
+    note: retryNote({ newBest: pb.isNew, personalBest: pb.best, score: score.banked, newDistanceBest: db.isNew, bailedMult: score.lastBail?.mult ?? 0, fail: extra?.failText ?? '', challenge }),
+  };
   return run.summary;
 }
 
@@ -69,14 +125,17 @@ export interface ResumePayload {
   endlessCp: Checkpoint | null;
   at: number;
   run?: { lives: number; over: boolean; summary: RunSummary | null; score: ScoreSnapshot };
+  /** The in-run goal, so a reload doesn't swap it. */
+  challenges?: ChallengeSnapshot;
 }
 
 /** Resumes older than this are ignored (a fresh visit, not an update reload). */
 export const RESUME_MAX_AGE = 30 * 60_000;
 
-export function buildResume(o: { mode: string; seed: number; cpIndex: number; endlessCp: Checkpoint | null; now: number; run?: RunState; score?: ScoreKeeper }): ResumePayload {
+export function buildResume(o: { mode: string; seed: number; cpIndex: number; endlessCp: Checkpoint | null; now: number; run?: RunState; score?: ScoreKeeper; challenges?: ChallengeSnapshot }): ResumePayload {
   const p: ResumePayload = { mode: o.mode, seed: o.seed, cpIndex: o.cpIndex, endlessCp: o.endlessCp, at: o.now };
   if (o.mode === 'endless' && o.run && o.score) p.run = { lives: o.run.lives, over: o.run.over, summary: o.run.summary, score: o.score.serialize() };
+  if (o.challenges) p.challenges = o.challenges;
   return p;
 }
 

@@ -16,8 +16,10 @@ import { newSeed } from './rng';
 import { Autopilot } from './diag/autopilot';
 import { Sfx } from './audio/sfx';
 import { LOOKS, nextLook } from './render/heroine/looks';
-import { ScoreKeeper, SCORE } from './score/score';
+import { ScoreKeeper, SCORE, charmTouched } from './score/score';
 import { EndlessHud } from './score/hud';
+import { Challenges } from './score/challenges';
+import { SET_PIECES } from './course/setpieces';
 import { zonesFromSearch } from './zones/registry';
 import { ZONES } from './zones/registry';
 import type { SimEvent } from './sim/types';
@@ -42,6 +44,8 @@ const MODE_LABEL: Record<Mode, string> = { opening: 'Course', endless: 'Endless'
 const BEST_KEY = 'icarus.endless.bestClean';
 /** Endless v2: personal best score. */
 const BEST_SCORE_KEY = 'icarus.endless.bestScore';
+/** Furthest distance of a finished or abandoned endless run. */
+const BEST_DISTANCE_KEY = 'icarus.endless.bestDistance';
 /** Endless v2: lives per run (src/score/run.ts). */
 export { MAX_LIVES };
 /** Checkpoint carried across an update reload (sessionStorage). */
@@ -64,6 +68,10 @@ export class Game {
   get lives(): number { return this.run.lives; }
   get runOver(): boolean { return this.run.over; }
   private bestScore = 0;
+  private bestDistance = 0;
+  private challenges = new Challenges(1);
+  /** The line that cost the latest life, shown on the summary if that life was the last. */
+  private lastFailMessage = '';
   /** Endless zone order of the current course (recorded into traces). */
   private zones: string[] = [];
   private lastChunkId = -1;
@@ -125,6 +133,7 @@ export class Game {
     };
     try { this.best = Number(localStorage.getItem(BEST_KEY)) || 0; } catch { this.best = 0; }
     try { this.bestScore = Number(localStorage.getItem(BEST_SCORE_KEY)) || 0; } catch { this.bestScore = 0; }
+    try { this.bestDistance = Number(localStorage.getItem(BEST_DISTANCE_KEY)) || 0; } catch { this.bestDistance = 0; }
     this.ui.version.textContent = `v ${BUILD_VERSION}`;
     for (const b of hud.querySelectorAll('button')) {
       b.addEventListener('pointerdown', (e) => e.stopPropagation());
@@ -171,7 +180,7 @@ export class Game {
       /** dev/review: autopilot off (e.g. to lose a life on purpose) */
       autopilotOff: () => { this.autopilot = null; },
       retry: () => this.retry(),
-      score: () => ({ total: this.score.total, chain: this.score.chain, mult: this.score.mult, lives: this.lives, runOver: this.runOver, best: this.score.best }),
+      score: () => ({ total: this.score.total, chain: this.score.chain, mult: this.score.mult, flow: this.score.flow, kinds: this.score.comboTrickKinds, charms: this.score.charmCount, lives: this.lives, runOver: this.runOver, best: this.score.best, goal: this.challenges.current }),
       /** dev: jump to an opening lesson's checkpoint */
       lesson: (i: number) => { this.cpIndex = Math.max(0, Math.min(i, this.course.lessons.length - 1)); this.startRun(); },
       // dev: freeze the real-time loop and drive the sim deterministically (screenshots, debugging)
@@ -258,7 +267,7 @@ export class Game {
   private saveResume(): void {
     const finished = this.sim?.state.mode === 'finished';
     try { // (a replay leaves the run's score alone, so the run is saved during one too)
-      sessionStorage.setItem(RESUME_KEY, JSON.stringify(buildResume({ mode: this.mode, seed: this.seed, cpIndex: finished ? 0 : this.cpIndex, endlessCp: this.endlessCp, now: Date.now(), run: this.run, score: this.score })));
+      sessionStorage.setItem(RESUME_KEY, JSON.stringify(buildResume({ mode: this.mode, seed: this.seed, cpIndex: finished ? 0 : this.cpIndex, endlessCp: this.endlessCp, now: Date.now(), run: this.run, score: this.score, challenges: this.mode === 'endless' ? this.challenges.serialize() : undefined })));
     } catch { /* storage blocked: reload anyway */ }
   }
 
@@ -275,6 +284,7 @@ export class Game {
     if (this.cpIndex > 0 || this.endlessCp || restored) { this.startScreen = false; this.ui.start.classList.remove('show'); }
     if (!restored) return;
     this.hud.setLives(this.run.lives, MAX_LIVES);
+    if (r.challenges) this.challenges.restore(r.challenges);
     if (this.run.over) this.hud.summary(this.run.summary ?? endRun(this.run, this.score, this.runDistance(), this.bestScore, this.seed));
   }
 
@@ -306,6 +316,9 @@ export class Game {
   private resetEndlessRun(): void {
     this.score.reset();
     Object.assign(this.run, newRunState());
+    this.challenges = new Challenges(this.seed);
+    this.lastFailMessage = '';
+    this.view.styleFlow = 0;
     this.lastChunkId = -1; this.lastPhase = '';
     this.hud?.hideSummary(); this.hud?.setLives(this.run.lives, MAX_LIVES);
   }
@@ -335,6 +348,7 @@ export class Game {
     if (prev?.setPiece && st.mode !== 'failed') this.score.bonus(`${prev.title} cleared`, SCORE.setPiece, prev.id);
     // calm HUD: banners only for zone changes; waves / peaks / breathers go to the HUD's (silent) wave hook
     if (c.gate) { const z = ZONES[c.gate.to]; this.hud.banner('Now entering', z?.name ?? c.gate.to, `${z?.tagline ?? ''}${z?.experimental ? ' · rough' : ''}`, '', 3.2); }
+    else if (c.setPiece) { const sp = SET_PIECES.find((s) => s.id === c.spec); this.hud.banner('Set piece', c.title, sp?.blurb ?? '', 'peak', 2.4); }
     const w = waveAt(c.x0 - (this.course as EndlessCourse).originX);
     const key = `${w.index}:${w.phase}:${c.setPiece ? c.id : ''}`;
     if (key !== this.lastPhase) { this.lastPhase = key; this.hud.wave(w.index, w.phase, c.setPiece ? c.title : ''); }
@@ -392,6 +406,7 @@ export class Game {
       const over = loseLife(this.run, this.score, 'manual-retry');
       this.hud.setLives(this.run.lives, MAX_LIVES);
       if (over) {
+        this.lastFailMessage = 'Bailed out';
         this.lastTrace = this.recorder.finish(st.tick);
         this.startRun(); // park the rider at the checkpoint under the summary
         this.showSummary();
@@ -404,8 +419,17 @@ export class Game {
 
   /** Endless: the run is over (the last life is gone): summary and personal best. */
   private showSummary(): void {
-    const s = endRun(this.run, this.score, this.runDistance(), this.bestScore, this.seed);
+    const s = endRun(this.run, this.score, this.runDistance(), this.bestScore, this.seed, {
+      distanceBest: this.bestDistance,
+      failText: this.lastFailMessage,
+      challengeText: this.challenges.current.text,
+      challenges: this.challenges.done,
+    });
     this.saveBestScore(s.score);
+    if (s.newDistanceBest) {
+      this.bestDistance = s.distanceBest;
+      try { localStorage.setItem(BEST_DISTANCE_KEY, String(Math.round(s.distanceBest))); } catch { /* private mode */ }
+    }
     this.ui.fail.classList.remove('show');
     this.hud.summary(s);
   }
@@ -457,9 +481,23 @@ export class Game {
       const c = this.course.chunkAt(st.x);
       if (c && c.cpX <= st.x && (!this.endlessCp || c.cpX > this.endlessCp.x)) this.endlessCp = { x: c.cpX, speed: c.cpSpeed, title: c.title };
     }
+    const prevX = this.prev?.x ?? st.x;
     const events: SimEvent[] = this.sim.drainEvents();
     if (this.mode === 'endless' && !this.replayer && !this.run.over) {
       this.score.update(TUNING.sim.dt, st, events, this.course);
+      for (const c of this.course.charms) {
+        if (this.score.tookCharm(c.id) || !charmTouched(c, prevX, st)) continue;
+        if (this.score.collectCharm(c)) { this.view.hideCharm(c.id); this.view.burst(c.x, c.y, c.lateral); }
+      }
+      const goal = this.challenges.update(st, events, { nearMisses: this.score.nearMisses, comboTrickKinds: this.score.comboTrickKinds, distance: this.runDistance() });
+      if (goal) { this.score.bonus(goal.text, goal.pts); this.view.punch(TUNING.feedback.challengeShake); this.sfx.cue('challenge'); }
+      for (const cue of this.score.drainCues()) {
+        if (cue === 'charm') { this.sfx.cue('charm'); continue; } // the burst already punched
+        this.sfx.cue(cue);
+        const shake = cue === 'near' ? TUNING.feedback.nearShake : cue === 'rank' ? TUNING.feedback.rankShake : cue === 'bank' ? TUNING.feedback.bankShake : 0;
+        if (shake) this.view.punch(shake);
+      }
+      this.view.styleFlow = this.score.flow;
       this.onChunk();
     }
     for (const e of events) {
@@ -482,6 +520,7 @@ export class Game {
       this.ui.fail.classList.add('show');
     }
     if (this.mode === 'endless' && !finished && !this.replayer && !this.run.over) {
+      this.lastFailMessage = msg;
       this.saveBest();
       const over = loseLife(this.run, this.score, 'fail');
       this.hud.setLives(this.run.lives, MAX_LIVES);
@@ -545,7 +584,7 @@ export class Game {
     if (this.startScreen && this.sim.state.x > this.course.startX + 3) { this.startScreen = false; this.ui.start.classList.remove('show'); }
     if (this.mode === 'endless') {
       const idle = this.sim.state.mode === 'grounded' ? Math.min(1, this.score.idleTime / SCORE.idle) : 0;
-      this.hud.update(dt, this.score, this.runDistance(), this.bestScore, idle);
+      this.hud.update(dt, this.score, this.runDistance(), this.bestScore, idle, this.run.over ? null : this.challenges.current);
     }
   }
 

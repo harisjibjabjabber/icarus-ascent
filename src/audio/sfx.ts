@@ -115,6 +115,34 @@ export class Sfx {
     }
   }
 
+  /** Score moments that aren't sim events: a close call, a multiplier step, a lantern, a goal, a banked combo. */
+  cue(kind: 'near' | 'rank' | 'charm' | 'challenge' | 'bank'): void {
+    if (!this.ctx || this.muted) return;
+    const t = this.ctx.currentTime;
+    switch (kind) {
+      case 'near':
+        this.tone(t, 0.08, 'triangle', 880, 1320, 0.09);
+        this.tone(t + 0.05, 0.12, 'sine', 1320, 1760, 0.06);
+        break;
+      case 'rank':
+        this.tone(t, 0.1, 'sine', 660, 990, 0.07);
+        break;
+      case 'charm':
+        this.tone(t, 0.09, 'sine', 740, 740, 0.07);
+        this.tone(t + 0.07, 0.12, 'sine', 988, 988, 0.06);
+        this.tone(t + 0.13, 0.16, 'sine', 1318, 1318, 0.05);
+        break;
+      case 'challenge':
+        this.tone(t, 0.12, 'triangle', 523, 784, 0.08);
+        this.tone(t + 0.09, 0.18, 'sine', 1046, 1046, 0.06);
+        break;
+      case 'bank':
+        this.tone(t, 0.14, 'sine', 392, 523, 0.06);
+        this.tone(t + 0.06, 0.18, 'sine', 659, 659, 0.05);
+        break;
+    }
+  }
+
   /** Continuous beds from the current state (per frame). */
   update(s: RiderState): void {
     if (!this.ctx || !this.beds || !this.grindTone) return;
