@@ -329,7 +329,7 @@ export class Assembler {
   private weightOf(zone: Zone, id: string): number { return zone.weights?.[id] ?? 1; }
 
   /** Queue `spec` after whatever connectors the pair (prev -> spec) needs. */
-  private enqueueWithConnectors(spec: PhraseSpec, base: Omit<Plan, 'spec' | 'connector'>, y: number, y0: number, forceRecovery = false): void {
+  private enqueueWithConnectors(spec: PhraseSpec, base: Omit<Plan, 'spec' | 'connector'>, y: number, y0: number, forceRecovery = false, connectorZone = base.zone): void {
     const chain: PhraseSpec[] = [];
     let a = this.queue.length ? this.queue[this.queue.length - 1].spec : this.history[this.history.length - 1], run = this.queue.length ? 0 : this.requiredRun;
     if (forceRecovery && a.required) { chain.push(SPEC.recovery); a = SPEC.recovery; run = 0; }
@@ -338,7 +338,7 @@ export class Assembler {
       if (!c || chain.some((q) => q.id === c)) break;
       chain.push(SPEC[c]); a = SPEC[c]; run = 0;
     }
-    for (const c of chain) this.queue.push({ ...base, spec: c, connector: true, setPiece: undefined, gate: undefined });
+    for (const c of chain) this.queue.push({ ...base, zone: connectorZone, spec: c, connector: true, setPiece: undefined, gate: undefined });
     this.queue.push({ ...base, spec, connector: !!base.gate });
   }
 
@@ -360,18 +360,20 @@ export class Assembler {
     if (span !== this.span) {
       const from = this.zones.zones[this.span % this.zones.zones.length].id;
       this.span = span;
-      if (from !== zone.id) { this.enqueueWithConnectors(SPEC.gate, { d, zone: zone.id, wave, gate: { from, to: zone.id } }, y, y0, true); return this.commit(this.queue.shift()!); }
+      if (from !== zone.id) { this.enqueueWithConnectors(SPEC.gate, { d, zone: zone.id, wave, gate: { from, to: zone.id } }, y, y0, true, from); return this.commit(this.queue.shift()!); }
     }
     // wave peak: one hand-authored set piece per wave (after a recovery; anything compulsory after it gets a recovery too)
-    if (wave.phase === 'peak' && this.spWave !== wave.index) {
-      const sps = zone.setPieces.map((id) => SPEC[id] as SetPieceSpec).filter((p) => p && p.minWave <= wave.index && p.tier <= maxTier(d) && p.id !== this.lastSetPiece);
+    // (also from just before the peak, so a long phrase can't carry the route straight over the whole peak)
+    if (wave.index >= 0 && this.spWave !== wave.index && (wave.phase === 'peak' || x >= wave.peakAt - 60 || wave.phase === 'breather')) {
+      const sps = zone.setPieces.map((id) => SPEC[id] as SetPieceSpec).filter((p) => p && p.minWave <= wave.index && p.tier <= maxTier(waveAt(wave.peakAt).d) && p.id !== this.lastSetPiece);
       if (sps.length) {
         this.spWave = wave.index;
         const w = sps.map((p) => this.weightOf(zone, p.id) * (p.minWave === wave.index ? 1.5 : 1));
         let pick = r() * w.reduce((a, b) => a + b, 0), sp = sps[sps.length - 1];
         for (let k = 0; k < sps.length; k++) { pick -= w[k]; if (pick <= 0) { sp = sps[k]; break; } }
         this.lastSetPiece = sp.id;
-        this.enqueueWithConnectors(sp, { d, zone: zone.id, wave, setPiece: true }, y, y0, true);
+        const pd = Math.max(d, waveAt(wave.peakAt).d); // a set piece is built at the wave's peak difficulty
+        this.enqueueWithConnectors(sp, { d: pd, zone: zone.id, wave: { ...wave, phase: 'peak' }, setPiece: true }, y, y0, true);
         return this.commit(this.queue.shift()!);
       }
     }

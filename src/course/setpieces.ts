@@ -86,9 +86,9 @@ export const SET_PIECES: SetPieceSpec[] = [
     entry: [8, HC], exit: [9, HC], receiving: 'broad', cpSpeed: 14,
     build: (b, d) => {
       b.flat(4).runIn().slope(46, 2, linear);
-      b.pot(b.cur().x); b.flat(lerp(42, 36, d));
+      b.pot(b.cur().x); b.flat(6).slope(lerp(36, 30, d), -2.5, linear);
       b.gap(5 + d, -0.5); b.slope(10, -0.6, easeOut).flat(lerp(22, 20, d));
-      b.pot(b.cur().x); b.flat(lerp(42, 36, d));
+      b.pot(b.cur().x); b.flat(6).slope(lerp(36, 30, d), -2.5, linear);
       b.gap(5.5 + d, -0.6); b.slope(10, -0.6, easeOut).flat(20);
     },
   },
