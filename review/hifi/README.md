@@ -67,7 +67,7 @@ a phone:
 - `sheet-1170x2532-1680.jpg`: iPhone DPR 3. Main (rendered at 1.5×, upscaled) vs hifi high (2.25×) vs ultra (3×).
 - `sheet-1170x2532-pairs.jpg` and `crop-1170-town-1680.jpg`: full-resolution comparisons. All frames are in
   `stills-1170/`.
-- `after-chase-ultra.mp4`: 15 s of the opening run on ultra, 585×1266 (DPR 1.5, kept small).
+- `after-chase-ultra.mp4` (7 MB): the first 15 s of the opening run on ultra, 585×1266 (DPR 1.5, to keep it small), 20 fps.
 - Every shot uses the game's chase camera (chest height or above).
 
 ## Weak spots (honest)
