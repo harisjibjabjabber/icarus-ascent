@@ -225,11 +225,14 @@ export function townMaterial(): TownMaterial {
           tn.z = sqrt(max(0.0, 1.0 - dot(tn.xy, tn.xy)));
           normal = normalize(townFrame(normal, -vViewPosition, townUv) * tn);
         }`)
-      // time of day (dusk/night): the dark interior colour behind windows glows warm (HDR: the bloom picks it up);
+      // time of day (dusk/night): window glass and the dark interiors glow warm (HDR: the bloom picks it up);
       // ~1 in 4 windows stays dark (keyed on origin-free chunk space: stable across rebases). uNight = 0 by day, so the branch is skipped and the shipped look is untouched.
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
         if (uNight > 0.0) {
-          float tw = 1.0 - smoothstep(0.045, 0.075, dot(vColor.rgb, vec3(0.3, 0.55, 0.15)));
+          // exact (unshaded) vertex colours: helper interiors T.interior #3a3442 (not the near-identical iron #3b3440 of
+          // wires/railings: 0.0035 apart in linear) and the kit's baked window glass #4a6a80 (bake_town.py)
+          float tw = max(1.0 - step(0.0015, distance(vColor.rgb, vec3(0.04231, 0.03434, 0.05448))),
+                         1.0 - smoothstep(0.015, 0.04, distance(vColor.rgb, vec3(0.0685, 0.1441, 0.2159))));
           float lit = step(0.27, fract(sin(dot(floor(vTPos.xz * 0.45) + floor(vTPos.y * 0.33), vec2(12.9898, 78.233))) * 43758.5453));
           totalEmissiveRadiance += vec3(1.0, 0.6, 0.25) * tw * lit * uNight * 3.0;
         }`)
