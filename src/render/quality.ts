@@ -50,8 +50,8 @@ export interface Quality {
 export const QUALITY: Record<QualityName, Quality> = {
   low: { name: 'low', pixelRatio: 1, minPixelRatio: 0.75, shadowMap: 0, shadowSoft: 1, shadowRange: 28, townShadows: false, cloudOctaves: 2, puffs: 16, petals: 0, anisotropy: 2, textures: 0, bloom: false, ao: false, lodScale: 1, fullRoofs: false },
   medium: { name: 'medium', pixelRatio: 1.5, minPixelRatio: 1, shadowMap: 1024, shadowSoft: 2.5, shadowRange: 28, townShadows: false, cloudOctaves: 3, puffs: 32, petals: 24, anisotropy: 4, textures: 1, bloom: false, ao: false, lodScale: 1, fullRoofs: false },
-  high: { name: 'high', pixelRatio: 2.25, minPixelRatio: 1.5, shadowMap: 2048, shadowSoft: 3.5, shadowRange: 42, townShadows: true, cloudOctaves: 4, puffs: 48, petals: 48, anisotropy: 8, textures: 2, bloom: true, ao: false, lodScale: 1.5, fullRoofs: false },
-  ultra: { name: 'ultra', pixelRatio: 3, minPixelRatio: 2, shadowMap: 4096, shadowSoft: 5, shadowRange: 64, townShadows: true, cloudOctaves: 4, puffs: 48, petals: 64, anisotropy: 16, textures: 2, bloom: true, ao: true, lodScale: 2.2, fullRoofs: true },
+  high: { name: 'high', pixelRatio: 2.25, minPixelRatio: 1.5, shadowMap: 2048, shadowSoft: 3.5, shadowRange: 42, townShadows: true, cloudOctaves: 4, puffs: 48, petals: 48, anisotropy: 8, textures: 2, bloom: true, ao: false, lodScale: 1.5, fullRoofs: true },
+  ultra: { name: 'ultra', pixelRatio: 3, minPixelRatio: 2, shadowMap: 4096, shadowSoft: 5, shadowRange: 64, townShadows: true, cloudOctaves: 4, puffs: 48, petals: 64, anisotropy: 16, textures: 2, bloom: true, ao: true, lodScale: 3, fullRoofs: true },
 };
 
 export const ORDER: QualityName[] = ['low', 'medium', 'high', 'ultra'];
