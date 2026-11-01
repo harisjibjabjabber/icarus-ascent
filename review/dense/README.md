@@ -66,6 +66,10 @@ Budget: ≤150 calls and ≤350k tris. The branch is within budget. Main peaked 
 - `before-chase.mp4` — main b6aa377, the whole opening (69.5 s).
 - `after-chase.mp4` — this branch, the whole opening (≈50 s).
 - `before-after-side-by-side.mp4` — both, started together. The right side ends first and holds on the finish.
-- `contact-sheet.jpg` — after-branch stills of the combos and the cobble street.
+- `contact-sheet.jpg` — after-branch stills of the combos and the cobble street, read left to right:
+  - top row: tutorial jump (10 s), heel-skim pots (16 s), optional rail grind (19 s), rail over the gap (23 s), big jump into the harbour (28 s);
+  - bottom row: pillar smash (30 s), handrail down to the wall (31 s), first wall run (36 s), canal wall run (41 s), last pot pair (47 s).
+- The after clip was rendered in two runs (start → x 205, then x 205 → finish) because the headless renderer was slow on the shared box. The sim is deterministic, so the join is seamless.
+- Clip sizes: before 13.0 MB, after 9.6 MB, side-by-side 15.3 MB.
 
 All clips use the chase camera at chest height or above (the game's own chase rig).
