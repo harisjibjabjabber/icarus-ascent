@@ -57,9 +57,20 @@ export class PostPass {
           float w0 = 1.0 / z0;
           float lap = abs(1.0/zl + 1.0/zr - 2.0*w0) + abs(1.0/zu + 1.0/zd - 2.0*w0);
           float zmin = min(z0, min(min(zl, zr), min(zu, zd)));
-          float e = smoothstep(uThreshold, uThreshold * 2.2, lap / w0);
+          // past ~40 m the threshold rises with distance: real silhouettes still ink, but small depth steps (LOD
+          // crossfade dither, roof tiles) don't sparkle as the camera moves
+          float thr = uThreshold * (1.0 + max(0.0, zmin - 40.0) / 40.0);
+          float e = smoothstep(thr, thr * 2.2, lap / w0);
           e *= 1.0 - smoothstep(uFade.x, uFade.y, zmin);
           e *= step(zmin, uFar * 0.98);
+          // town LOD crossfade / spawn dissolve pixels are tagged alpha 0.5: no ink in or right next to them
+          float tag = 0.0;
+          for (int i = 0; i < 5; i++) {
+            vec2 oo = i == 0 ? vec2(0.0) : i == 1 ? vec2(o.x, 0.0) : i == 2 ? vec2(-o.x, 0.0) : i == 3 ? vec2(0.0, o.y) : vec2(0.0, -o.y);
+            float a = texture2D(tColor, vUv + oo).a;
+            tag = max(tag, 1.0 - step(0.05, abs(a - 0.5)));
+          }
+          e *= 1.0 - tag;
           vec3 col = c.rgb;
           float l = dot(col, vec3(0.2126, 0.7152, 0.0722));
           col = mix(vec3(l), col, uSat) * uWarm + uLift;

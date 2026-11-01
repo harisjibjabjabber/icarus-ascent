@@ -144,4 +144,31 @@ describe('authored opening', () => {
     expect(end.x).toBeCloseTo(sim.state.x, 6);
     expect(end.mode).toBe(sim.state.mode);
   });
+
+  it('wall-run gaps: holding right on the wall crosses; a plain jump (no wall ride) falls short even at speed', () => {
+    const wallGaps = course.gaps.filter((g) => g.requires === 'wall');
+    expect(wallGaps.length).toBe(2);
+    expect(course.walls.length).toBeGreaterThanOrEqual(4); // 2 required (gaps) + optional garden / harbour walls
+    for (const g of wallGaps) {
+      // every wall gap has its required wall alongside, tight to the track (right edge of the 3.2 m route)
+      const w = course.walls.find((q) => q.required && q.x0 <= g.x0 && q.x1 >= g.x1)!;
+      expect(w).toBeTruthy();
+      expect(w.lateral).toBeLessThanOrEqual(2.5);
+      for (const speed of [12, 14, 18]) {
+        for (const wallRide of [true, false]) {
+          const sim = new Simulation(course, TUNING, { x: g.x0 - 40, speed });
+          const ap = new Autopilot({ minSpeed: speed });
+          for (let i = 0; i < 12 / dt && sim.state.mode !== 'failed' && sim.state.x < g.x1 + 8; i++) {
+            for (const a of ap.next(sim)) if (wallRide || a.type !== 'side') sim.enqueue(a);
+            sim.step();
+          }
+          if (wallRide) expect(sim.state.x, `wall ride over gap at ${g.x0.toFixed(0)} from ${speed} m/s: ${sim.state.fail?.message}`).toBeGreaterThan(g.x1 + 8);
+          else expect(sim.state.mode, `plain jump over the ${(g.x1 - g.x0).toFixed(0)} m gap at ${g.x0.toFixed(0)} from ${speed} m/s should fall short`).toBe('failed');
+        }
+      }
+    }
+    // the first wall gap (lesson 9) stays the forgiving teaching one: longest wall overhang before the lip
+    const first = course.walls.find((q) => q.required)!;
+    expect(wallGaps[0].x0 - first.x0).toBeGreaterThanOrEqual(4);
+  });
 });

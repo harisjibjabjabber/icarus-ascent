@@ -1,0 +1,46 @@
+[
+ {
+  "id": 0,
+  "x0": 863.5,
+  "x1": 906.5,
+  "lateral": 2.4,
+  "required": true,
+  "ticks": 45,
+  "shotAt": 874,
+  "x": 874,
+  "mode": "wallRiding"
+ },
+ {
+  "id": 1,
+  "x0": 945.5,
+  "x1": 969.5,
+  "lateral": 2.4,
+  "required": false,
+  "ticks": 0,
+  "shotAt": -1,
+  "x": 970,
+  "mode": "grounded"
+ },
+ {
+  "id": 2,
+  "x0": 999.5,
+  "x1": 1030.5,
+  "lateral": 2.4,
+  "required": true,
+  "ticks": 45,
+  "shotAt": 1008,
+  "x": 1008,
+  "mode": "wallRiding"
+ },
+ {
+  "id": 3,
+  "x0": 1085.5,
+  "x1": 1111.5,
+  "lateral": 2.4,
+  "required": false,
+  "ticks": 0,
+  "shotAt": -1,
+  "x": 1112,
+  "mode": "grounded"
+ }
+]
