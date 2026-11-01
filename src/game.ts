@@ -2,8 +2,7 @@ import { TUNING } from './tuning';
 import { GAME_TITLE } from './meta';
 import { buildLabCourse } from './course/lab';
 import { buildOpeningCourse } from './course/opening';
-import { EndlessCourse, SPEC } from './course/endless';
-import type { SetPieceSpec } from './course/setpieces';
+import { EndlessCourse } from './course/endless';
 import { BUILD_VERSION, VersionWatcher } from './version';
 import type { Course } from './course/course';
 import { Simulation, predictJumpArc } from './sim/simulation';
@@ -23,6 +22,7 @@ import { zonesFromSearch } from './zones/registry';
 import { ZONES } from './zones/registry';
 import type { SimEvent } from './sim/types';
 import { MAX_LIVES, newRunState, loseLife, retryCostsLife, updateBest, endRun, buildResume, parseResume, applyRunResume, type Checkpoint } from './score/run';
+import { waveAt } from './course/waves';
 
 type Mode = 'opening' | 'endless' | 'lab';
 const NEXT_MODE: Record<Mode, Mode> = { opening: 'endless', endless: 'lab', lab: 'opening' };
@@ -57,7 +57,7 @@ export class Game {
   /** Endless zone order of the current course (recorded into traces). */
   private zones: string[] = [];
   private lastChunkId = -1;
-  private lastWave = -2;
+  private lastPhase = '';
   private hud: EndlessHud;
   private startScreen = true;
   /** Opening: index of the furthest lesson checkpoint reached this attempt. */
@@ -296,7 +296,7 @@ export class Game {
   private resetEndlessRun(): void {
     this.score.reset();
     Object.assign(this.run, newRunState());
-    this.lastChunkId = -1; this.lastWave = -2;
+    this.lastChunkId = -1; this.lastPhase = '';
     this.hud?.hideSummary(); this.hud?.setLives(this.run.lives, MAX_LIVES);
   }
 
@@ -314,7 +314,7 @@ export class Game {
     return true;
   }
 
-  /** Endless v2: wave / set piece / zone banners and the set-piece bonus, as the rider enters a new chunk. */
+  /** Endless v2: zone banners, the wave hook and the set-piece bonus, as the rider enters a new chunk. */
   private onChunk(): void {
     const st = this.sim.state;
     const c = this.course.chunkAt(st.x);
@@ -323,12 +323,11 @@ export class Game {
     this.lastChunkId = c.id;
     // paid once per set piece per run (a checkpoint retry re-riding it pays nothing again)
     if (prev?.setPiece && st.mode !== 'failed') this.score.bonus(`${prev.title} cleared`, SCORE.setPiece, prev.id);
-    const w = c.wave;
-    if (c.setPiece && w) this.hud.banner(`Wave ${w.index + 1} · peak`, c.title, (SPEC[c.spec ?? ''] as SetPieceSpec | undefined)?.blurb ?? '', 'peak', 3);
-    else if (c.gate) { const z = ZONES[c.gate.to]; this.hud.banner('Now entering', z?.name ?? c.gate.to, `${z?.tagline ?? ''}${z?.experimental ? ' · rough' : ''}`, '', 3.2); }
-    else if (w && w.index !== this.lastWave && w.phase === 'build' && w.index >= 0) this.hud.banner(`Wave ${w.index + 1}`, w.index === 0 ? 'Here we go' : 'Faster, harder', '', '', 2);
-    else if (w && w.phase === 'breather' && prev?.wave?.phase !== 'breather') this.hud.banner('Breather', 'Catch your breath', '', '', 1.8);
-    if (w) this.lastWave = w.index;
+    // calm HUD: banners only for zone changes; waves / peaks / breathers go to the HUD's (silent) wave hook
+    if (c.gate) { const z = ZONES[c.gate.to]; this.hud.banner('Now entering', z?.name ?? c.gate.to, `${z?.tagline ?? ''}${z?.experimental ? ' · rough' : ''}`, '', 3.2); }
+    const w = waveAt(c.x0 - (this.course as EndlessCourse).originX);
+    const key = `${w.index}:${w.phase}:${c.setPiece ? c.id : ''}`;
+    if (key !== this.lastPhase) { this.lastPhase = key; this.hud.wave(w.index, w.phase, c.setPiece ? c.title : ''); }
   }
 
   private saveBest(): void {

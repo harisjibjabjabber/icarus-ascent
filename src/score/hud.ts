@@ -1,19 +1,36 @@
 import './hud.css';
 import type { Popup, ScoreKeeper } from './score';
 import type { RunSummary } from './run';
-
-const fmt = (n: number) => Math.round(n).toLocaleString('en-GB');
-const fmtKm = (m: number) => (m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(2)} km`);
+import type { WavePhase } from '../course/waves';
 
 export type { RunSummary };
 
-/** Endless HUD (DOM): score, lives, combo bubble, trick pop-ups, wave / zone banners, run summary. */
+/** One cached formatter (toLocaleString per frame allocates a formatter each call). */
+const NF = new Intl.NumberFormat('en-GB', { maximumFractionDigits: 0 });
+const fmt = (n: number) => NF.format(Math.round(n));
+const fmtKm = (m: number) => (m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(2)} km`);
+
+/**
+ * Endless HUD (DOM): score, lives, combo bubble, pop-ups, zone banners, run summary.
+ *
+ * Calm by design (the brief: no excessive interface or reward effects mid-run): no per-trick or air
+ * pop-ups, only a banked combo (with its total), a near miss, a bail and a set-piece bonus; banners
+ * only for zone changes. The combo bubble and pop-ups sit in the top band of the screen, right of
+ * the score and clear of the rider (who rides at ~60-80% of the screen height). Per-frame updates
+ * write to the DOM only when a value changes.
+ */
 export class EndlessHud {
   readonly root: HTMLElement;
   private el: Record<'score' | 'sub' | 'lives' | 'combo' | 'mult' | 'chain' | 'meter' | 'pops' | 'banner' | 'bk' | 'bt' | 'bs' | 'sum', HTMLElement>;
   private lastMult = 0;
   private lastScore = '';
+  private lastSub = '';
+  private lastChain = '';
+  private lastMeter = '';
+  private comboOn = false;
   private bannerTimer = 0;
+  /** Wave hook: the wave / phase the rider is in (kept for future use and dev tools; not shown). */
+  waveState: { index: number; phase: WavePhase; setPiece: string } | null = null;
   private popQueue: Popup[] = [];
   private popCooldown = 0;
   onAgain: () => void = () => {};
@@ -46,9 +63,9 @@ export class EndlessHud {
     const s = fmt(k.total);
     if (s !== this.lastScore) { this.el.score.textContent = s; this.lastScore = s; }
     const sub = `${fmtKm(distance)}${personalBest > 0 ? ` · best ${fmt(personalBest)}` : ''}`;
-    if (this.el.sub.textContent !== sub) this.el.sub.textContent = sub;
+    if (sub !== this.lastSub) { this.el.sub.textContent = sub; this.lastSub = sub; }
     const on = k.chain >= 2;
-    this.el.combo.classList.toggle('show', on);
+    if (on !== this.comboOn) { this.el.combo.classList.toggle('show', on); this.comboOn = on; }
     if (on) {
       const m = k.mult;
       if (m !== this.lastMult) {
@@ -57,12 +74,15 @@ export class EndlessHud {
         void this.el.mult.offsetWidth; this.el.mult.classList.add('pop');
         this.lastMult = m;
       }
-      this.el.chain.textContent = `${k.chain} tricks · ${fmt(k.comboPoints)}`;
-      this.el.meter.style.setProperty('--k', String(Math.max(0, 1 - idleFrac)));
+      const chain = `${k.chain} tricks · ${fmt(k.comboPoints)}`;
+      if (chain !== this.lastChain) { this.el.chain.textContent = chain; this.lastChain = chain; }
+      const meter = Math.max(0, 1 - idleFrac).toFixed(2);
+      if (meter !== this.lastMeter) { this.el.meter.style.setProperty('--k', meter); this.lastMeter = meter; }
     } else this.lastMult = 0;
     for (const p of k.drainPopups()) this.popQueue.push(p);
+    if (this.popQueue.length > 3) this.popQueue.splice(0, this.popQueue.length - 3);
     this.popCooldown -= dt;
-    if (this.popQueue.length && this.popCooldown <= 0) { this.spawnPop(this.popQueue.shift()!); this.popCooldown = this.popQueue.length > 3 ? 0.08 : 0.16; }
+    if (this.popQueue.length && this.popCooldown <= 0) { this.spawnPop(this.popQueue.shift()!); this.popCooldown = 0.3; }
     if (this.bannerTimer > 0) { this.bannerTimer -= dt; if (this.bannerTimer <= 0) this.el.banner.classList.remove('show'); }
   }
 
@@ -70,11 +90,13 @@ export class EndlessHud {
     const d = document.createElement('div');
     d.className = `eh-pop ${p.kind}`;
     d.innerHTML = `${p.text}${p.pts ? `<b>${p.pts > 0 ? '+' : ''}${fmt(p.pts)}</b>` : ''}`;
-    d.style.marginLeft = `${(Math.random() - 0.5) * 60}px`;
     this.el.pops.appendChild(d);
-    setTimeout(() => d.remove(), 1200);
-    while (this.el.pops.children.length > 6) this.el.pops.firstElementChild?.remove();
+    setTimeout(() => d.remove(), 1400);
+    while (this.el.pops.children.length > 3) this.el.pops.firstElementChild?.remove();
   }
+
+  /** Wave hook: called as the rider enters a wave phase (or a set piece). Records it; shows nothing (calm HUD). */
+  wave(index: number, phase: WavePhase, setPiece = ''): void { this.waveState = { index, phase, setPiece }; }
 
   banner(kicker: string, title: string, sub = '', kind: '' | 'peak' = '', seconds = 2.6): void {
     this.el.bk.textContent = kicker; this.el.bt.textContent = title; this.el.bs.textContent = sub;
@@ -99,7 +121,7 @@ export class EndlessHud {
       b.addEventListener('click', (e) => { e.stopPropagation(); if ((b as HTMLElement).dataset.act === 'again') this.onAgain(); else this.onSameSeed(); });
     }
     this.el.sum.classList.add('show');
-    this.el.combo.classList.remove('show');
+    this.el.combo.classList.remove('show'); this.comboOn = false;
   }
   hideSummary(): void { this.el.sum.classList.remove('show'); }
   get summaryShown(): boolean { return this.el.sum.classList.contains('show'); }
