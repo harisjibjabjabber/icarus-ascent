@@ -27,11 +27,16 @@ export interface Orb {
 
 export type OrbPlacement = Omit<Orb, 'id'>;
 
-/** World / screen presentation (dainty sparkle stars). */
+/** World / screen presentation (dainty 4-point stars, legible at 390×844). */
 export const ORB_VIS = {
-  goldSize: 0.26,
-  rareSize: 0.39,
-  maxBodyPx: 14,
+  /** ~1.7× the previous 0.26 m body, so a mid-distance gold star is about 8–10 px. */
+  goldSize: 0.442,
+  /** 1.5× gold. */
+  rareSize: 0.663,
+  /** Screen cap near Ao. Was 14 px; raised so a close gold star can reach ~18 px. */
+  maxBodyPx: 18,
+  /** Purple keeps the 1.5× ratio when the cap is active. */
+  rareMaxBodyPx: 27,
   nearFadeStart: 0.9,
   nearFadeEnd: 3,
 } as const;
@@ -61,7 +66,7 @@ export function orbPopup(tier: OrbTier): string {
 }
 
 export function orbBurstColor(tier: OrbTier): string {
-  return tier === 'rare' ? '#b088ff' : '#ffc857';
+  return tier === 'rare' ? '#8a3dff' : '#ffc857';
 }
 
 export function addOrb(placements: OrbPlacement[], tier: OrbTier, x: number, y: number, lateral: number, pickup: OrbPickup): void {
@@ -94,15 +99,16 @@ export function orbTouched(o: Orb, prevX: number, st: RiderState): boolean {
 }
 
 const ATLAS_COLS = 8;
-/** Star body + bright core + thin cross glints per collectible. */
-const PARTS_PER_ORB = 4;
+/** Halo (rare only) + star body + bright core + thin cross glints. */
+const PARTS_PER_ORB = 5;
 
 const GOLD_STAR = new THREE.Color('#ffc857');
-const GOLD_CORE = new THREE.Color('#fff4c8');
+const GOLD_CORE = new THREE.Color('#fff6d0');
 const GOLD_GLINT = new THREE.Color('#ffe8a0');
-const RARE_STAR = new THREE.Color('#9a72ff');
-const RARE_CORE = new THREE.Color('#e8d4ff');
-const RARE_GLINT = new THREE.Color('#c4a8ff');
+const RARE_STAR = new THREE.Color('#7a2cff');
+const RARE_CORE = new THREE.Color('#f4e8ff');
+const RARE_GLINT = new THREE.Color('#c9a0ff');
+const RARE_HALO = new THREE.Color('#9a4dff');
 
 const smooth = (a: number, b: number, x: number) => {
   const t = clamp((x - a) / Math.max(1e-6, b - a), 0, 1);
@@ -164,31 +170,38 @@ export class OrbView {
     for (const o of this.list) {
       const rare = o.tier === 'rare';
       const base = rare ? ORB_VIS.rareSize : ORB_VIS.goldSize;
-      const phase = o.trailIdx * 1.05 + o.id * 0.11;
-      const twAmp = rare ? 0.14 : 0.1;
-      const tw = 1 + Math.sin(time * 3.4 + phase * 2.1) * twAmp + (rare ? Math.sin(time * 5.2 + phase) * 0.06 : 0);
+      // Neighbours along a trail shimmer out of phase.
+      const phase = o.trailIdx * 1.35 + o.id * 0.41;
+      const twAmp = rare ? 0.24 : 0.16;
+      const tw = 1
+        + Math.sin(time * 3.1 + phase) * twAmp
+        + (rare ? Math.sin(time * 5.4 + phase * 1.4) * 0.1 : 0);
       const bob = Math.sin(time * 2.0 + o.id * 0.13) * 0.035;
       toScene(o.x, o.y + bob, o.lateral, this.worldPos);
-      let starS = base * tw;
-      if (cam) starS = worldSizeForScreen(cam, this.worldPos, starS, ORB_VIS.maxBodyPx, screenH);
-      const roll = time * 0.55 + o.id * 0.17;
+      let starS: number = base;
+      if (cam) starS = worldSizeForScreen(cam, this.worldPos, base, rare ? ORB_VIS.rareMaxBodyPx : ORB_VIS.maxBodyPx, screenH);
+      starS *= tw;
+      const roll = time * 0.48 + phase;
       this.rollQ.setFromAxisAngle(new THREE.Vector3(0, 0, 1), roll);
-      const parts: { sprite: number; scale: number; color: THREE.Color }[] = [
-        { sprite: ORB_SPRITE.star, scale: starS, color: rare ? RARE_STAR : GOLD_STAR },
-        { sprite: ORB_SPRITE.sparkle, scale: starS * 0.38, color: rare ? RARE_CORE : GOLD_CORE },
-        { sprite: ORB_SPRITE.streak, scale: starS * 0.55, color: rare ? RARE_GLINT : GOLD_GLINT },
-        { sprite: ORB_SPRITE.streak, scale: starS * 0.55, color: rare ? RARE_GLINT : GOLD_GLINT },
-      ];
-      for (let p = 0; p < PARTS_PER_ORB; p++) {
+      const parts: { sprite: number; scale: number; color: THREE.Color; bright: number; spin: number }[] = [];
+      if (rare) parts.push({ sprite: ORB_SPRITE.glow, scale: starS * 1.7, color: RARE_HALO, bright: 0.38, spin: 0 });
+      const body = parts.length;
+      parts.push(
+        { sprite: ORB_SPRITE.star, scale: starS, color: rare ? RARE_STAR : GOLD_STAR, bright: tw, spin: 0 },
+        { sprite: ORB_SPRITE.sparkle, scale: starS * 0.4, color: rare ? RARE_CORE : GOLD_CORE, bright: 1.2 + twAmp, spin: 0 },
+        { sprite: ORB_SPRITE.streak, scale: starS * 0.16, color: rare ? RARE_GLINT : GOLD_GLINT, bright: 0.55, spin: 0 },
+        { sprite: ORB_SPRITE.streak, scale: starS * 0.16, color: rare ? RARE_GLINT : GOLD_GLINT, bright: 0.55, spin: Math.PI / 2 },
+      );
+      for (let p = 0; p < parts.length; p++) {
         const part = parts[p];
-        let scale = part.scale * (p >= 2 ? 0.22 : 1);
-        if (p >= 2) scale *= 0.85 + 0.15 * Math.sin(time * 4.1 + phase + p);
+        let scale = part.scale;
+        if (p >= body + 2) scale *= 0.85 + 0.15 * Math.sin(time * 4.1 + phase + p);
         this.dummy.position.copy(this.worldPos);
         this.dummy.quaternion.copy(this.camQ);
         this.dummy.quaternion.multiply(this.rollQ);
-        if (p === 3) this.dummy.rotateZ(Math.PI / 2);
-        const bright = p === 0 ? tw : p === 1 ? 1.15 + twAmp * 0.5 : 0.45;
-        this.dummy.scale.set(scale * bright, scale * bright, 1);
+        if (part.spin) this.dummy.rotateZ(part.spin);
+        const bright = part.bright;
+        this.dummy.scale.set(scale, scale, 1);
         this.dummy.updateMatrix();
         this.mesh.setMatrixAt(i, this.dummy.matrix);
         this.spriteAttr!.setX(i, part.sprite);

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { ORB_ASSETS, ORB_SPRITE } from '../orb/orbAssets';
 import { orbRand } from '../orb/orbRand';
-import { ROUTE_DIR, toScene } from './space';
+import { toScene } from './space';
 
 const ATLAS_COLS = 8;
 const MAX = 128;
@@ -116,7 +116,7 @@ export class OrbParticles {
     color: string,
     vel: (i: number, r: number) => { vx: number; vy: number; vz: number },
   ): void {
-    if (this.low && n > 4) n = 4;
+    if (this.low && n > 6) n = 6;
     const base = toScene(x, y, lateral);
     this.c.set(color);
     for (let i = 0; i < n; i++) {
@@ -135,29 +135,24 @@ export class OrbParticles {
     }
   }
 
-  /** Gold pickup: tiny spark burst + a few HUD-ward streaks (<200 ms). */
+  /** Gold pickup: a short flash plus 8 sparkles, about 170–230 ms, kept small. */
   pickupGold(e: { id: number; tick: number; x: number; y: number; lateral: number }, color: string): void {
-    this.emit(e.id, e.tick, e.x, e.y + 0.32, e.lateral, 5, 0.16, 0.1, ORB_SPRITE.sparkle, color, (i, r) => {
-      const a = (i / 5) * Math.PI * 2 + r * 0.4;
-      return { vx: Math.cos(a) * 2.8, vy: Math.sin(a) * 2.8 + 0.9, vz: (r - 0.5) * 0.8 };
+    this.emit(e.id, e.tick, e.x, e.y + 0.32, e.lateral, 1, 0.16, 0.36, ORB_SPRITE.star, color, () => ({ vx: 0, vy: 0.3, vz: 0 }));
+    this.emit(e.id, e.tick, e.x, e.y + 0.32, e.lateral, 8, 0.2, 0.2, ORB_SPRITE.sparkle, color, (i, r) => {
+      const a = (i / 8) * Math.PI * 2 + r * 0.3;
+      const sp = 3.4 + r * 1.8;
+      return { vx: Math.cos(a) * sp, vy: Math.sin(a) * sp + 0.8, vz: (r - 0.5) * 1.2 };
     });
-    this.emit(e.id, e.tick, e.x, e.y + 0.35, e.lateral, 2, 0.18, 0.08, ORB_SPRITE.streak, color, (i, r) => ({
-      vx: -ROUTE_DIR.x * (1.8 + r * 1.5) + (r - 0.5) * 0.4,
-      vy: 2 + i * 0.5 + r * 0.3,
-      vz: -ROUTE_DIR.z * (1.8 + r * 1.5),
-    }));
   }
 
+  /** Purple pickup: the same pop, larger and violet. */
   pickupRare(e: { id: number; tick: number; x: number; y: number; lateral: number }, color: string): void {
-    this.emit(e.id, e.tick, e.x, e.y + 0.32, e.lateral, 7, 0.18, 0.12, ORB_SPRITE.star, color, (i, r) => {
-      const a = (i / 7) * Math.PI * 2;
-      return { vx: Math.cos(a) * 3.2, vy: Math.sin(a) * 3.2 + 1.2, vz: (r - 0.5) * 1.2 };
+    this.emit(e.id, e.tick, e.x, e.y + 0.36, e.lateral, 1, 0.18, 0.52, ORB_SPRITE.star, color, () => ({ vx: 0, vy: 0.4, vz: 0 }));
+    this.emit(e.id, e.tick, e.x, e.y + 0.36, e.lateral, 10, 0.22, 0.3, ORB_SPRITE.sparkle, color, (i, r) => {
+      const a = (i / 10) * Math.PI * 2 + r * 0.25;
+      const sp = 4.2 + r * 2;
+      return { vx: Math.cos(a) * sp, vy: Math.sin(a) * sp + 1.1, vz: (r - 0.5) * 1.4 };
     });
-    this.emit(e.id, e.tick, e.x, e.y + 0.35, e.lateral, 2, 0.2, 0.09, ORB_SPRITE.streak, color, (i, r) => ({
-      vx: -ROUTE_DIR.x * (2 + r) + (r - 0.5) * 0.4,
-      vy: 2.2 + i * 0.45,
-      vz: -ROUTE_DIR.z * (2 + r),
-    }));
   }
 
   trailComplete(e: { id: number; tick: number; x: number; y: number; lateral: number }, color: string): void {
@@ -192,13 +187,14 @@ export class OrbParticles {
       if (s.life <= 0) continue;
       const t = 1 - s.life / s.max;
       const scale = s.size0 * (1 - t) + s.size1 * t;
+      const fade = t < 0.55 ? 1 : Math.max(0, 1 - (t - 0.55) / 0.45);
       this.dummy.position.set(s.px, s.py, s.pz);
       this.dummy.quaternion.copy(this.camQ);
       this.dummy.scale.setScalar(scale);
       this.dummy.updateMatrix();
       this.mesh.setMatrixAt(i, this.dummy.matrix);
       this.spriteAttr.setX(i, s.sprite);
-      this.colorAttr.setXYZ(i, s.r, s.g, s.b);
+      this.colorAttr.setXYZ(i, s.r * fade, s.g * fade, s.b * fade);
       i++;
       if (i >= MAX) break;
     }

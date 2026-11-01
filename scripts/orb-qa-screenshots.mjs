@@ -111,7 +111,12 @@ const burst = await page.evaluate(() => {
     g.view.scene.traverse((o) => { if (o.isInstancedMesh && o.renderOrder === 650) n = o.count; });
     if (g.score.orbCount > before) { hit = true; parts = n; break; }
   }
+  // Let the star-pop travel for ~80 ms so the sparkles have left the flash.
+  if (hit) ic.advance(10, undefined, 5);
   const g = ic.game;
+  let n = 0;
+  g.view.scene.traverse((o) => { if (o.isInstancedMesh && o.renderOrder === 650) n = o.count; });
+  parts = n;
   return {
     hit,
     parts,
@@ -138,7 +143,7 @@ await boot(1, 'town');
 await gotoX(697, ap);
 await shot('orb-purple-ahead');
 
-// (d) harbour centre-line trail, seed 7, route line near 673 m.
+// (d) harbour centre-line trail, seed 7 at 283 m.
 await boot(7, 'harbour');
 await gotoX(283, ap);
 await shot('orb-harbour-trail');

@@ -31,4 +31,4 @@ A single purple star marks a mastery point about **every 250 m** (cursor **160�
 
 ## Presentation
 
-Stars stay the current small billboards (gold ~0.26 m, rare ~0.39 m) with twinkle. Pickup bursts stay short. Nothing in this pass changes size or the HUD star.
+Gold stars are about 0.44 m (roughly 8–10 px at mid-distance, capped near 18 px beside Ao), with a slow spin and an out-of-phase twinkle. Purple is 1.5× that, a saturated violet with a soft halo and a stronger twinkle. Pickup is a small star-pop, about 200 ms. Counts and placement are unchanged.
