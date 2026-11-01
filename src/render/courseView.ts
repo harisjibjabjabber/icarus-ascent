@@ -173,8 +173,8 @@ export class CourseView {
     this.orbView.sync();
   }
 
-  /** Bob / pulse collectible orbs. */
-  animate(time: number): void { this.orbView.animate(time); }
+  /** Twinkle collectible stars (camera-facing). */
+  animate(time: number, cam?: THREE.Camera, screenH = 844): void { this.orbView.animate(time, cam, screenH); }
 
   /** The floating origin moved: re-place every chunk. */
   rebase(): void { for (const v of this.views.values()) v.group.position.copy(toScene(v.chunk.x0, v.chunk.y0)); }
@@ -370,7 +370,7 @@ export class CourseView {
   }
 
   private railMesh(r: Rail): THREE.Group {
-    if (r.risky || r.dress) return this.highLineMesh(r);
+    if (r.risky && this.props?.piece('rail')) return this.highLineMesh(r);
     const { points, lateral, required } = r;
     const g = new THREE.Group();
     const curve = new THREE.CurvePath<THREE.Vector3>();
@@ -398,12 +398,10 @@ export class CourseView {
     return g;
   }
 
-  private wallMesh(w: { x0: number; x1: number; yBottom: number; yTop: number; lateral: number; required?: boolean; face?: 'shop' | 'warehouse' | 'hull' }): THREE.Mesh {
+  private wallMesh(w: { x0: number; x1: number; yBottom: number; yTop: number; lateral: number; required?: boolean }): THREE.Mesh {
     const C = COURSE_STYLE, gb = new GeoBuilder();
     const len = w.x1 - w.x0, h = w.yTop - w.yBottom, mid = w.x0 + len / 2;
     const rot: [number, number, number] = [0, ROUTE_YAW, 0];
-    if (w.face === 'warehouse') return this.warehouseWall(w, gb, len, h, mid, rot);
-    if (w.face === 'hull') return this.hullWall(w, gb, len, h, mid, rot);
     const face = w.required ? C.wallRequired : C.wall, shade = w.required ? C.wallRequiredShade : C.wallShade;
     // Rideable walls read as their own thing, never as house plaster: a turquoise azulejo-tiled face (diamond tiles
     // on the riding band), a bright gold coping (the same gold as the required rail) and, on walls you must ride,
@@ -436,64 +434,29 @@ export class CourseView {
   }
 
   /**
-   * Elevated line anchored to the right-hand facade: washing line, balcony rail, gutter or bunting.
-   * Arms run out to the building, never down through the street. A stair on the facade feeds the line.
+   * Risky high line: a painted fence panel (the grind is its top rail) and two post lanterns
+   * framing the street before it. The street mesh itself is untouched, so the safe line stays readable.
    */
   private highLineMesh(r: Rail): THREE.Group {
     const g = new THREE.Group();
-    const gb = new GeoBuilder();
-    const dress = r.dress ?? 'wash';
-    const rot: [number, number, number] = [0, ROUTE_YAW, 0];
-    const pts = r.points;
-    const x0 = pts[0].x, x1 = pts[pts.length - 1].x;
-    const yAt = (x: number) => Course.railSample(r, Math.min(Math.max(x, x0), x1)).y;
-    const facade = 4.65;
-    const rope = dress === 'gutter' ? '#8a8078' : dress === 'balcony' ? '#e0b15a' : '#e6d3b8';
-    for (let x = x0; x < x1 - 0.05; x += 1.15) {
-      const b = Math.min(x1, x + 1.15);
-      const y = (yAt(x) + yAt(b)) / 2;
-      const mid = (x + b) / 2;
-      gb.add(new THREE.BoxGeometry(b - x, dress === 'gutter' ? 0.1 : 0.055, 0.06), this.L(mid, y, r.lateral), rope, { rot, top: '#fff6e4' });
-      if (dress === 'gutter') gb.add(new THREE.BoxGeometry(b - x, 0.08, 0.18), this.L(mid, y - 0.08, r.lateral + 0.08), '#6a6058', { rot });
-      if (dress === 'balcony') gb.add(new THREE.BoxGeometry(b - x, 0.07, Math.max(0.4, facade - r.lateral - 0.45)), this.L(mid, y - 0.82, (r.lateral + 0.4 + facade) / 2), '#e7d7c4', { rot, top: '#f6ecdf' });
-      if (dress === 'bunting') {
-        const hue = (Math.round(x) % 3 === 0) ? '#c4543a' : (Math.round(x) % 3 === 1) ? '#e2b15a' : '#3d6f8a';
-        gb.add(new THREE.ConeGeometry(0.16, 0.32, 4), this.L(mid, y - 0.2, r.lateral), hue, { rot: [Math.PI, ROUTE_YAW, 0] });
-      }
-    }
+    const rail = this.props!.piece('rail')!;
+    const beacon = this.props!.piece('beacon');
     const ironParts: THREE.BufferGeometry[] = [];
-    const bracket = this.props?.piece('bracket');
-    for (let x = x0; x <= x1 + 0.01; x += 8) {
-      const y = yAt(Math.min(x, x1));
-      const arm = facade - r.lateral;
-      if (bracket) ironParts.push(this.stamp(bracket.body, (u, v, w) => ({ x: x + w, y: y + v * 0.85, lat: facade - u * (arm / 0.95) })));
-      else {
-        gb.add(new THREE.BoxGeometry(0.08, 0.07, arm), this.L(x, y, r.lateral + arm / 2), '#3a3642', { rot });
-        gb.add(new THREE.BoxGeometry(0.14, 0.4, 0.12), this.L(x, y - 0.12, facade - 0.05), '#4a3c34', { rot });
-      }
-    }
-    for (let s = 0; s < 6; s++) {
-      const yy = yAt(x0) - 1.05 + s * 0.18;
-      gb.add(new THREE.BoxGeometry(1.35, 0.14, 1.05), this.L(x0 - 9 + s * 1.45, yy, 3.9), '#cbb89a', { rot, top: '#f3e6d4' });
-    }
-    const built = gb.build();
-    if (built) { const mesh = new THREE.Mesh(built, vc(1.05)); mesh.castShadow = true; g.add(mesh); }
-    if (dress === 'wash') {
-      const names = ['cloth-shirt', 'cloth-towel', 'cloth-sock', 'cloth-sheet'];
-      let k = 0;
-      for (let x = x0 + 1.6; x < x1 - 1; x += 2.4) {
-        const piece = this.props?.piece(names[k % names.length]);
-        k++;
-        if (!piece) continue;
-        // hang on the facade side of the line, short of the riding lane
-        ironParts.push(this.stamp(piece.body, (u, v, w) => ({ x: x + u * 0.5, y: yAt(x) + v * 0.36, lat: r.lateral + 1.05 + w * 0.45 })));
-      }
-    }
-    const beacon = this.props?.piece('beacon');
     const glowParts: THREE.BufferGeometry[] = [];
-    if (beacon) {
-      const base = this.course.groundBelow(x0 - 2, 1e6)?.sample.y ?? yAt(x0) - 1.1;
-      const place = (u: number, v: number, w: number) => ({ x: x0 - 2 + u, y: base + v * 1.35, lat: facade - 0.15 + w });
+    const x0 = r.points[0].x, x1 = r.points[r.points.length - 1].x;
+    const n = Math.max(1, Math.round((x1 - x0) / 1.08));
+    for (let i = 0; i < n; i++) {
+      const a = x0 + ((x1 - x0) * i) / n, b = x0 + ((x1 - x0) * (i + 1)) / n;
+      const mid = (a + b) / 2;
+      const top = Course.railSample(r, mid).y;
+      const gnd = this.course.groundBelow(mid, top)?.sample.y ?? top - 1.1;
+      ironParts.push(this.stamp(rail.body, (u, v, w) => ({ x: a + u * (b - a), y: gnd + v * (top - gnd), lat: r.lateral + w })));
+    }
+    const mouth = x0 - 5.5;
+    const base = this.course.groundBelow(mouth, 1e6)?.sample.y ?? r.points[0].y - 1.1;
+    if (beacon) for (const lat of [-1.25, 1.25]) {
+      const sc = 1.55;
+      const place = (u: number, v: number, w: number) => ({ x: mouth + u * sc, y: base + v * sc, lat: lat + w * sc });
       ironParts.push(this.stamp(beacon.body, place));
       if (beacon.glow) glowParts.push(this.stamp(beacon.glow, place));
     }
@@ -501,34 +464,6 @@ export class CourseView {
     if (im) { const mesh = new THREE.Mesh(im, this.iron); mesh.castShadow = true; g.add(mesh); }
     if (gm) { const mesh = new THREE.Mesh(gm, this.beaconGlow); mesh.castShadow = false; g.add(mesh); }
     return g;
-  }
-
-  /** Harbour warehouse: corrugated bays and a loading door. The gold coping is the ride. */
-  private warehouseWall(w: { x0: number; x1: number; yBottom: number; yTop: number; lateral: number }, gb: GeoBuilder, len: number, h: number, mid: number, rot: [number, number, number]): THREE.Mesh {
-    const C = COURSE_STYLE;
-    gb.add(new THREE.BoxGeometry(len, h, 0.55), this.L(mid, w.yBottom + h / 2, w.lateral + 0.28), '#7d8794', { rot, top: '#aeb6c0' });
-    gb.add(new THREE.BoxGeometry(len + 0.2, 0.22, 0.7), this.L(mid, w.yBottom + 0.12, w.lateral + 0.28), '#5c534c', { rot });
-    for (let y = w.yBottom + 0.55; y < w.yTop - 0.3; y += 0.48)
-      gb.add(new THREE.BoxGeometry(len, 0.06, 0.08), this.L(mid, y, w.lateral - 0.02), '#c5ccd4', { rot });
-    gb.add(new THREE.BoxGeometry(Math.min(3.2, len * 0.35), h * 0.55, 0.08), this.L(w.x0 + 2.2, w.yBottom + h * 0.32, w.lateral - 0.04), '#2c3138', { rot });
-    gb.add(new THREE.BoxGeometry(len + 0.3, 0.22, 0.75), this.L(mid, w.yTop + 0.02, w.lateral + 0.25), C.wallCopingShade, { rot, top: C.railRequired });
-    const m = new THREE.Mesh(gb.build()!, vc(0.9));
-    m.castShadow = m.receiveShadow = true;
-    return m;
-  }
-
-  /** Moored hull: planked wood and portholes, ridden along the sheer. */
-  private hullWall(w: { x0: number; x1: number; yBottom: number; yTop: number; lateral: number }, gb: GeoBuilder, len: number, h: number, mid: number, rot: [number, number, number]): THREE.Mesh {
-    const C = COURSE_STYLE;
-    gb.add(new THREE.BoxGeometry(len, h, 0.7), this.L(mid, w.yBottom + h / 2, w.lateral + 0.4), '#5c4030', { rot, top: '#8d6848' });
-    for (let y = w.yBottom + 0.4; y < w.yTop - 0.35; y += 0.38)
-      gb.add(new THREE.BoxGeometry(len, 0.05, 0.08), this.L(mid, y, w.lateral - 0.02), '#3a281c', { rot });
-    for (let x = w.x0 + 1.6; x < w.x1 - 1; x += 2.4)
-      gb.add(new THREE.CylinderGeometry(0.18, 0.18, 0.08, 10), this.L(x, w.yBottom + h * 0.55, w.lateral - 0.02), '#9fd0de', { rot: [Math.PI / 2, 0, 0] });
-    gb.add(new THREE.BoxGeometry(len + 0.2, 0.16, 0.55), this.L(mid, w.yTop + 0.04, w.lateral + 0.2), '#c4a46a', { rot, top: C.railRequired });
-    const m = new THREE.Mesh(gb.build()!, vc(0.95));
-    m.castShadow = m.receiveShadow = true;
-    return m;
   }
 
   /** Copy a prop into chunk-local scene space. `place` is in route metres (x, height, lateral). */

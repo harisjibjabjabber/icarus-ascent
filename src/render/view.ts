@@ -445,7 +445,7 @@ export class GameView {
     this.rebaseIfNeeded(x, y);
     this.courseView?.sync();
     this.presentTime += Math.max(0, dt);
-    this.courseView?.animate(this.presentTime);
+    this.courseView?.animate(this.presentTime, this.rig.camera, this.renderer.domElement.clientHeight || 844);
     this.env.streamScenery(x, this.courseView?.course.kind === 'endless' ? (this.courseView.course as unknown as { generatedTo: number }).generatedTo : Infinity);
     const airborne = curr.mode === 'airborne';
     if (airborne && (this.trail.length === 0 || Math.abs(this.trail[this.trail.length - 1].x - x) > 0.4)) this.trail.push({ x, y });

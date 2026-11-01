@@ -135,54 +135,40 @@ export class OrbParticles {
     }
   }
 
-  /** Gold pickup burst + HUD-ward streaks. */
+  /** Gold pickup: tiny spark burst + a few HUD-ward streaks (<200 ms). */
   pickupGold(e: { id: number; tick: number; x: number; y: number; lateral: number }, color: string): void {
-    this.emit(e.id, e.tick, e.x, e.y + 0.35, e.lateral, 8, 0.28, 0.14, ORB_SPRITE.sparkle, color, (i, r) => {
-      const a = (i / 8) * Math.PI * 2 + r * 0.4;
-      return { vx: Math.cos(a) * 3.5, vy: Math.sin(a) * 3.5 + 1.2, vz: (r - 0.5) * 1.2 };
+    this.emit(e.id, e.tick, e.x, e.y + 0.32, e.lateral, 5, 0.16, 0.1, ORB_SPRITE.sparkle, color, (i, r) => {
+      const a = (i / 5) * Math.PI * 2 + r * 0.4;
+      return { vx: Math.cos(a) * 2.8, vy: Math.sin(a) * 2.8 + 0.9, vz: (r - 0.5) * 0.8 };
     });
-    this.emit(e.id, e.tick, e.x, e.y + 0.2, e.lateral, 1, 0.12, 0.55, ORB_SPRITE.ring, color, () => ({ vx: 0, vy: 0, vz: 0 }));
-    this.emit(e.id, e.tick, e.x, e.y + 0.35, e.lateral, 1, 0.12, 0.35, ORB_SPRITE.burst, color, () => ({ vx: 0, vy: 0, vz: 0 }));
-    this.emit(e.id, e.tick, e.x, e.y + 0.4, e.lateral, 3, 0.38, 0.1, ORB_SPRITE.streak, color, (i, r) => ({
-      vx: -ROUTE_DIR.x * (2 + r * 2) + (r - 0.5) * 0.5,
-      vy: 2.5 + i * 0.6 + r,
-      vz: -ROUTE_DIR.z * (2 + r * 2),
+    this.emit(e.id, e.tick, e.x, e.y + 0.35, e.lateral, 2, 0.18, 0.08, ORB_SPRITE.streak, color, (i, r) => ({
+      vx: -ROUTE_DIR.x * (1.8 + r * 1.5) + (r - 0.5) * 0.4,
+      vy: 2 + i * 0.5 + r * 0.3,
+      vz: -ROUTE_DIR.z * (1.8 + r * 1.5),
     }));
   }
 
   pickupRare(e: { id: number; tick: number; x: number; y: number; lateral: number }, color: string): void {
-    this.emit(e.id, e.tick, e.x, e.y + 0.35, e.lateral, 14, 0.35, 0.18, ORB_SPRITE.star, color, (i, r) => {
-      const a = (i / 14) * Math.PI * 2;
-      return { vx: Math.cos(a) * 4.5, vy: Math.sin(a) * 4.5 + 2, vz: (r - 0.5) * 2 };
+    this.emit(e.id, e.tick, e.x, e.y + 0.32, e.lateral, 7, 0.18, 0.12, ORB_SPRITE.star, color, (i, r) => {
+      const a = (i / 7) * Math.PI * 2;
+      return { vx: Math.cos(a) * 3.2, vy: Math.sin(a) * 3.2 + 1.2, vz: (r - 0.5) * 1.2 };
     });
-    this.emit(e.id, e.tick, e.x, e.y + 0.15, e.lateral, 1, 0.18, 0.75, ORB_SPRITE.ring, color, () => ({ vx: 0, vy: 0, vz: 0 }));
-    this.emit(e.id, e.tick, e.x, e.y + 0.25, e.lateral, 1, 0.22, 0.95, ORB_SPRITE.ring, color, () => ({ vx: 0, vy: 0, vz: 0 }));
-    this.emit(e.id, e.tick, e.x, e.y + 0.5, e.lateral, 1, 0.45, 0.35, ORB_SPRITE.flare, color, () => ({ vx: 0, vy: 0.4, vz: 0 }));
-    this.beam(e);
-  }
-
-  /** Vertical light column for rare orbs (visible at distance). */
-  private beam(e: { id: number; tick: number; x: number; y: number; lateral: number }): void {
-    this.emit(e.id, e.tick, e.x, e.y + 1.2, e.lateral, 6, 0.5, 0.22, ORB_SPRITE.flare, '#9ef0f0', (i) => ({
-      vx: 0, vy: 0.8 + i * 0.15, vz: 0,
+    this.emit(e.id, e.tick, e.x, e.y + 0.35, e.lateral, 2, 0.2, 0.09, ORB_SPRITE.streak, color, (i, r) => ({
+      vx: -ROUTE_DIR.x * (2 + r) + (r - 0.5) * 0.4,
+      vy: 2.2 + i * 0.45,
+      vz: -ROUTE_DIR.z * (2 + r),
     }));
   }
 
   trailComplete(e: { id: number; tick: number; x: number; y: number; lateral: number }, color: string): void {
-    this.emit(e.id, e.tick, e.x, e.y + 0.5, e.lateral, 10, 0.4, 0.16, ORB_SPRITE.swirl, color, (i, r) => {
-      const a = (i / 10) * Math.PI * 2;
-      return { vx: Math.cos(a) * 2.5, vy: 3 + r * 2, vz: Math.sin(a) * 1.5 };
+    this.emit(e.id, e.tick, e.x, e.y + 0.45, e.lateral, 6, 0.22, 0.11, ORB_SPRITE.sparkle, color, (i, r) => {
+      const a = (i / 6) * Math.PI * 2;
+      return { vx: Math.cos(a) * 2, vy: 2.2 + r, vz: Math.sin(a) * 1.2 };
     });
   }
 
-  /** Idle shimmer near an orb (deterministic). */
-  idleTwinkle(id: number, tick: number, x: number, y: number, lateral: number, color: string): void {
-    if (this.low) return;
-    if (orbRand(id, tick) > 0.08) return;
-    this.emit(id, tick, x, y + 0.2, lateral, 1, 0.35, 0.08, ORB_SPRITE.sparkle, color, (_, r) => ({
-      vx: (r - 0.5) * 0.4, vy: 0.6 + r * 0.5, vz: (orbRand(id, tick + 1) - 0.5) * 0.4,
-    }));
-  }
+  /** Unused in-run (stars twinkle in OrbView); kept for API compatibility. */
+  idleTwinkle(_id: number, _tick: number, _x: number, _y: number, _lateral: number, _color: string): void {}
 
   update(dt: number): void {
     for (const s of this.slots) {

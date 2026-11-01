@@ -5,7 +5,7 @@
 import * as THREE from 'three';
 import type { RiderState } from '../sim/types';
 import type { Course } from './course';
-import { toon } from '../render/materials';
+import { ORB_ASSETS, ORB_SPRITE } from '../orb/orbAssets';
 import { toScene } from '../render/space';
 
 export type OrbTier = 'common' | 'rare';
@@ -27,26 +27,26 @@ export interface Orb {
 
 export type OrbPlacement = Omit<Orb, 'id'>;
 
+/** World / screen presentation (dainty sparkle stars). */
+export const ORB_VIS = {
+  goldSize: 0.26,
+  rareSize: 0.39,
+  maxBodyPx: 14,
+  nearFadeStart: 0.9,
+  nearFadeEnd: 3,
+} as const;
+
 export const ORB = {
-  /** Per gold orb (banked immediately). */
   gold: 75,
-  /** Per purple orb. */
   rare: 1200,
-  /** Bonus when every orb in a trail is collected. */
   trailComplete: 400,
-  /** Extra gold per consecutive pickup within the streak window (capped). */
   streakStep: 8,
   streakMax: 64,
-  /** Sim seconds: longer gap resets the streak pitch. */
   streakGap: 0.6,
-  /** A step longer than this (m) is a teleport, not a pickup. */
   stepMax: 4,
-  /** Feet may be this far below / above an air orb (m). */
   airBelow: 1.15,
   airAbove: 2.4,
-  /** Grind lock vs a rail / high-line orb (m). */
   grindBand: 0.85,
-  /** Route orb: vertical band around the floating orb (m). */
   routeBand: 1.25,
 } as const;
 
@@ -61,10 +61,9 @@ export function orbPopup(tier: OrbTier): string {
 }
 
 export function orbBurstColor(tier: OrbTier): string {
-  return tier === 'rare' ? '#6ecfd4' : '#ffd36b';
+  return tier === 'rare' ? '#b088ff' : '#ffc857';
 }
 
-/** Set pieces and phrase builders push placements here; ids are assigned when the chunk is built. */
 export function addOrb(placements: OrbPlacement[], tier: OrbTier, x: number, y: number, lateral: number, pickup: OrbPickup): void {
   placements.push({ x, y, lateral, tier, pickup, trailId: 0, trailIdx: 0, trailLen: 1 });
 }
@@ -85,10 +84,6 @@ export function placementCommonRoute(x: number, y: number, lateral = 0): OrbPlac
   return { x, y, lateral, tier: 'common', pickup: 'route', trailId: 0, trailIdx: 0, trailLen: 1 };
 }
 
-/**
- * Did this tick pass an orb? Air orbs need a real launch arc; grind orbs need a grind;
- * route orbs need the rider near the band. Teleports collect nothing.
- */
 export function orbTouched(o: Orb, prevX: number, st: RiderState): boolean {
   if (!(st.x > prevX) || st.x - prevX > ORB.stepMax) return false;
   if (o.x <= prevX - 0.05 || o.x > st.x + 0.2) return false;
@@ -98,35 +93,49 @@ export function orbTouched(o: Orb, prevX: number, st: RiderState): boolean {
   return Math.abs(st.y - o.y) <= ORB.routeBand;
 }
 
-const COMMON_BODY = '#ffc857';
-const COMMON_EMI = '#ff9a2a';
-const RARE_BODY = '#7a6cff';
-const RARE_EMI = '#4ecdc4';
-const HALO_COMMON = '#ffe9a8';
-const HALO_RARE = '#9ef0f0';
+const ATLAS_COLS = 8;
+/** Star body + bright core + thin cross glints per collectible. */
+const PARTS_PER_ORB = 4;
 
-/** Instanced emissive spheres + soft halo sprites. */
+const GOLD_STAR = new THREE.Color('#ffc857');
+const GOLD_CORE = new THREE.Color('#fff4c8');
+const GOLD_GLINT = new THREE.Color('#ffe8a0');
+const RARE_STAR = new THREE.Color('#9a72ff');
+const RARE_CORE = new THREE.Color('#e8d4ff');
+const RARE_GLINT = new THREE.Color('#c4a8ff');
+
+const smooth = (a: number, b: number, x: number) => {
+  const t = clamp((x - a) / Math.max(1e-6, b - a), 0, 1);
+  return t * t * (3 - 2 * t);
+};
+const clamp = (n: number, a: number, b: number) => Math.max(a, Math.min(b, n));
+
+function worldSizeForScreen(cam: THREE.Camera, pos: THREE.Vector3, base: number, maxPx: number, screenH: number): number {
+  if (!(cam instanceof THREE.PerspectiveCamera)) return base;
+  const dist = Math.max(0.6, cam.position.distanceTo(pos));
+  let s = base * smooth(ORB_VIS.nearFadeStart, ORB_VIS.nearFadeEnd, dist);
+  const vFov = (cam.fov * Math.PI) / 180;
+  const pxPerM = screenH / (2 * Math.tan(vFov / 2)) / dist;
+  const px = s * pxPerM;
+  if (px > maxPx) s *= maxPx / px;
+  return s;
+}
+
+/** Kenney atlas billboards: 4-point star, core, cross glint; camera-facing. */
 export class OrbView {
   private taken = new Set<number>();
   private list: Orb[] = [];
   private dummy = new THREE.Object3D();
-  private common: THREE.InstancedMesh | null = null;
-  private rare: THREE.InstancedMesh | null = null;
-  private haloCommon: THREE.InstancedMesh | null = null;
-  private haloRare: THREE.InstancedMesh | null = null;
-  private commonMat = toon(COMMON_BODY, { emissive: COMMON_EMI, emissiveIntensity: 1.45 });
-  private rareMat = toon(RARE_BODY, { emissive: RARE_EMI, emissiveIntensity: 1.65 });
-  private haloMatCommon = new THREE.MeshBasicMaterial({ color: HALO_COMMON, transparent: true, opacity: 0.58, depthWrite: false, fog: false, blending: THREE.AdditiveBlending });
-  private haloMatRare = new THREE.MeshBasicMaterial({ color: HALO_RARE, transparent: true, opacity: 0.68, depthWrite: false, fog: false, blending: THREE.AdditiveBlending });
-  private bodyGeo = new THREE.SphereGeometry(1, 10, 8);
-  private haloGeo = new THREE.SphereGeometry(1, 8, 6);
+  private worldPos = new THREE.Vector3();
+  private rollQ = new THREE.Quaternion();
+  private mesh: THREE.InstancedMesh | null = null;
+  private spriteAttr: THREE.InstancedBufferAttribute | null = null;
+  private colorAttr: THREE.InstancedBufferAttribute | null = null;
+  private camQ = new THREE.Quaternion();
   private signature = '';
 
   constructor(readonly parent: THREE.Group, readonly course: Course) {
-    this.commonMat.side = THREE.DoubleSide;
-    this.rareMat.side = THREE.DoubleSide;
-    this.commonMat.fog = false;
-    this.rareMat.fog = false;
+    void this.loadAtlas();
   }
 
   hide(id: number): void {
@@ -147,49 +156,60 @@ export class OrbView {
     this.layout();
   }
 
-  animate(time: number): void {
-    const pulse = 1 + Math.sin(time * 5.5) * 0.04;
-    this.commonMat.emissiveIntensity = 1.02 + Math.sin(time * 5.5) * 0.18;
-    this.rareMat.emissiveIntensity = 1.15 + Math.sin(time * 4.2) * 0.22;
-    let ic = 0, ir = 0;
+  /** `cam` used for billboarding, near-camera fade and screen-space size clamp. */
+  animate(time: number, cam?: THREE.Camera, screenH = 844): void {
+    if (cam) cam.getWorldQuaternion(this.camQ);
+    if (!this.mesh || !this.shaderMat) return;
+    let i = 0;
     for (const o of this.list) {
-      const bob = Math.sin(time * 2.3 + o.id * 0.17) * 0.11;
-      const base = o.tier === 'rare' ? 0.52 : 0.36;
-      const s = base * pulse * (1 + Math.sin(time * 5.5 + o.id) * 0.035);
-      this.dummy.position.copy(toScene(o.x, o.y + bob, o.lateral));
-      this.dummy.rotation.set(Math.sin(time * 2.8 + o.id * 0.2) * 0.22, time * 2.1 + o.id * 0.11, 0);
-      this.dummy.scale.setScalar(s);
-      this.dummy.updateMatrix();
-      const idx = o.tier === 'rare' ? ir++ : ic++;
-      const mesh = o.tier === 'rare' ? this.rare : this.common;
-      const halo = o.tier === 'rare' ? this.haloRare : this.haloCommon;
-      mesh?.setMatrixAt(idx, this.dummy.matrix);
-      if (halo) {
-        this.dummy.scale.setScalar(s * (o.tier === 'rare' ? 3.8 : 3.2));
-        this.dummy.rotation.y += 0.4;
+      const rare = o.tier === 'rare';
+      const base = rare ? ORB_VIS.rareSize : ORB_VIS.goldSize;
+      const phase = o.trailIdx * 1.05 + o.id * 0.11;
+      const twAmp = rare ? 0.14 : 0.1;
+      const tw = 1 + Math.sin(time * 3.4 + phase * 2.1) * twAmp + (rare ? Math.sin(time * 5.2 + phase) * 0.06 : 0);
+      const bob = Math.sin(time * 2.0 + o.id * 0.13) * 0.035;
+      toScene(o.x, o.y + bob, o.lateral, this.worldPos);
+      let starS = base * tw;
+      if (cam) starS = worldSizeForScreen(cam, this.worldPos, starS, ORB_VIS.maxBodyPx, screenH);
+      const roll = time * 0.55 + o.id * 0.17;
+      this.rollQ.setFromAxisAngle(new THREE.Vector3(0, 0, 1), roll);
+      const parts: { sprite: number; scale: number; color: THREE.Color }[] = [
+        { sprite: ORB_SPRITE.star, scale: starS, color: rare ? RARE_STAR : GOLD_STAR },
+        { sprite: ORB_SPRITE.sparkle, scale: starS * 0.38, color: rare ? RARE_CORE : GOLD_CORE },
+        { sprite: ORB_SPRITE.streak, scale: starS * 0.55, color: rare ? RARE_GLINT : GOLD_GLINT },
+        { sprite: ORB_SPRITE.streak, scale: starS * 0.55, color: rare ? RARE_GLINT : GOLD_GLINT },
+      ];
+      for (let p = 0; p < PARTS_PER_ORB; p++) {
+        const part = parts[p];
+        let scale = part.scale * (p >= 2 ? 0.22 : 1);
+        if (p >= 2) scale *= 0.85 + 0.15 * Math.sin(time * 4.1 + phase + p);
+        this.dummy.position.copy(this.worldPos);
+        this.dummy.quaternion.copy(this.camQ);
+        this.dummy.quaternion.multiply(this.rollQ);
+        if (p === 3) this.dummy.rotateZ(Math.PI / 2);
+        const bright = p === 0 ? tw : p === 1 ? 1.15 + twAmp * 0.5 : 0.45;
+        this.dummy.scale.set(scale * bright, scale * bright, 1);
         this.dummy.updateMatrix();
-        halo.setMatrixAt(idx, this.dummy.matrix);
+        this.mesh.setMatrixAt(i, this.dummy.matrix);
+        this.spriteAttr!.setX(i, part.sprite);
+        this.colorAttr!.setXYZ(i, part.color.r * bright, part.color.g * bright, part.color.b * bright);
+        i++;
       }
     }
-    if (this.common?.instanceMatrix) this.common.instanceMatrix.needsUpdate = true;
-    if (this.rare?.instanceMatrix) this.rare.instanceMatrix.needsUpdate = true;
-    if (this.haloCommon?.instanceMatrix) this.haloCommon.instanceMatrix.needsUpdate = true;
-    if (this.haloRare?.instanceMatrix) this.haloRare.instanceMatrix.needsUpdate = true;
+    this.mesh.count = i;
+    this.mesh.instanceMatrix.needsUpdate = true;
+    this.spriteAttr!.needsUpdate = true;
+    this.colorAttr!.needsUpdate = true;
   }
 
   dispose(): void {
-    for (const m of [this.common, this.rare, this.haloCommon, this.haloRare]) {
-      if (!m) continue;
-      this.parent.remove(m);
-      m.dispose();
+    if (this.mesh) {
+      this.parent.remove(this.mesh);
+      this.mesh.geometry.dispose();
+      (this.mesh.material as THREE.Material).dispose();
+      this.mesh = null;
     }
-    this.common = this.rare = this.haloCommon = this.haloRare = null;
-    this.bodyGeo.dispose();
-    this.haloGeo.dispose();
-    this.commonMat.dispose();
-    this.rareMat.dispose();
-    this.haloMatCommon.dispose();
-    this.haloMatRare.dispose();
+    this.spriteAttr = this.colorAttr = null;
   }
 
   private layout(): void {
@@ -202,62 +222,77 @@ export class OrbView {
       }
     }
     this.list = list;
-    const nC = Math.max(1, list.filter((o) => o.tier === 'common').length);
-    const nR = Math.max(1, list.filter((o) => o.tier === 'rare').length);
-    this.common = this.ensureTier(this.common, this.commonMat, nC, 'common');
-    this.rare = this.ensureTier(this.rare, this.rareMat, nR, 'rare');
-    this.haloCommon = this.ensureHalo(this.haloCommon, this.haloMatCommon, nC, 'common');
-    this.haloRare = this.ensureHalo(this.haloRare, this.haloMatRare, nR, 'rare');
-    let ic = 0, ir = 0;
-    for (const o of list) {
-      const idx = o.tier === 'rare' ? ir++ : ic++;
-      const mesh = o.tier === 'rare' ? this.rare! : this.common!;
-      const bob = 0;
-      const base = o.tier === 'rare' ? 0.52 : 0.36;
-      this.dummy.position.copy(toScene(o.x, o.y + bob, o.lateral));
-      this.dummy.quaternion.identity();
-      this.dummy.scale.setScalar(base);
-      this.dummy.updateMatrix();
-      mesh.setMatrixAt(idx, this.dummy.matrix);
-      const halo = o.tier === 'rare' ? this.haloRare! : this.haloCommon!;
-      this.dummy.scale.setScalar(base * (o.tier === 'rare' ? 3.8 : 3.2));
-      this.dummy.updateMatrix();
-      halo.setMatrixAt(idx, this.dummy.matrix);
-    }
-    if (this.common) this.common.count = list.filter((o) => o.tier === 'common').length;
-    if (this.rare) this.rare.count = list.filter((o) => o.tier === 'rare').length;
-    if (this.haloCommon) this.haloCommon.count = this.common?.count ?? 0;
-    if (this.haloRare) this.haloRare.count = this.rare?.count ?? 0;
+    const cap = Math.max(1, list.length * PARTS_PER_ORB);
+    this.ensureCapacity(cap);
     this.animate(typeof performance !== 'undefined' ? performance.now() / 1000 : 0);
   }
 
-  private ensureTier(prev: THREE.InstancedMesh | null, mat: THREE.Material, cap: number, tier: OrbTier): THREE.InstancedMesh | null {
-    if (!this.list.some((o) => o.tier === tier)) {
-      if (prev) { this.parent.remove(prev); prev.dispose(); }
-      return null;
+  private ensureCapacity(cap: number): void {
+    if (!this.shaderMat) return;
+    if (this.mesh && this.mesh.instanceMatrix.count >= cap) return;
+    if (this.mesh) {
+      this.parent.remove(this.mesh);
+      this.mesh.geometry.dispose();
     }
-    if (prev && prev.count >= cap) return prev;
-    if (prev) { this.parent.remove(prev); prev.dispose(); }
-    const m = new THREE.InstancedMesh(this.bodyGeo, mat, cap);
-      m.frustumCulled = false;
-      m.castShadow = false;
-      m.renderOrder = 520;
-    this.parent.add(m);
-    return m;
+    const geo = new THREE.PlaneGeometry(1, 1);
+    this.spriteAttr = new THREE.InstancedBufferAttribute(new Float32Array(cap), 1);
+    this.colorAttr = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3), 3);
+    geo.setAttribute('sprite', this.spriteAttr);
+    geo.setAttribute('iColor', this.colorAttr);
+    this.mesh = new THREE.InstancedMesh(geo, this.shaderMat, cap);
+    this.mesh.frustumCulled = false;
+    this.mesh.renderOrder = 521;
+    this.mesh.count = 0;
+    this.parent.add(this.mesh);
   }
 
-  private ensureHalo(prev: THREE.InstancedMesh | null, mat: THREE.Material, cap: number, tier: OrbTier): THREE.InstancedMesh | null {
-    if (!this.list.some((o) => o.tier === tier)) {
-      if (prev) { this.parent.remove(prev); prev.dispose(); }
-      return null;
-    }
-    if (prev && prev.count >= cap) return prev;
-    if (prev) { this.parent.remove(prev); prev.dispose(); }
-    const m = new THREE.InstancedMesh(this.haloGeo, mat, cap);
-      m.frustumCulled = false;
-      m.castShadow = false;
-      m.renderOrder = 520;
-    this.parent.add(m);
-    return m;
+  private shaderMat: THREE.ShaderMaterial | null = null;
+
+  private createAtlasMaterial(tex: THREE.Texture): THREE.ShaderMaterial {
+    return new THREE.ShaderMaterial({
+      uniforms: { map: { value: tex }, cols: { value: ATLAS_COLS } },
+      vertexShader: `
+        attribute float sprite;
+        attribute vec3 iColor;
+        varying vec2 vUv;
+        varying vec3 vColor;
+        uniform float cols;
+        void main() {
+          vColor = iColor;
+          float col = floor(sprite + 0.01);
+          vUv = vec2((col + uv.x) / cols, uv.y);
+          vec4 mv = modelViewMatrix * instanceMatrix * vec4(position, 1.0);
+          gl_Position = projectionMatrix * mv;
+        }`,
+      fragmentShader: `
+        uniform sampler2D map;
+        varying vec2 vUv;
+        varying vec3 vColor;
+        void main() {
+          vec4 t = texture2D(map, vUv);
+          if (t.a < 0.02) discard;
+          gl_FragColor = vec4(vColor, t.a);
+        }`,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      fog: false,
+    });
+  }
+
+  private async loadAtlas(): Promise<void> {
+    const url = ORB_ASSETS.tex.atlas;
+    if (!url || typeof document === 'undefined') return;
+    const tex = await new Promise<THREE.Texture | null>((resolve) => {
+      new THREE.TextureLoader().load(url, (t) => {
+        t.colorSpace = THREE.SRGBColorSpace;
+        t.magFilter = THREE.LinearFilter;
+        t.minFilter = THREE.LinearFilter;
+        resolve(t);
+      }, undefined, () => resolve(null));
+    });
+    if (!tex) return;
+    this.shaderMat = this.createAtlasMaterial(tex);
+    this.layout();
   }
 }

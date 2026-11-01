@@ -708,8 +708,10 @@ export class EndlessCourse extends Course {
   built = 0;
   recycled = 0;
   private nextTrailId = 1;
-  /** Course x where the next spacing-based rare orb may spawn (~150–250 m apart). */
-  private nextRareAt = 0;
+  /** No second gold trail starts before this x (breather after each line). */
+  private rhythm = { quietUntil: 0 };
+  /** Next mastery star may appear at or after this course x. */
+  private nextRareX = { at: 0 };
 
   /** `x0` shifts the whole route (precision tests); `script` fixes the phrase list (tests). */
   constructor(seed: number, opts: { x0?: number; script?: string[]; d?: number; zones?: string[] } = {}) {
@@ -719,7 +721,9 @@ export class EndlessCourse extends Course {
     this.asm = new Assembler(seed, opts.script ? { ids: opts.script, d: opts.d ?? 0.5 } : undefined, this.zones);
     this.endX = (opts.x0 ?? 0) - 10;
     this.originX = this.endX;
-    this.nextRareAt = this.endX + 90 + mulberry32(seed)() * 60;
+    const r0 = mulberry32(seed)();
+    this.rhythm.quietUntil = this.endX + 12;
+    this.nextRareX.at = this.endX + 160 + r0 * 80;
     this.generateTo(this.endX + STREAM.ahead);
   }
   /** Where the route begins (distance is measured from startX). */
@@ -762,23 +766,26 @@ export class EndlessCourse extends Course {
     const last = surfaces[surfaces.length - 1];
     const end = last.points[last.points.length - 1];
     const trailPlacements: OrbPlacement[] = [];
-    const nextRareX = { at: this.nextRareAt };
     stampOrbTrails(trailPlacements, {
       phraseId: plan.spec.id,
       chunkX0: this.endX,
       chunkX1: end.x,
       setPiece: plan.setPiece,
+      connector: plan.connector,
+      breather: plan.wave.phase === 'breather',
+      speed: plan.spec.cpSpeed || 13,
       surfaces,
       rails,
       walls,
       gaps,
       features: b.features,
+      obstacles,
       yAt: ground,
       rng: this.asm.rngFor(i),
       nextTrailId: () => this.nextTrailId++,
-      nextRareX,
+      rhythm: this.rhythm,
+      nextRareX: this.nextRareX,
     });
-    this.nextRareAt = nextRareX.at;
     const orbs: Orb[] = trailPlacements.map((q) => ({ id: this.ids.h++, ...q }));
     const chunk: Chunk = {
       id: this.ids.c++, x0: this.endX, x1: end.x, y0: this.endY, y1: end.y, title: plan.spec.title, spec: plan.spec.id, tier: plan.spec.tier,
