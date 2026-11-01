@@ -191,7 +191,9 @@ export function buildTownChunk(kit: Kit, k: number, seed: number, ground: Ground
   const streetY = (x: number) => { const g = ground(x); return g.gap ? level(ground, x) - 7 : g.y - 0.14; };
   const canalY = (x: number) => level(ground, x) - 6.5;
   ribbon(-T.front, -T.streetEdge, streetY, T.pavement, T.pavementAlt);
-  if (!harbour) ribbon(T.streetEdge, T.front, streetY, T.pavement, T.pavementAlt);
+  // right pavement always (in the harbour it runs out to the quay edge): no tall plain quay face beside the track
+  // that reads like a wall you could ride; only the turquoise course walls are rideable
+  ribbon(T.streetEdge, harbour ? T.front + 2 : T.front, streetY, T.pavement, T.pavementAlt);
   ribbon(-T.front - 0.2, T.front + 0.2, canalY, T.water, T.water);
   ribbon(-26, -T.front, (x) => level(ground, x) - 0.2, T.pavementAlt, T.pavementAlt);
   if (!harbour) ribbon(T.front, 26, (x) => level(ground, x) - 0.2, T.pavementAlt, T.pavementAlt);

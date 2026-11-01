@@ -23,7 +23,8 @@ export const COURSE_STYLE = {
   receivePost: '#2fb39a',
   postBase: '#3d3a44',
   rail: '#3d3a44', railPost: '#34313b', railRequired: '#ffc44d',
-  wall: '#f4ead9', wallShade: '#dccdbb', wallTrim: '#c96a42', wallFrieze: '#3c6fa8', wallRequired: '#cdeadc', wallRequiredShade: '#a9d3c0',
+  wall: '#3fa9ad', wallShade: '#2b7f86', wallTrim: '#c96a42', wallFrieze: '#3c6fa8', wallRequired: '#35b3b3', wallRequiredShade: '#23848c',
+  wallTile: '#d9f4ee', wallTileEdge: '#f6e7b8', wallCopingShade: '#b8862e',
   wallPlinth: '#a9978a',
   marker: '#5d4f6e',
   pot: '#cf6d3f', potDark: '#a8502c', potBand: '#3c6fa8', potPaint: '#f2d7a8',
@@ -297,13 +298,31 @@ export class CourseView {
     const len = w.x1 - w.x0, h = w.yTop - w.yBottom, mid = w.x0 + len / 2;
     const rot: [number, number, number] = [0, ROUTE_YAW, 0];
     const face = w.required ? C.wallRequired : C.wall, shade = w.required ? C.wallRequiredShade : C.wallShade;
-    // whitewashed plaster/harbour wall (riding face at w.lateral): stone plinth, blue tile band, terracotta coping
+    // Rideable walls read as their own thing, never as house plaster: a turquoise azulejo-tiled face (diamond tiles
+    // on the riding band), a bright gold coping (the same gold as the required rail) and, on walls you must ride,
+    // gold chevrons pointing the way. Optional walls are garden/terrace walls with flower boxes on top.
     gb.add(new THREE.BoxGeometry(len, h, 0.5), this.L(mid, w.yBottom + h / 2, w.lateral + 0.25), shade, { rot, top: face });
-    gb.add(new THREE.BoxGeometry(len + 0.2, Math.min(1.2, h * 0.15), 0.7), this.L(mid, w.yBottom + Math.min(1.2, h * 0.15) / 2, w.lateral + 0.25), C.wallPlinth, { rot });
-    const fb = Math.min(0.42, h * 0.12), fy = w.yTop - 0.3 - fb / 2;
-    gb.add(new THREE.BoxGeometry(len, fb, 0.04), this.L(mid, fy, w.lateral - 0.01), C.wallFrieze, { rot });
-    for (let x = w.x0 + 0.3; x < w.x1 - 0.1; x += 0.6) gb.add(new THREE.BoxGeometry(0.2, 0.2, 0.06), this.L(x, fy, w.lateral - 0.03), '#f2efe6', { rot: [Math.PI / 4, ROUTE_YAW, 0] });
-    gb.add(new THREE.BoxGeometry(len + 0.3, 0.2, 0.8), this.L(mid, w.yTop + 0.02, w.lateral + 0.25), C.potDark, { rot, top: C.wallTrim });
+    const ph = Math.min(1.0, h * 0.12);
+    gb.add(new THREE.BoxGeometry(len + 0.2, ph, 0.7), this.L(mid, w.yBottom + ph / 2, w.lateral + 0.25), C.wallPlinth, { rot });
+    const g0 = this.course.groundBelow(mid, 1e6)?.sample.y ?? w.yBottom + h / 2;
+    const band = [Math.max(w.yBottom + ph + 0.5, Math.min(g0 + 0.6, w.yTop - 2.6)), 0];
+    band[1] = Math.min(w.yTop - 0.6, band[0] + 2.4);
+    for (let x = w.x0 + 0.45; x < w.x1 - 0.2; x += 0.9) for (let yy = band[0]; yy <= band[1] + 1e-6; yy += 0.8)
+      gb.add(new THREE.BoxGeometry(0.42, 0.42, 0.05), this.L(x + ((yy - band[0]) / 0.8 % 2 ? 0.45 : 0), yy, w.lateral - 0.02), C.wallTile, { rot: [0, ROUTE_YAW, Math.PI / 4] });
+    gb.add(new THREE.BoxGeometry(len, 0.12, 0.05), this.L(mid, band[0] - 0.45, w.lateral - 0.02), C.wallTileEdge, { rot });
+    gb.add(new THREE.BoxGeometry(len, 0.12, 0.05), this.L(mid, band[1] + 0.45, w.lateral - 0.02), C.wallTileEdge, { rot });
+    if (w.required) for (let x = w.x0 + 1.5; x < w.x1 - 1; x += 3.2) {
+      const cy = (band[0] + band[1]) / 2;
+      for (const sd of [1, -1]) gb.add(new THREE.BoxGeometry(0.7, 0.16, 0.06), this.L(x + 0.22, cy + sd * 0.22, w.lateral - 0.05), C.railRequired, { rot: [0, ROUTE_YAW, -sd * Math.PI / 4] });
+    }
+    gb.add(new THREE.BoxGeometry(len + 0.3, 0.24, 0.8), this.L(mid, w.yTop + 0.02, w.lateral + 0.25), C.wallCopingShade, { rot, top: C.railRequired });
+    if (!w.required) {
+      const rng = mulberry32(((w.x0 * 977) | 0) >>> 0);
+      for (let x = w.x0 + 1.2; x < w.x1 - 1; x += 2.6) {
+        gb.add(new THREE.BoxGeometry(1.4, 0.3, 0.4), this.L(x, w.yTop + 0.29, w.lateral + 0.35), C.potDark, { rot, top: C.pot });
+        for (let k = 0; k < 5; k++) { const fc = C.flowers[Math.floor(rng() * C.flowers.length)]; gb.add(blob(0, 0.1, rng()), this.L(x - 0.5 + k * 0.25, w.yTop + 0.52, w.lateral + 0.35), k % 2 ? C.leaf : fc, { scale: 0.17, top: k % 2 ? C.leafTop : fc }); }
+      }
+    }
     const m = new THREE.Mesh(gb.build()!, vc(0.9));
     m.castShadow = m.receiveShadow = true;
     return m;
