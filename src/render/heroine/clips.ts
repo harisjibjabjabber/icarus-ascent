@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { E, setRestraintReference, type ClipDef, type Pose, type V3, type Key } from './kit';
 
 /**
- * Ao's performance, authored for the Icarus board (regular stance: left foot to the nose, +X).
+ * Ao's performance, authored for the broom (ridden like a skateboard) (regular stance: left foot to the nose, +X).
  * She faces +Z (the rider's right, away from the chase camera), so the camera reads her back,
  * hair and three-quarter profile; the chest opens toward travel and the head turns further.
  * Appeal rules: an S-curve in every key pose (hips set back and counter-tilted against the

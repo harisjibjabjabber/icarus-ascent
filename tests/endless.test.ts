@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { Simulation } from '../src/sim/simulation';
 import { Course, type Chunk } from '../src/course/course';
-import { EndlessCourse, LIBRARY, PHRASES, SPEC, STREAM, buildPhrase, connectorFor, difficultyAt, maxTier, maxRequiredRun, netDrop } from '../src/course/endless';
+import { EndlessCourse, LIBRARY, PHRASES, SPEC, STREAM, buildPhrase, connectorFor, maxTier, maxRequiredRun, netDrop } from '../src/course/endless';
 import { Autopilot } from '../src/diag/autopilot';
 import { Recorder, replayHeadless } from '../src/diag/recorder';
 import { TUNING } from '../src/tuning';
@@ -77,9 +77,9 @@ describe('assembly', () => {
     expect(late.filter((t) => t === 3).length).toBeGreaterThan(0);
     for (let s = 1; s <= 60; s++) {
       const cs = generate(s, 5000);
-      for (const c of cs) if (!c.connector) expect(c.tier!).toBeLessThanOrEqual(maxTier(difficultyAt(c.x0 + 10)));
+      for (const c of cs) if (!c.connector) expect(c.tier!).toBeLessThanOrEqual(maxTier(c.difficulty!)); // assembled under the wave's difficulty (it may start just into the next phase)
       let run = 0;
-      for (const c of cs) { run = SPEC[c.spec!].required ? run + 1 : 0; expect(run).toBeLessThanOrEqual(maxRequiredRun(c.difficulty!)); }
+      for (const c of cs) { if (c.setPiece) { run = 0; continue; } run = SPEC[c.spec!].required ? run + 1 : 0; expect(run).toBeLessThanOrEqual(maxRequiredRun(c.difficulty!)); }
     }
     expect(maxRequiredRun(1)).toBeGreaterThan(maxRequiredRun(0));
   });

@@ -36,9 +36,11 @@ describe('render quality manager', () => {
     const q = new QualityManager('', true);
     const scales: number[] = [];
     q.onScale = (s) => scales.push(s);
-    feed(q, 52, AUTO.warmup + AUTO.window * 3 + 0.5);
+    feed(q, 52, AUTO.warmup + AUTO.window + 0.5);
     expect(q.level.name).toBe('high');
-    expect(q.scale).toBeCloseTo(QUALITY.high.pixelRatio - 3 * AUTO.step);
+    expect(q.scale).toBeCloseTo(QUALITY.high.pixelRatio - AUTO.step); // first notch applies at once
+    feed(q, 52, AUTO.window * 2 + AUTO.scaleGap);
+    expect(q.scale).toBeLessThanOrEqual(QUALITY.high.pixelRatio - 2 * AUTO.step); // later notches merge (debounced)
     feed(q, 52, 30);
     expect(q.scale).toBe(QUALITY.high.minPixelRatio); // floor, still high
     expect(q.level.name).toBe('high');

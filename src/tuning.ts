@@ -1,5 +1,5 @@
 /**
- * THE single tuning resource for Icarus's Ascent.
+ * THE single tuning resource for the game (working title "Witch Broom", see src/meta.ts).
  *
  * Every gameplay threshold lives here: gesture distances, timing windows,
  * movement constants. Nothing else in the codebase should hard-code a feel value.

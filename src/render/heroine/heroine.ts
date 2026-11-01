@@ -207,7 +207,7 @@ export class Heroine {
     this.setupSprings();
   }
 
-  /** Soft painterly cel to sit in the Icarus palette; outlines tinted warm. */
+  /** Soft painterly cel to sit in the witch-town palette; outlines tinted warm. */
   private styleMaterials(): void {
     const mats = new Set<MToonMaterial>();
     this.vrm.scene.traverse((o) => { const m = (o as THREE.Mesh).material; (Array.isArray(m) ? m : [m]).forEach((x) => { if (x && (x as MToonMaterial).isMToonMaterial) mats.add(x as MToonMaterial); }); });
@@ -261,16 +261,16 @@ export class Heroine {
   setTier(t: HeroineTier, anisotropy = 1): void {
     this.tier = t;
     for (const m of this.outlineMats) m.visible = t !== 'low';
-    const hi = t === 'high' || t === 'ultra';
     this.vrm.scene.traverse((o) => {
       const mesh = o as THREE.Mesh;
       if (!mesh.isMesh) return;
       mesh.castShadow = t !== 'low';
-      // high/ultra: crisp clothes/hair textures at glancing angles (VRM textures load with anisotropy 1)
+      // crisp clothes/hair textures at glancing angles (VRM textures load with anisotropy 1). `anisotropy` is the
+      // device's value, the same on every tier: changing it re-uploads the textures, so a tier switch never does.
       for (const m of (Array.isArray(mesh.material) ? mesh.material : [mesh.material]) as (THREE.Material & Record<string, unknown>)[]) {
         for (const k of ['map', 'shadeMultiplyTexture', 'normalMap', 'matcapTexture', 'rimMultiplyTexture']) {
           const tx = m[k] as THREE.Texture | null | undefined;
-          const a = hi ? anisotropy : 1;
+          const a = anisotropy;
           if (tx && tx.isTexture && tx.anisotropy !== a) { tx.anisotropy = a; tx.needsUpdate = true; }
         }
       }

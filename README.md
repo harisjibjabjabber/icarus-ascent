@@ -1,6 +1,8 @@
-# Icarus's Ascent: movement lab (milestone 1)
+# Witch Broom (working title): movement lab
 
-TypeScript + Vite + three.js. Fully 3D, built for portrait phones, with a fixed-angle chase camera. Placeholder art only.
+A momentum game about Ao, a young witch who rides her broom like a skateboard through a Mediterranean seaside town. TypeScript + Vite + three.js, fully 3D, built for portrait phones, with a fixed-angle chase camera.
+
+The game's identity, biome plan and roadmap are in [VISION.md](VISION.md). [BRIEF.md](BRIEF.md) remains the reference for controls and movement. The working title is a single constant in `src/meta.ts`.
 
 ```
 npm install
@@ -28,7 +30,7 @@ Each build writes `version.json` (short commit + build time) and bakes the same 
 | Grind | in the air, swipe down near a rail's catch area. The catch window is generous. Jump to leave the rail, or ride it to the end | ↓ in the air |
 | Wall ride | in the air, swipe right and hold beside a right-hand wall (needs about 7 m/s or more). Release or jump to leave | hold → |
 | Grab | in the air away from a wall, swipe left/right and hold. Release before landing or you fail | hold ← / → |
-| Heel skim | in the air on ordinary ground, swipe down and keep holding into the landing. The board goes onto its heel and you slow more the longer you hold. Release or push to end it | hold ↓ into landing |
+| Heel skim | in the air on ordinary ground, swipe down and keep holding into the landing. The broom goes onto its heel and you slow more the longer you hold. Release or push to end it | hold ↓ into landing |
 | Pots | low obstacles: jump over them, or break them with your heel (hold down into the landing, or skim into them). Rolling into one or clipping it fails | |
 | Pillars | tall obstacles: smash through while doing a trick at the moment of contact, either mid-flip or having grabbed on that jump (held or already released, any duration), or heel-skimming on the ground. Normal landing rules still apply afterwards: let go of the grab and finish the flip before touchdown. A trick completed just before also counts for 26 m (lenient extra). Rolling or plain-jumping into one fails. The hitbox is forgiving: with a trick it triggers 0.8 m early, and a plain hit needs a solid overlap | |
 | Sound | "Sound" button (mute persists) | M |
@@ -86,44 +88,41 @@ Open it with `?endless` (add `&seed=N` to choose the seed), the **Endless** butt
 
 ## Art direction and render quality
 
-Look: a soft, warm, stylised late afternoon above the clouds in a mythic Greek world
-(inspired by the mood of Vicente Lucendo's "Summer Afternoon"; no code or assets copied).
-Everything is procedural: there are no external models, textures or fonts in the scene.
+Look: a warm, painterly Kiki's-Delivery-Service-style seaside town on a hill, ridden through in the morning light
+(setting and plan in [VISION.md](VISION.md)). The town is built from CC0 kit pieces and painted textures, not
+procedural boxes; licences are tracked in `art/LICENSES.md`.
 
-- **Shading** (`src/render/materials.ts`): toon material with a soft, linearly filtered
-  colour ramp (lavender shadows to warm light) and a warm rim light added at
-  `<opaque_fragment>`. Foliage sways in the wind through a per-vertex `sway` weight and
-  shared time uniform.
-- **Sky and clouds** (`src/render/environment.ts`): a gradient sky shader with a low sun
-  disc, sun glow and faint cirrus. The cloud sea is an fbm shader disc that drifts slowly
-  and fades into the haze, and one instanced mesh of cloud puffs gives it volume.
-- **Scenery**: floating islands with rocky undersides, colonnades, small temples with
-  terracotta roofs, cypress and olive trees, cumulus towers and far lavender crags. Each
-  200 m segment is merged into one vertex-coloured mesh, so it costs one draw call.
-- **Course** (`src/render/courseView.ts`): marble and travertine flagstone paths with a
-  darker curb at each lip, and cloud platforms trimmed with puffs that stay below the
-  riding line. Rails are bronze; required rails are a brighter gold. Walls are marble
-  slabs with a frieze and cornice; required walls are tinted mint. Pots are terracotta
-  amphorae with a black band, and pillars are fluted, painted columns. Gameplay markers
-  are kept: lip lines, orange takeoff posts and teal receiving posts.
-- **Rider** (`src/render/riderView.ts`): a low-poly Icarus in a red chiton with laurel and
-  feathered wings. The wings fold on the ground, half-open on rails and walls, and spread
-  and beat in the air. He uses the same pose hierarchy as before (flip, wall roll,
-  boardslide, grab, heel).
-- **Effects**: drifting petals (one instanced mesh) stay outside the route corridor, and a
-  CSS warm vignette grades only the frame edges. There is no bloom pass: on a phone it
-  would cost a full-screen render target for very little.
+- **Town** (`src/render/town/`): premade kit pieces (Quaternius Medieval Village MegaKit, Kenney Fantasy Town and
+  Pirate kits, baked into `public/town/kit.bin` by `art/pipeline/bake_town.py`) are placed along both sides of the
+  street in 40 m chunks and merged into one mesh per chunk, with a near and a far level of detail. Surfaces use a
+  painted texture array (`public/town/detail-array.webp`, built by `art/pipeline/build_detail_array.py`) multiplied by
+  per-house palette tints.
+- **Backdrop** (`src/render/environment.ts`): a gradient sky dome, a painted sky and sea panorama, a painted far-town
+  layer on the hill, a shader sea far below, distant hillside blocks, and cumulus puffs.
+- **Course** (`src/render/courseView.ts`): a cobbled street with darker kerbs, terracotta-tiled plazas, wrought-iron
+  rails, whitewashed walls with terracotta coping and a blue tile band, terracotta pots and crates or barrels for the
+  breakables. Gameplay markers (lip lines, takeoff and receiving posts, required rail and wall tints) keep their contrast.
+- **Rider** (`src/render/riderView.ts`, `src/render/heroine/`, `src/render/broom.ts`): Ao is a VRM model (look chosen
+  with `?look=witch` or the look button) with a cel-style MToon material, riding a broom whose handle is the deck her
+  feet plant on and whose straw tail trails sparkles and drags in a heel skim. Until the model loads, a procedural
+  low-poly stand-in rides instead.
+- **Post** (`src/render/post.ts`): one full-screen pass with a depth-based ink outline, a split-tone grade (lavender
+  shadows, warm lights), and on the higher tiers soft bloom and ambient occlusion.
+- **Effects**: drifting petals (one instanced mesh) stay outside the route corridor, and a CSS warm vignette grades the
+  frame edges.
 
-**Quality levels** (`src/render/quality.ts`). Pick one with `?q=low|medium|high`, which
-pins it; the dev overlay shows the current level.
+**Quality levels** (`src/render/quality.ts`). Pick one with `?q=low|medium|high|ultra`, which pins it at full
+resolution (no automatic changes); the dev overlay shows the current level. `?fps=1` shows an fps, tier, resolution
+and draw-call readout (any `?q=` also turns it on).
 
-| level  | pixel ratio | shadow map | cloud octaves | cloud puffs | petals |
-|--------|-------------|------------|---------------|-------------|--------|
-| low    | 1           | off        | 2             | 16          | 0      |
-| medium | 1.5         | 1024       | 3             | 32          | 24     |
-| high   | 2           | 2048       | 4             | 48          | 48     |
+| level  | max pixel ratio (floor) | shadow map | town shadows | textures | bloom | AO |
+|--------|-------------------------|------------|--------------|----------|-------|----|
+| low    | 1 (0.75)                | off        | no           | flat + brush | no | no |
+| medium | 1.5 (1)                 | 1024       | no           | painted detail | no | no |
+| high   | 2.25 (1.5)              | 2048       | yes          | detail + normal maps | yes | no |
+| ultra  | 3 (2)                   | 4096       | yes          | detail + normal maps | yes | yes |
 
-Phones start at medium and desktops at high. Unless the level is pinned, it steps down
-when the average frame rate stays under 48 fps for two consecutive 2 s windows, ignoring
-the first 3 s after a change and any paused time. `node scripts/perf-probe.mjs [url]`
-prints draw calls, triangles and frame time.
+Phones start at high and desktops at ultra. Unless the level is pinned, small frame-rate dips lower the render
+resolution first, and a sustained shortfall (under 45 fps for two consecutive 2 s windows) steps the tier down. A
+phone that holds the refresh cap at full resolution for about 20 s can be promoted to ultra, but never again once it
+has stepped down. `node scripts/perf-probe.mjs [url]` prints draw calls, triangles and frame time.

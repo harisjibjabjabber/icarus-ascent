@@ -28,3 +28,33 @@ describe('deterministic replay', () => {
     expect(replayed).toEqual(sim.state);
   });
 });
+
+describe('endless traces carry their zones', () => {
+  it('a run recorded on a town -> hills route replays bit-for-bit headless; traces without zones use the default order', async () => {
+    const { EndlessCourse } = await import('../src/course/endless');
+    const { Autopilot } = await import('../src/diag/autopilot');
+    const { ZoneSequence } = await import('../src/zones/sequence');
+    const { buildCourseFor } = await import('../src/diag/recorder');
+    const zones = ['town', 'hills'];
+    const seed = 4, gateAt = new ZoneSequence(zones).boundaries(10000)[0].at;
+    const course = new EndlessCourse(seed, { zones });
+    const sim = new Simulation(course);
+    const rec = new Recorder(seed, 'endless', undefined, zones);
+    const ap = new Autopilot({ minSpeed: 15, styleFlips: true });
+    for (let i = 0; i < 400 / sim.dt && sim.state.x - course.originX < gateAt + 300 && sim.state.mode !== 'failed'; i++) {
+      for (const a of ap.next(sim)) { rec.record(sim.state.tick, a); sim.enqueue(a); }
+      sim.step();
+    }
+    expect(sim.state.mode).not.toBe('failed');
+    expect(sim.state.x - course.originX).toBeGreaterThan(gateAt + 300); // rode into the hills
+    const trace = JSON.parse(JSON.stringify(rec.finish(sim.state.tick)));
+    expect(trace.zones).toEqual(zones);
+    expect(replayHeadless(trace)).toEqual(sim.state);
+    // an older trace (no zones field) builds the default route
+    const { zones: _z, ...old } = trace;
+    void _z;
+    const dflt = buildCourseFor(old) as InstanceType<typeof EndlessCourse>;
+    expect(dflt.zones.zones.map((z) => z.id)).toEqual(['town']);
+    expect((buildCourseFor(trace) as InstanceType<typeof EndlessCourse>).zones.zones.map((z) => z.id)).toEqual(zones);
+  }, 60000);
+});

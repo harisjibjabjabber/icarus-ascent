@@ -2,6 +2,10 @@ import { Course, type Chunk, type Feature, type Gap, type Obstacle, type Rail, t
 import { extend, kicker, smooth, easeOut, linear, crestPop, rollingHills, type Ease } from './shapes';
 import { TUNING } from '../tuning';
 import { mulberry32 } from '../rng';
+import { SET_PIECES, type SetPieceSpec } from './setpieces';
+import { waveAt, type WaveInfo } from './waves';
+import { ZoneSequence } from '../zones/sequence';
+import type { Zone } from '../zones/zone';
 
 /**
  * Endless assembly (brief §10, §12 "Fourth").
@@ -156,6 +160,11 @@ export const PHRASES: PhraseSpec[] = [
     build: (b) => { b.flat(10).rollers(2, 0.7, 22).flat(10); },
   },
   {
+    // zone gate: a calm, readable run between zones (rendered as an arch + fog wall; see src/zones/scenery.ts)
+    id: 'gate', title: 'Zone gate', tier: 0, style: true, required: false, entry: [6, HC], exit: [8, HC], airtime: 0.3, receiving: 'flat', cpSpeed: 13,
+    build: (b) => { b.flat(24).rollers(2, 0.7, 22).flat(24); },
+  },
+  {
     id: 'climb', title: 'Climb', tier: 0, style: false, required: false, entry: [8, HC], exit: [8, 22], airtime: 0, receiving: 'flat', cpSpeed: 13,
     build: (b) => { b.flat(4).rollers(1, 0.8, 20).slope(40, 6).rollers(2, 0.8, 20).slope(30, 5).rollers(1, 0.8, 20).flat(6); },
   },
@@ -275,12 +284,54 @@ export function netDrop(p: PhraseSpec): number {
   return v;
 }
 
-export const SPEC = Object.fromEntries(PHRASES.map((p) => [p.id, p])) as Record<string, PhraseSpec>;
-const CONNECTORS = new Set(['start', 'boost', 'bleed', 'recovery', 'climb']);
-export const LIBRARY = PHRASES.filter((p) => !CONNECTORS.has(p.id));
+/**
+ * Variable-length calm run-up (flat, with gentle rollers once it is long enough): pads the route
+ * so a set piece starts right at its wave's peak instead of drifting into the build or spilling
+ * past the peak. A connector like `recovery` (same entry/exit), never compulsory.
+ */
+export function runwaySpec(len: number): PhraseSpec {
+  return {
+    id: 'runway', title: 'Run-up', tier: 0, style: false, required: false, entry: [6, HC], exit: [8, HC], airtime: 0, receiving: 'flat', cpSpeed: 13,
+    build: (b) => {
+      const n = len >= 26 ? Math.max(1, Math.round(len / 32)) : 0;
+      if (n) { const a = (len - 22 * n) / 2; b.flat(a).rollers(n, 0.7, 22).flat(a); } else if (len >= 8) b.flat(2).rollers(1, Math.min(0.4, 0.018 * (len - 4)), len - 4).flat(2); else b.flat(len);
+    },
+  };
+}
+/** Shortest run-up the assembler inserts (m). */
+const MIN_RUNWAY = 4;
+/** A connector with `extra` m of calm run-up (as a runway) in front: same id, entry and exit, just longer. */
+export function paddedSpec(spec: PhraseSpec, extra: number): PhraseSpec {
+  const lead = runwaySpec(extra);
+  return { ...spec, build: (b, d, r) => { lead.build(b, d, r); spec.build(b, d, r); } };
+}
 
-/** Difficulty 0..1 by distance (m from the start). */
-export function difficultyAt(dist: number): number { return Math.min(1, Math.max(0, (dist - 300) / 4500)); }
+export const SPEC = Object.fromEntries([...PHRASES, runwaySpec(40), ...SET_PIECES].map((p) => [p.id, p])) as Record<string, PhraseSpec>;
+const CONNECTORS = new Set(['start', 'boost', 'bleed', 'recovery', 'climb', 'gate', 'runway']);
+
+/** Length of a phrase built at difficulty d (m). Phrases ignore their RNG for geometry, so this is exact. */
+function measureLength(spec: PhraseSpec, d: number): number {
+  const b = buildPhrase(spec, 0, 0, d, () => 0.5);
+  const c = b.chains[b.chains.length - 1].points;
+  return c[c.length - 1].x;
+}
+/** Per spec: lengths at d = 0 and 1 when the length is affine in d (every authored phrase lerps), else null. */
+const lengthCache = new Map<string, [number, number] | null>();
+export function phraseLength(spec: PhraseSpec, d: number): number {
+  if (spec.id === 'runway' || SPEC[spec.id] !== spec) return measureLength(spec, d); // one-off (padded) lengths
+  let e = lengthCache.get(spec.id);
+  if (e === undefined) {
+    const a = measureLength(spec, 0), b = measureLength(spec, 1), m = measureLength(spec, 0.37);
+    e = Math.abs(a + (b - a) * 0.37 - m) < 1e-9 ? [a, b] : null;
+    lengthCache.set(spec.id, e);
+  }
+  return e ? e[0] + (e[1] - e[0]) * d : measureLength(spec, d);
+}
+export const LIBRARY = PHRASES.filter((p) => !CONNECTORS.has(p.id));
+export { SET_PIECES };
+
+/** Difficulty 0..1 by distance (m from the start): in waves (build, peak, breather), see waves.ts. */
+export function difficultyAt(dist: number): number { return waveAt(dist).d; }
 /** Highest tier allowed at difficulty d. */
 export function maxTier(d: number): Tier { return d >= 0.35 ? 3 : d >= 0.1 ? 2 : 1; }
 /** Longest run of consecutive compulsory phrases allowed at difficulty d (longer combinations later). */
@@ -300,52 +351,191 @@ export function connectorFor(a: PhraseSpec, b: PhraseSpec, ctx: { requiredRun: n
   return null;
 }
 
-interface Plan { spec: PhraseSpec; d: number; connector: boolean }
+interface Plan { spec: PhraseSpec; d: number; connector: boolean; zone: string; wave: WaveInfo; setPiece?: boolean; gate?: { from: string; to: string } }
 
-/** Seeded phrase sequencer. Phrase i depends only on (seed, i, history). */
+/** Lookahead (m) beyond which a phrase can't reach a wave's peak / breather start, so its length needn't be measured. */
+const FIT_HORIZON = 900;
+
+/**
+ * Seeded phrase sequencer. Phrase i depends only on (seed, i, history): `x`/`y` passed to next()
+ * are where the already-assembled route ends, itself a function of the history.
+ *
+ * Wave placement (see waves.ts):
+ *  - each wave gets at most one set piece, which starts at or after the wave's peakAt and ends at
+ *    or before its breatherAt. It is picked at the start of the wave's build; build phrases are
+ *    only chosen while there is still room for it (plus its run-in recovery and speed connectors)
+ *    before the peak, and whatever is left is padded with calm run-up (the first lead-in connector
+ *    is lengthened, or a `runway` chunk goes in) so it starts right at the peak.
+ *    If it can't fit, the wave goes without one (never spilling into the breather);
+ *  - no compulsory phrase or set piece ends inside a breather: breathers hold only style air and
+ *    connectors.
+ */
 export class Assembler {
   private index = 0;
   private history: PhraseSpec[] = [];
   private requiredRun = 0;
   private queue: Plan[] = [];
-  constructor(readonly seed: number, private script?: { ids: string[]; d: number }) {}
+  /** Zone span the route is in, the last wave whose set piece was decided, and that decision. */
+  private span = 0;
+  private spWave = -1;
+  private spPlan: { wave: number; sp: SetPieceSpec; d: number } | null = null;
+  private lastSetPiece = '';
+  constructor(readonly seed: number, private script?: { ids: string[]; d: number }, readonly zones: ZoneSequence = new ZoneSequence(['town'])) {}
 
   private rng(i: number): () => number { return mulberry32((this.seed ^ Math.imul(i + 1, 0x9e3779b1)) >>> 0); }
 
-  /** Next phrase to build, given where the route currently ends. */
-  next(x: number, y: number, y0: number): Plan {
-    if (this.queue.length) return this.commit(this.queue.shift()!);
-    const i = this.index;
-    if (this.script) { // tests: a fixed phrase list, then calm recovery forever
-      const id = this.script.ids[i] ?? 'recovery';
-      return this.commit({ spec: SPEC[id], d: this.script.d, connector: CONNECTORS.has(id) });
-    }
-    if (i === 0) return this.commit({ spec: SPEC.start, d: 0, connector: true });
-    const d = difficultyAt(x);
-    const r = this.rng(i);
-    const prev = this.history[this.history.length - 1];
-    const recent = this.history.slice(-3).map((p) => p.id);
-    const tier = maxTier(d);
-    const cands = LIBRARY.filter((p) => p.tier <= tier && !recent.includes(p.id));
-    const w = cands.map((p) => {
-      let k = p.style ? 1.3 : 1; // the user wants lots of hills/kickers to trick off (but also things to do: dense course)
-      if (p.tier === tier) k *= 1.6;
-      if (p.required && this.requiredRun >= maxRequiredRun(d)) k *= 0.5;
-      if (y < y0 - 100 && netDrop(p) < -6) k *= 0.6; // deep below the start: fewer big descents
-      return k;
-    });
-    let pick = r() * w.reduce((a, b) => a + b, 0), spec = cands[cands.length - 1];
-    for (let k = 0; k < cands.length; k++) { pick -= w[k]; if (pick <= 0) { spec = cands[k]; break; } }
-    // neighbour validation: insert connectors until the pair works
+  private weightOf(zone: Zone, id: string): number { return zone.weights?.[id] ?? 1; }
+
+  /** Connectors the pair (a -> spec) needs, `a` having closed a run of `run` compulsory phrases. */
+  private connectorsFrom(a: PhraseSpec, run: number, spec: PhraseSpec, d: number, y: number, y0: number, forceRecovery = false): PhraseSpec[] {
     const chain: PhraseSpec[] = [];
-    let a = prev, run = this.requiredRun;
+    if (forceRecovery && a.required) { chain.push(SPEC.recovery); a = SPEC.recovery; run = 0; }
     for (let k = 0; k < 3; k++) {
       const c = connectorFor(a, spec, { requiredRun: run, d, y, y0 });
       if (!c || chain.some((q) => q.id === c)) break;
       chain.push(SPEC[c]); a = SPEC[c]; run = 0;
     }
-    for (const c of chain) this.queue.push({ spec: c, d, connector: true });
-    this.queue.push({ spec, d, connector: false });
+    return chain;
+  }
+
+  /** Connectors needed before `spec` after whatever is queued (or the history). */
+  private connectorChain(spec: PhraseSpec, d: number, y: number, y0: number, forceRecovery = false): PhraseSpec[] {
+    const a = this.queue.length ? this.queue[this.queue.length - 1].spec : this.history[this.history.length - 1], run = this.queue.length ? 0 : this.requiredRun;
+    return this.connectorsFrom(a, run, spec, d, y, y0, forceRecovery);
+  }
+
+  private static lengthOf(specs: PhraseSpec[], d: number): number { let L = 0; for (const p of specs) L += phraseLength(p, d); return L; }
+
+  /** Queue `spec` after whatever connectors the pair (prev -> spec) needs. */
+  private enqueueWithConnectors(spec: PhraseSpec, base: Omit<Plan, 'spec' | 'connector'>, y: number, y0: number, forceRecovery = false, connectorZone = base.zone): void {
+    for (const c of this.connectorChain(spec, base.d, y, y0, forceRecovery)) this.queue.push({ ...base, zone: connectorZone, spec: c, connector: true, setPiece: undefined, gate: undefined });
+    this.queue.push({ ...base, spec, connector: !!base.gate });
+  }
+
+  /**
+   * Connectors that lead from `a` into the set piece: what the pair needs (a recovery after a
+   * compulsory phrase, speed, height), or, when it needs none, what a calm runway in between
+   * would need (so whatever pads the route still delivers the rider at the set piece's entry speed).
+   */
+  private leadIn(a: PhraseSpec, run: number, plan: { sp: SetPieceSpec; d: number }, y: number, y0: number, padding: boolean): PhraseSpec[] {
+    const chain = this.connectorsFrom(a, run, plan.sp, plan.d, y, y0, true);
+    return chain.length || !padding ? chain : this.connectorsFrom(SPEC.runway, 0, plan.sp, plan.d, y, y0);
+  }
+
+  /** Room a set piece needs right after phrase `p`. */
+  private setPieceReserve(p: PhraseSpec, plan: { sp: SetPieceSpec; d: number }, y: number, y0: number): number {
+    return Assembler.lengthOf(this.leadIn(p, p.required ? this.requiredRun + 1 : 0, plan, y, y0, true), plan.d);
+  }
+
+  /**
+   * Queue the wave's set piece so it starts at or after the peak and ends by the breather. If its
+   * lead-in doesn't reach the peak, the first connector is lengthened by a calm run-up (or, with
+   * no connector due, a runway chunk pads the route). Returns false (nothing queued) if it can't
+   * end before the breather.
+   */
+  private scheduleSetPiece(plan: { sp: SetPieceSpec; d: number }, x: number, y: number, y0: number, wave: WaveInfo, zone: Zone): boolean {
+    const a = this.history[this.history.length - 1];
+    let chain = this.leadIn(a, this.requiredRun, plan, y, y0, false);
+    let L = Assembler.lengthOf(chain, plan.d);
+    if (x + L < wave.peakAt) {
+      chain = this.leadIn(a, this.requiredRun, plan, y, y0, true);
+      const pad = wave.peakAt - x - Assembler.lengthOf(chain, plan.d) + 1e-6;
+      if (pad > 0) chain = chain.length ? [paddedSpec(chain[0], Math.max(1, pad)), ...chain.slice(1)] : [runwaySpec(Math.max(MIN_RUNWAY, pad))];
+      L = Assembler.lengthOf(chain, plan.d);
+    }
+    if (x + L + phraseLength(plan.sp, plan.d) > wave.breatherAt + 1e-6) return false;
+    for (const c of chain) this.queue.push({ spec: c, d: plan.d, connector: true, zone: zone.id, wave });
+    this.queue.push({ spec: plan.sp, d: plan.d, connector: false, zone: zone.id, wave, setPiece: true });
+    this.spPlan = null;
+    this.lastSetPiece = plan.sp.id;
+    return true;
+  }
+
+  /** Next phrase to build, given where the route currently ends (x = distance from the start). */
+  next(x: number, y: number, y0: number): Plan {
+    const wave = waveAt(x);
+    if (this.queue.length) return this.commit(this.queue.shift()!);
+    const i = this.index;
+    const zone = this.zones.zoneAt(x);
+    if (this.script) { // tests: a fixed phrase list, then calm recovery forever
+      const id = this.script.ids[i] ?? 'recovery';
+      return this.commit({ spec: SPEC[id], d: this.script.d, connector: CONNECTORS.has(id), zone: zone.id, wave, setPiece: id.startsWith('sp-') });
+    }
+    if (i === 0) return this.commit({ spec: SPEC.start, d: 0, connector: true, zone: zone.id, wave });
+    const d = wave.d;
+    const r = this.rng(i);
+    // zone change: a gate chunk first (zones change at the end of a wave, in the breather)
+    const span = this.zones.spanAt(x);
+    if (span !== this.span) {
+      const from = this.zones.zones[this.span % this.zones.zones.length].id;
+      this.span = span;
+      if (from !== zone.id) { this.enqueueWithConnectors(SPEC.gate, { d, zone: zone.id, wave, gate: { from, to: zone.id } }, y, y0, true, from); return this.commit(this.queue.shift()!); }
+    }
+    // wave peak: one hand-authored set piece per wave, decided as the wave's build begins
+    const live = wave.index >= 0 && (wave.phase === 'build' || wave.phase === 'peak');
+    if (this.spPlan && this.spPlan.wave !== wave.index) this.spPlan = null;
+    if (live && this.spWave < wave.index) {
+      this.spWave = wave.index;
+      const pd = Math.max(d, waveAt(wave.peakAt).d); // a set piece is built at the wave's peak difficulty
+      const room = wave.breatherAt - wave.peakAt - MIN_RUNWAY;
+      const sps = zone.setPieces.map((id) => SPEC[id] as SetPieceSpec)
+        .filter((p) => p && p.minWave <= wave.index && p.tier <= maxTier(waveAt(wave.peakAt).d) && p.id !== this.lastSetPiece && phraseLength(p, pd) <= room);
+      if (sps.length) {
+        const w = sps.map((p) => this.weightOf(zone, p.id) * (p.minWave === wave.index ? 1.5 : 1) * (y < y0 - 100 && netDrop(p) < -12 ? 0.4 : 1)); // deep: fewer big drops
+        let pick = r() * w.reduce((a, b) => a + b, 0), sp = sps[sps.length - 1];
+        for (let k = 0; k < sps.length; k++) { pick -= w[k]; if (pick <= 0) { sp = sps[k]; break; } }
+        this.spPlan = { wave: wave.index, sp, d: pd };
+      }
+    }
+    const plan = live ? this.spPlan : null;
+    if (plan && wave.phase === 'peak') { // already at the peak (a long phrase carried the route here): now or never
+      if (this.scheduleSetPiece(plan, x, y, y0, wave, zone)) return this.commit(this.queue.shift()!);
+      this.spPlan = null;
+    }
+    const pending = plan && wave.phase === 'build' ? this.spPlan : null;
+    const recent = this.history.slice(-3).map((p) => p.id);
+    const tier = maxTier(d);
+    const breather = wave.phase === 'breather' || wave.phase === 'warmup';
+    const pool = zone.phrases.map((id) => SPEC[id]).filter((p) => p && !CONNECTORS.has(p.id));
+    const allowed = (p: PhraseSpec) => p.tier <= tier && (!breather || (!p.required && p.tier <= 2));
+    // room: compulsory phrases end before the breather; build phrases leave room for the set piece before the peak
+    const fits = (p: PhraseSpec, peakRoom: boolean): boolean => {
+      const checkBreather = p.required && !breather && x + FIT_HORIZON > wave.breatherAt;
+      const checkPeak = peakRoom && !!pending && x + FIT_HORIZON > wave.peakAt;
+      if (!checkBreather && !checkPeak) return true;
+      const chain = [...this.connectorChain(p, d, y, y0), p];
+      const end = x + Assembler.lengthOf(chain, d);
+      if (checkBreather && end > wave.breatherAt) return false;
+      // (the set piece's connectors are judged from the height the route will be at after p: a climb may be due)
+      if (checkPeak && end + this.setPieceReserve(p, pending!, chain.reduce((h, q) => h + netDrop(q), y), y0) > wave.peakAt) return false;
+      return true;
+    };
+    const prev = this.history[this.history.length - 1];
+    const choose = (peakRoom: boolean) => {
+      const ok = pool.filter((p) => p !== prev && allowed(p) && fits(p, peakRoom));
+      const fresh = ok.filter((p) => !recent.includes(p.id));
+      return fresh.length ? fresh : ok;
+    };
+    let cands = choose(true);
+    if (pending && !cands.length) { // nothing else fits before the peak: the set piece goes in now
+      if (this.scheduleSetPiece(pending, x, y, y0, wave, zone)) return this.commit(this.queue.shift()!);
+      this.spPlan = null;
+      cands = choose(false);
+    }
+    if (!cands.length) cands = pool.filter((p) => p !== prev && !p.required && p.tier <= tier);
+    if (!cands.length) cands = [SPEC.recovery];
+    const topTier = Math.max(...cands.map((p) => p.tier));
+    const w = cands.map((p) => {
+      let k = p.style ? 1.3 : 1; // the user wants lots of hills/kickers to trick off (but also things to do: dense course)
+      if (p.tier === topTier) k *= 1.6; // the hardest on offer (in breathers and peak tails: the bigger style air)
+      if (wave.phase === 'peak' && p.required) k *= 1.5; // peaks: more compulsory chains
+      if (p.required && this.requiredRun >= maxRequiredRun(d)) k *= 0.5;
+      if (y < y0 - 100 && netDrop(p) < -6) k *= 0.6; // deep below the start: fewer big descents
+      return k * this.weightOf(zone, p.id);
+    });
+    let pick = r() * w.reduce((a, b) => a + b, 0), spec = cands[cands.length - 1];
+    for (let k = 0; k < cands.length; k++) { pick -= w[k]; if (pick <= 0) { spec = cands[k]; break; } }
+    this.enqueueWithConnectors(spec, { d, zone: zone.id, wave }, y, y0);
     return this.commit(this.queue.shift()!);
   }
 
@@ -353,7 +543,7 @@ export class Assembler {
     this.index++;
     this.history.push(p.spec);
     if (this.history.length > 8) this.history.shift();
-    this.requiredRun = p.spec.required ? this.requiredRun + 1 : 0;
+    this.requiredRun = p.spec.required ? this.requiredRun + (p.setPiece ? 99 : 1) : 0;
     return p;
   }
 
@@ -392,16 +582,19 @@ export class EndlessCourse extends Course {
   recycled = 0;
 
   /** `x0` shifts the whole route (precision tests); `script` fixes the phrase list (tests). */
-  constructor(seed: number, opts: { x0?: number; script?: string[]; d?: number } = {}) {
+  constructor(seed: number, opts: { x0?: number; script?: string[]; d?: number; zones?: string[] } = {}) {
     super(seed, [], [], [], [], (opts.x0 ?? 0) + 2, Infinity);
     this.kind = 'endless';
-    this.asm = new Assembler(seed, opts.script ? { ids: opts.script, d: opts.d ?? 0.5 } : undefined);
+    this.zones = new ZoneSequence(opts.zones ?? ['town']);
+    this.asm = new Assembler(seed, opts.script ? { ids: opts.script, d: opts.d ?? 0.5 } : undefined, this.zones);
     this.endX = (opts.x0 ?? 0) - 10;
     this.originX = this.endX;
     this.generateTo(this.endX + STREAM.ahead);
   }
   /** Where the route begins (distance is measured from startX). */
   readonly originX: number;
+  /** Zone order for this run (default: the town only). */
+  readonly zones: ZoneSequence;
 
   private generateTo(x: number): void {
     while (this.endX < x) this.appendPhrase();
@@ -435,7 +628,7 @@ export class EndlessCourse extends Course {
     const end = last.points[last.points.length - 1];
     const chunk: Chunk = {
       id: this.ids.c++, x0: this.endX, x1: end.x, y0: this.endY, y1: end.y, title: plan.spec.title, spec: plan.spec.id, tier: plan.spec.tier,
-      difficulty: plan.d, connector: plan.connector, cpX: this.endX + 2, cpSpeed: plan.spec.cpSpeed, features: b.features,
+      difficulty: plan.d, connector: plan.connector, zone: plan.zone, gate: plan.gate, setPiece: plan.setPiece, wave: this.waveLabel(this.endX), cpX: this.endX + 2, cpSpeed: plan.spec.cpSpeed, features: b.features,
       surfaces: surfaces.map((q) => q.id), rails: rails.map((q) => q.id), walls: walls.map((q) => q.id), obstacles: obstacles.map((q) => q.id), markers: [],
     };
     this.addChunk(chunk, surfaces, rails, walls, obstacles, gaps);
@@ -457,8 +650,11 @@ export class EndlessCourse extends Course {
     }
   }
 
+  /** The wave phase a chunk starting at course x really lies in (not the one it was assembled under). */
+  private waveLabel(x: number): Chunk['wave'] { const w = waveAt(x - this.originX); return { index: w.index, phase: w.phase }; }
+
   /** Where the generated route currently ends. */
   get generatedTo(): number { return this.endX; }
 }
 
-export function buildEndlessCourse(seed: number): EndlessCourse { return new EndlessCourse(seed); }
+export function buildEndlessCourse(seed: number, zones?: string[]): EndlessCourse { return new EndlessCourse(seed, { zones }); }
