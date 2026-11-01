@@ -35,6 +35,10 @@ export const SCORE = {
   grab: 150, grabPerSec: 400, grabMin: 0.2,
   grind: 100, grindPerSec: 250,
   wall: 150, wallPerSec: 350,
+  wash: 420, washPerSec: 280,
+  swing: 380, swingPerSec: 320,
+  flight: 700, flightPerSec: 220,
+  bounce: 260,
   skim: 60, skimPerSec: 120,
   pot: 200, pillar: 600,
   airMin: 0.7, airPerSec: 150,
@@ -78,7 +82,7 @@ export const SCORE = {
 export type PopupKind = 'near' | 'bank' | 'bail' | 'bonus';
 export interface Popup { text: string; pts: number; kind: PopupKind }
 export type Cue = 'near' | 'rank' | 'orb' | 'bank';
-const TRICK_KINDS = ['flip', 'double', 'grab', 'grind', 'line', 'wall', 'skim', 'pot', 'pillar', 'near'] as const;
+const TRICK_KINDS = ['flip', 'double', 'grab', 'grind', 'line', 'wall', 'wash', 'swing', 'flight', 'bounce', 'skim', 'pot', 'pillar', 'near'] as const;
 export type TrickKind = typeof TRICK_KINDS[number];
 export interface BailInfo { mult: number; chain: number; points: number }
 
@@ -241,7 +245,16 @@ export class ScoreKeeper {
         }
         case 'grab-end': if (fresh && e.held >= SCORE.grabMin) this.addLink('grab', Math.round(SCORE.grab + SCORE.grabPerSec * Math.min(e.held, 1.5))); break;
         // contact starts end the flight: time on a rail / wall / heel is not air
-        case 'grind-start': this.endFlight(); if (fresh) this.addLink('grind', SCORE.grind); break;
+        case 'grind-start': {
+          this.endFlight();
+          if (!fresh) break;
+          const rail = course.rails.find((q) => q.id === e.railId);
+          this.addLink(rail?.wash ? 'wash' : 'grind', rail?.wash ? SCORE.wash : SCORE.grind);
+          break;
+        }
+        case 'swing-start': this.endFlight(); if (fresh) this.addLink('swing', SCORE.swing); break;
+        case 'flight-start': if (fresh) this.addLink('flight', SCORE.flight); break;
+        case 'bounce': if (fresh) this.addLink('bounce', SCORE.bounce); break;
         case 'skim-start': this.endFlight(); if (fresh) this.addLink('skim', SCORE.skim); break;
         case 'wall-start': {
           this.endFlight();
@@ -285,7 +298,7 @@ export class ScoreKeeper {
       }
     }
     // flight tracking (air points, edge landings, close pots): only real airborne time counts
-    if (st.mode === 'airborne') {
+    if (st.mode === 'airborne' || st.mode === 'flying') {
       if (!this.inAir) { this.inAir = true; this.airTime = 0; this.takeoffX = Number.isFinite(this.prevX) ? this.prevX : st.x; }
       this.airTime += dt;
       if (fresh && Number.isFinite(this.prevX)) for (const o of course.obstacles) {
@@ -295,7 +308,8 @@ export class ScoreKeeper {
       }
     } else this.endFlight();
     // sustained contact points
-    const rate = st.mode === 'grinding' ? SCORE.grindPerSec : st.mode === 'wallRiding' ? SCORE.wallPerSec : st.mode === 'heelSkim' ? SCORE.skimPerSec : 0;
+    const wash = st.mode === 'grinding' && course.rails.some((q) => q.id === st.railId && q.wash);
+    const rate = wash ? SCORE.washPerSec : st.mode === 'grinding' ? SCORE.grindPerSec : st.mode === 'wallRiding' ? SCORE.wallPerSec : st.mode === 'heelSkim' ? SCORE.skimPerSec : st.mode === 'swinging' ? SCORE.swingPerSec : st.mode === 'flying' ? SCORE.flightPerSec : 0;
     if (rate && this.chain > 0 && fresh) { this.comboPoints += rate * dt; this.idle = 0; }
     // banking: plain rolling for a while ends the combo
     if (st.mode === 'grounded') {

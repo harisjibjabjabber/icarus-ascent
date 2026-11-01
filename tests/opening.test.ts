@@ -39,7 +39,7 @@ const L = (t: string) => course.lessons.find((l) => l.title === t)!;
 describe('authored opening', () => {
   it('teaches the brief §10 sequence, one idea per lesson, each with a checkpoint and a short prompt', () => {
     expect(course.kind).toBe('opening');
-    expect(course.lessons.map((l) => l.title)).toEqual(['Push', 'Descent', 'Jump', 'Pot', 'Heel skim', 'Optional rail', 'Rail', 'Big jump', 'Wall ride', 'Put it together']);
+    expect(course.lessons.map((l) => l.title)).toEqual(['Push', 'Descent', 'Jump', 'Pot', 'Heel skim', 'Optional rail', 'Rail', 'Big jump', 'Wall ride', 'Put it together', 'Washing line', 'Swing', 'Updraft', 'Bounce']);
     for (const l of course.lessons) {
       expect(l.prompt.length).toBeLessThan(95);
       expect(l.promptX0).toBeLessThanOrEqual(l.cpX + 2);

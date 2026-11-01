@@ -173,6 +173,39 @@ export function buildOpeningCourse(): Course {
   flat(28);
   pots.push(cur().x - 12, cur().x - 8);
 
+  // Optional lessons. The street never breaks, so skipping a move still finishes the run.
+  flat(8);
+  const wCp = cur().x;
+  // Smooth at both ends, so a fast rider rolls the lip. Reaching the line takes the jump.
+  extend(pts, cur().x + 16, cur().y + 1.15, smooth, 1.2);
+  const lipW = { ...cur() };
+  slope(18, -1.15, smooth);
+  flat(14);
+  const wLen = 16, wX = lipW.x + 1.4, wY = lipW.y + 1.05;
+  rails.push({ id: rails.length, points: Array.from({ length: 6 }, (_, i) => ({ x: wX + (wLen * i) / 5, y: wY - 0.1 * (i / 5) })), lateral: 1.2, required: false, dress: 'wash', wash: true });
+  lesson({ title: 'Washing line', cpX: wCp, cpSpeed: 12, prompt: 'Jump the crest, then swipe down onto the washing line', keys: '↑ then ↓', promptX0: wCp, promptX1: wX + 6, featureX: wX, required: false });
+  flat(8);
+  const sCp = cur().x;
+  const sStreet = cur().y;
+  const sAx = sCp + 12;
+  flat(26);
+  const swingSpec = { ax: sAx, ay: sStreet + 6.5, length: 5.15, lateral: 1.9, anchor: 'crane' as const };
+  lesson({ title: 'Swing', cpX: sCp, cpSpeed: 12, prompt: 'Hold down by the rope to hook it — release as you rise', keys: 'hold ↓, then let go', promptX0: sCp, promptX1: sAx + 3, featureX: sAx, required: false });
+  flat(6);
+  const uCp = cur().x;
+  extend(pts, cur().x + 14, cur().y + 1.05, smooth, 1.2);
+  const lipU = { ...cur() };
+  slope(16, -1.05, smooth);
+  flat(22);
+  const upSpec = { x0: lipU.x + 1.5, x1: lipU.x + 12, y0: lipU.y - 1.05 + 1.6, y1: lipU.y + 8, lift: TUNING.tricks.updraftLift, corridorX1: lipU.x + 26, source: 'vent' as const, lateral: 3.4 };
+  lesson({ title: 'Updraft', cpX: uCp, cpSpeed: 12, prompt: 'Jump into the steam and hold up to fly the trail', keys: '↑ then hold ↑', promptX0: uCp, promptX1: lipU.x + 8, featureX: lipU.x + 3, required: false });
+  flat(6);
+  const bCp = cur().x;
+  const bY = cur().y;
+  const boatSpecs = [0, 1, 2, 3].map((i) => ({ x: bCp + 9 + i * 4.4, y: bY + 0.42, half: 1.05, lateral: 2.05, kind: 'boat' as const }));
+  flat(30);
+  lesson({ title: 'Bounce', cpX: bCp, cpSpeed: 12, prompt: 'Jump onto the boats and bounce along the chain', keys: '↑ onto each boat', promptX0: bCp, promptX1: bCp + 14, featureX: boatSpecs[0].x, required: false });
+
   // ---------------------------------------------------------------- finish (harbour quay)
   const aF = cur().x;
   slope(26, -2.5);
@@ -191,5 +224,26 @@ export function buildOpeningCourse(): Course {
   const O = TUNING.obstacles;
   for (const x of pots) course.addObstacle('pot', x, O.potHalfWidth, O.potHeight);
   for (const x of pillars) course.addObstacle('pillar', x, O.pillarHalfWidth, O.pillarHeight);
+  const sw = course.addSwing(swingSpec);
+  const up = course.addUpdraft(upSpec);
+  const pads = boatSpecs.map((q) => course.addBounce(q));
+  const washRail = rails[rails.length - 1];
+  course.addRide({ activity: 'wash', path: washRail.points.map((p) => ({ x: p.x, y: p.y, lateral: washRail.lateral })), hardest: { x: wX + wLen * 0.85, y: wY, lateral: 1.2, pickup: 'grind' } });
+  course.addRide({
+    activity: 'swing',
+    path: Array.from({ length: 7 }, (_, i) => { const phi = -0.15 + (1.15 * i) / 6; return { x: sw.ax + sw.length * Math.sin(phi), y: sw.ay - sw.length * Math.cos(phi), lateral: sw.lateral }; }),
+    hardest: { x: sw.ax + sw.length * Math.sin(0.95), y: sw.ay - sw.length * Math.cos(0.95), lateral: sw.lateral, pickup: 'air' },
+  });
+  course.addRide({
+    activity: 'flight',
+    path: [0, 0.35, 0.7, 1].map((t) => ({ x: up.x0 + (up.corridorX1 - up.x0) * t, y: up.y0 + 1.2 + Math.sin(t * Math.PI) * 2.4, lateral: 0 })),
+    hardest: { x: up.corridorX1 - 2, y: up.y0 + 2.2, lateral: 0, pickup: 'air' },
+  });
+  course.addRide({
+    activity: 'bounce',
+    path: pads.map((p) => ({ x: p.x, y: p.y + 1.1, lateral: p.lateral * 0.75 })),
+    hardest: { x: pads[pads.length - 1].x, y: pads[pads.length - 1].y + 1.1, lateral: pads[pads.length - 1].lateral * 0.75, pickup: 'air' },
+  });
+  for (const h of course.chunks[0].rides ?? []) course.placeOrb({ x: h.hardest.x, y: h.hardest.y, lateral: h.hardest.lateral, tier: 'rare', pickup: h.hardest.pickup, trailId: 0, trailIdx: 0, trailLen: 1 });
   return course;
 }

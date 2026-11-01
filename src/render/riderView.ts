@@ -113,7 +113,7 @@ export class RiderView {
     this.lateral += (targetLateral - this.lateral) * ease(targetLateral !== 0 ? 14 : 4);
     toScene(x, y, this.lateral, this.root.position);
 
-    const airborne = s.mode === 'airborne';
+    const airborne = s.mode === 'airborne' || s.mode === 'flying' || s.mode === 'swinging';
     // board pitch: follow the contact on the ground/rail, ease toward a gentle flight attitude in the air
     const target = airborne ? Math.max(-0.6, Math.min(0.6, Math.atan2(s.vy, Math.max(4, s.speed)) * 0.6)) : angle;
     this.boardAngle += (target - this.boardAngle) * ease(airborne ? 6 : 25);

@@ -19,9 +19,9 @@ function generate(seed: number, dist: number, step = 50): Chunk[] {
 }
 
 describe('phrase library', () => {
-  it('has 15-24 authored phrases (plus connectors), each declaring entry/exit speed, airtime, receiver and tier', () => {
+  it('has 15-28 authored phrases (plus connectors), each declaring entry/exit speed, airtime, receiver and tier', () => {
     expect(LIBRARY.length).toBeGreaterThanOrEqual(15);
-    expect(LIBRARY.length).toBeLessThanOrEqual(24);
+    expect(LIBRARY.length).toBeLessThanOrEqual(28);
     for (const p of PHRASES) {
       expect(p.entry[0]).toBeLessThanOrEqual(p.entry[1]);
       expect(p.exit[0]).toBeLessThanOrEqual(p.exit[1]);

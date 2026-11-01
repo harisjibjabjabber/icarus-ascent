@@ -1,5 +1,5 @@
 import { TUNING, type Tuning } from '../tuning';
-import { Course, type Obstacle, type Rail, type Surface, type Vec2, type Wall } from '../course/course';
+import { Course, type Obstacle, type Rail, type Surface, type Swing, type Updraft, type Vec2, type Wall } from '../course/course';
 import { describeAction, type Action } from '../input/actions';
 import type { FailInfo, RiderState, SimEvent } from './types';
 
@@ -16,6 +16,11 @@ import type { FailInfo, RiderState, SimEvent } from './types';
  *   airborne --right held + valid wall proximity-----> wallRiding
  *   grinding --rail end / up-------------------------> airborne
  *   wallRiding --wall end / release / slid off / up--> airborne
+ *   airborne --down held near a rope-----------------> swinging
+ *   swinging --release / up / street / timeout-------> airborne
+ *   airborne --updraft has lifted enough-------------> flying
+ *   flying --corridor ends / time / ground-----------> airborne | grounded
+ *   airborne --descending through a bounce pad-------> airborne (bounced)
  *   airborne --hits ledge face / falls below route---> failed
  *   grounded --passes finish-------------------------> finished
  *
@@ -37,6 +42,8 @@ export class Simulation {
   private sideHeld: { side: 'left' | 'right'; strokeId: number } | null = null;
   /** An up stroke resolved as a right hold (wall context): its release ends the hold. */
   private upAsSide = -1;
+  /** Up stroke still held. Steers a flight; cleared on release or landing. */
+  private upHeld = -1;
   private seenRevision = -1;
 
   /** `start` lets a run begin at a checkpoint (x on the ground, rolling at speed). */
@@ -60,7 +67,8 @@ export class Simulation {
       airTime: 0, groundTime: 0, coyote: 0, jumpBuffer: 0, pushStrokeId: -1, pushApplied: 0, jumpStrokeId: -1,
       air: 'none', flip: 0, flipsThisJump: 0, flipQueued: false, sideStrokeId: -1, prepStrokeId: -1, prepTimer: 0, prepHeld: false,
       prepAge: 0, prepStrength: 0, skimPendingPush: false, wallExit: 'none', railBlockedByFlip: false,
-      railId: -1, wallId: -1, contactTime: 0, wallEntrySpeed: 0, lastContact: 'ground', lastContactId: g.surface.id,
+      railId: -1, wallId: -1, swingId: -1, swingPhi: 0, swingOmega: 0, updraftId: -1, gustY: NaN, flightX1: Infinity, flightTime: 0,
+      bounced: [], bounceId: -1, launchVy: 0, contactTime: 0, wallEntrySpeed: 0, lastContact: 'ground', lastContactId: g.surface.id,
       prepTriedThisAir: false, sideTriedThisAir: false,
       broken: [], trickCredit: 'none', creditGround: 0, grabbedThisAir: false,
       takeoffX: x, takeoffY: g.sample.y, takeoffSpeed: 0, leftBy: 'none', fail: null,
@@ -69,9 +77,10 @@ export class Simulation {
 
   /** Copy the private hold-tracking too (used by predictJumpArc and tests). */
   cloneFrom(other: Simulation): void {
-    this.state = { ...other.state, broken: [...other.state.broken] };
+    this.state = { ...other.state, broken: [...other.state.broken], bounced: [...other.state.bounced] };
     this.sideHeld = other.sideHeld ? { ...other.sideHeld } : null;
     this.upAsSide = other.upAsSide;
+    this.upHeld = other.upHeld;
   }
 
   enqueue(a: Action): void { this.queue.push(a); }
@@ -89,6 +98,7 @@ export class Simulation {
     if (this.course.revision !== this.seenRevision) {
       this.seenRevision = this.course.revision;
       s0.broken = s0.broken.filter((id) => this.course.hasObstacle(id));
+      s0.bounced = s0.bounced.filter((id) => this.course.bounce(id));
     }
     const q = this.queue;
     this.queue = [];
@@ -100,6 +110,8 @@ export class Simulation {
       case 'airborne': this.stepAirborne(); break;
       case 'grinding': this.stepGrinding(); break;
       case 'wallRiding': this.stepWall(); break;
+      case 'swinging': this.stepSwing(); break;
+      case 'flying': this.stepFlying(); break;
       case 'failed': case 'finished': break;
     }
     if (s.mode === 'grounded' || s.mode === 'heelSkim') {
@@ -223,6 +235,12 @@ export class Simulation {
       case 'wallRiding':
         this.jump('wall', strokeId);
         return this.resolve(name, 'jump off wall');
+      case 'swinging':
+        this.releaseSwing('up');
+        return this.resolve(name, 'release the rope upward');
+      case 'flying':
+        this.upHeld = strokeId;
+        return this.resolve(name, 'climb');
       case 'airborne': {
         if ((s.leftBy === 'edge' || s.leftBy === 'crest') && s.coyote > 0) { this.jump('coyote', strokeId); return this.resolve(name, 'coyote jump'); }
         if (strokeId === s.jumpStrokeId) return this.reject(name, 'same stroke as the jump (no double action)');
@@ -288,7 +306,7 @@ export class Simulation {
     c.cloneFrom(this);
     const cs = c.state;
     cs.air = 'none'; cs.flip = 0; cs.flipQueued = false; cs.prepStrokeId = -1; cs.prepHeld = false; cs.prepTimer = 0; cs.jumpBuffer = 0;
-    c.sideHeld = null; c.upAsSide = -1;
+    c.sideHeld = null; c.upAsSide = -1; c.upHeld = -1;
     const n = Math.round(maxSeconds / this.dt);
     for (let i = 1; i <= n; i++) {
       c.step();
@@ -319,6 +337,13 @@ export class Simulation {
         this.emit({ type: 'prep', armed: true });
         this.resolve(name, 'landing prep armed (rail catch / heel skim)');
         this.tryRailCatch(); // already in a catch band? catch now
+        this.trySwing();
+        return;
+      case 'flying':
+        if (!fresh) return;
+        s.prepStrokeId = strokeId; s.prepHeld = true; s.prepTimer = this.K.prepArmWindow; s.prepAge = 0; s.prepStrength = strength;
+        return this.resolve(name, 'dive');
+      case 'swinging':
         return;
       case 'grinding': case 'wallRiding':
         if (fresh) this.reject(name, `down has no meaning while ${s.mode === 'grinding' ? 'grinding' : 'wall riding'}`);
@@ -359,11 +384,16 @@ export class Simulation {
 
   private onRelease(dir: 'down' | 'up', strokeId: number): void {
     const s = this.state;
-    if (dir === 'up' && strokeId === this.upAsSide) { // an up stroke that became a right hold
-      this.upAsSide = -1;
-      if (this.sideHeld?.strokeId === strokeId) this.sideHeld = null;
-      return this.onSideRelease('right', strokeId);
+    if (dir === 'up') {
+      if (strokeId === this.upHeld) this.upHeld = -1;
+      if (strokeId === this.upAsSide) { // an up stroke that became a right hold
+        this.upAsSide = -1;
+        if (this.sideHeld?.strokeId === strokeId) this.sideHeld = null;
+        return this.onSideRelease('right', strokeId);
+      }
+      return;
     }
+    if (s.mode === 'swinging') { this.releaseSwing('release'); return; }
     if (dir !== 'down' || strokeId !== s.prepStrokeId) return;
     s.prepHeld = false;
     if (s.mode === 'heelSkim') {
@@ -429,6 +459,9 @@ export class Simulation {
     s.jumpBuffer = 0;
     this.resetAir();
     s.takeoffX = s.x; s.takeoffY = s.y; s.takeoffSpeed = Math.hypot(s.vx, s.vy);
+    s.launchVy = s.vy;
+    s.bounced = []; s.gustY = NaN; s.bounceId = -1;
+    this.upHeld = strokeId;
     this.emit({ type: 'jump', kind, x: s.x, y: s.y, vx: s.vx, vy: s.vy });
   }
 
@@ -507,6 +540,8 @@ export class Simulation {
     this.resetAir();
     s.lastContact = 'ground';
     s.takeoffX = s.x; s.takeoffY = s.y; s.takeoffSpeed = s.speed;
+    s.launchVy = s.vy;
+    s.bounced = []; s.gustY = NaN; s.bounceId = -1;
     if (crest) s.leftBy = 'crest';
     this.emit({ type: 'leave-edge', x: s.x, y: s.y, crest });
   }
@@ -524,11 +559,15 @@ export class Simulation {
       s.flip = Math.min(1, s.flip + dt / K.flipDuration);
       if (s.flip >= 1) this.finishRotation();
     } else if (s.air === 'grabLeft' || s.air === 'grabRight') s.contactTime += dt;
+    this.liftUpdraft(dt);
+    if (s.mode === 'flying') return this.stepFlying();
+    if (s.mode !== 'airborne') return;
     s.vy -= M.airGravity * dt;
     s.vx -= Math.sign(s.vx) * M.airDrag * s.vx * s.vx * dt;
     s.vx = Math.min(s.vx, M.hardCap);
     const p0 = { x: s.x, y: s.y };
     const p1 = { x: s.x + s.vx * dt, y: s.y + s.vy * dt };
+    if (this.tryBounce(p0, p1)) return;
     // A risky high line keeps the street, but the street does not catch anyone airborne inside its void.
     const hit = this.inRiskyVoid(p1.x) ? null : this.sweep(p0, p1);
     if (hit) {
@@ -538,7 +577,7 @@ export class Simulation {
     }
     s.x = p1.x; s.y = p1.y;
     // contacts that need a held / armed intent
-    if (this.isPrepArmed()) this.tryRailCatch();
+    if (this.isPrepArmed()) { this.tryRailCatch(); this.trySwing(); }
     if (s.mode === 'airborne' && this.sideHeld?.side === 'right' && s.air === 'grabRight' && this.sideHeld.strokeId === s.sideStrokeId) {
       const w = this.wallCatchable();
       if (w.wall) {
@@ -688,6 +727,7 @@ export class Simulation {
     s.mode = 'grounded';
     s.surfaceId = surf.id; s.seg = sm.seg; s.angle = th;
     s.groundTime = 0; s.coyote = 0; s.leftBy = 'none';
+    s.bounceId = -1; s.bounced = []; s.gustY = NaN; this.upHeld = -1;
     s.air = 'none'; s.flip = 0; s.airTime = 0;
     s.lastContact = 'ground'; s.lastContactId = surf.id;
     s.pushStrokeId = -1;
@@ -718,6 +758,7 @@ export class Simulation {
     for (const r of this.course.rails) {
       const x0 = Course.railX0(r), x1 = Course.railX1(r);
       if (s.x < x0 - K.railCatchBefore || s.x > x1 - 0.5) continue;
+      if (r.wash && !this.washReachable()) continue;
       const cx = Math.max(s.x, x0);
       const ry = Course.railSample(r, cx).y;
       const d = s.y - ry;
@@ -858,6 +899,137 @@ export class Simulation {
     s.sideStrokeId = -1; // the hold is spent: it can't turn into a grab
     this.afterWall();
     s.takeoffX = s.x; s.takeoffY = s.y; s.takeoffSpeed = s.speed;
+  }
+
+  private washReachable(): boolean {
+    const s = this.state;
+    const trick = s.leftBy === 'crest' || s.leftBy === 'rail' || s.leftBy === 'wall' || s.leftBy === 'swing' || s.leftBy === 'bounce' || s.leftBy === 'flight';
+    return trick || s.launchVy > this.M.jumpVelocity + this.K.washLaunchExtra;
+  }
+
+  /** Hook the nearest rope when a fresh down is held at its low point. A stale swipe (for a rail) does not hook. */
+  private trySwing(): void {
+    const s = this.state, K = this.K;
+    if (s.mode !== 'airborne' || !s.prepHeld || s.prepAge > 0.5) return;
+    let best: Swing | null = null, bestD: number = K.swingCatch;
+    for (const sw of this.course.swings) {
+      const d = Math.hypot(s.x - sw.ax, s.y - (sw.ay - sw.length));
+      if (d < bestD && s.y < sw.ay - 0.5) { best = sw; bestD = d; }
+    }
+    if (!best) return;
+    const phi = Math.atan2(s.x - best.ax, best.ay - s.y);
+    s.swingPhi = phi;
+    s.swingOmega = (s.vx * Math.cos(phi) + s.vy * Math.sin(phi)) / best.length;
+    s.x = best.ax + best.length * Math.sin(phi);
+    s.y = best.ay - best.length * Math.cos(phi);
+    s.mode = 'swinging'; s.swingId = best.id; s.contactTime = 0; s.air = 'none'; s.flip = 0; s.flipQueued = false;
+    s.vx = s.swingOmega * best.length * Math.cos(phi);
+    s.vy = s.swingOmega * best.length * Math.sin(phi);
+    this.emit({ type: 'swing-start', swingId: best.id, x: s.x, y: s.y });
+  }
+
+  private stepSwing(): void {
+    const s = this.state, sw = this.course.swing(s.swingId);
+    if (!sw) { s.mode = 'airborne'; s.swingId = -1; return; }
+    const L = sw.length, g = this.M.airGravity, dt = this.dt;
+    s.swingOmega += -(g / L) * Math.sin(s.swingPhi) * dt;
+    s.swingPhi += s.swingOmega * dt;
+    s.x = sw.ax + L * Math.sin(s.swingPhi);
+    s.y = sw.ay - L * Math.cos(s.swingPhi);
+    s.vx = s.swingOmega * L * Math.cos(s.swingPhi);
+    s.vy = s.swingOmega * L * Math.sin(s.swingPhi);
+    s.contactTime += dt;
+    const street = this.course.groundBelow(s.x, s.y + 2);
+    if (street && s.y <= street.sample.y + this.K.swingStreet) this.releaseSwing('street');
+    else if (s.contactTime > this.K.swingMax) this.releaseSwing('timeout');
+  }
+
+  private releaseSwing(reason: 'release' | 'up' | 'street' | 'timeout'): void {
+    const s = this.state;
+    const id = s.swingId;
+    if (reason === 'up') s.vy += this.K.swingPop;
+    s.mode = 'airborne'; s.leftBy = 'swing'; s.launchVy = s.vy; s.swingId = -1; s.jumpStrokeId = -1; s.coyote = 0;
+    this.resetAir();
+    s.takeoffX = s.x; s.takeoffY = s.y; s.takeoffSpeed = Math.hypot(s.vx, s.vy);
+    s.prepHeld = false; s.prepStrokeId = -1;
+    this.emit({ type: 'swing-end', swingId: id, x: s.x, y: s.y, reason });
+  }
+
+  /** Columns only catch a deliberate launch, not a crest the street itself threw the rider off. */
+  private liftUpdraft(dt: number): void {
+    const s = this.state, K = this.K;
+    const deliberate = s.leftBy === 'jump' || s.leftBy === 'swing' || s.leftBy === 'bounce' || s.leftBy === 'rail' || s.leftBy === 'wall' || s.leftBy === 'flight';
+    if (!deliberate) return;
+    for (const u of this.course.updrafts) {
+      if (s.x < u.x0 || s.x > u.x1 || s.y < u.y0 || s.y > u.y1) continue;
+      if (!Number.isFinite(s.gustY)) { s.gustY = s.y; s.updraftId = u.id; }
+      s.vy += (u.lift || K.updraftLift) * dt;
+      if (s.y - s.gustY >= K.updraftGain) this.enterFlight(u);
+      return;
+    }
+  }
+
+  private enterFlight(u: Updraft): void {
+    const s = this.state;
+    s.mode = 'flying'; s.flightTime = 0; s.flightX1 = u.corridorX1; s.updraftId = u.id;
+    s.air = 'none'; s.flip = 0; s.flipQueued = false;
+    this.emit({ type: 'flight-start', updraftId: u.id, x: s.x, y: s.y });
+  }
+
+  private stepFlying(): void {
+    const s = this.state, M = this.M, K = this.K, dt = this.dt;
+    s.flightTime += dt; s.airTime += dt;
+    s.vy -= M.airGravity * K.flightGravity * dt;
+    if (this.upHeld !== -1) s.vy += K.flightClimb * dt;
+    if (s.prepHeld) s.vy -= K.flightDive * dt;
+    s.vy = Math.max(-18, Math.min(12, s.vy));
+    s.vx -= Math.sign(s.vx) * M.airDrag * s.vx * s.vx * dt;
+    s.vx = Math.min(s.vx, M.hardCap);
+    const p0 = { x: s.x, y: s.y };
+    const p1 = { x: s.x + s.vx * dt, y: s.y + s.vy * dt };
+    if (this.tryBounce(p0, p1)) return;
+    const hit = this.sweep(p0, p1);
+    if (hit) {
+      if (hit.kind === 'land') { this.endFlight(); return this.land(hit.surface, hit.x); }
+      if (hit.kind === 'snap') { s.x = p1.x; s.y = hit.y; return; }
+      this.endFlight();
+      return this.failFace(hit.surface, hit.x, hit.y);
+    }
+    s.x = p1.x; s.y = p1.y;
+    if (s.flightTime >= K.flightMax || s.x >= s.flightX1) {
+      this.endFlight();
+      s.mode = 'airborne'; s.leftBy = 'flight'; s.launchVy = s.vy; s.jumpStrokeId = -1;
+    } else if (s.y < this.course.lowestNear(s.x) - M.failDepth) this.failGap();
+  }
+
+  private endFlight(): void {
+    if (this.state.mode !== 'flying' && this.state.flightTime <= 0) return;
+    this.emit({ type: 'flight-end', x: this.state.x, y: this.state.y });
+    this.state.flightTime = 0;
+  }
+
+  /** Descending through a pad pops the rider back up. One trigger per pad; the street underneath still catches a miss. */
+  private tryBounce(p0: Vec2, p1: Vec2): boolean {
+    const s = this.state, K = this.K;
+    if (s.vy >= 0 && p1.y >= p0.y) return false;
+    for (const b of this.course.bounces) {
+      if (s.bounced.includes(b.id)) continue;
+      const half = b.half;
+      const xLo = Math.min(p0.x, p1.x), xHi = Math.max(p0.x, p1.x);
+      if (xHi < b.x - half || xLo > b.x + half) continue;
+      const yLo = Math.min(p0.y, p1.y), yHi = Math.max(p0.y, p1.y);
+      const rad = b.kind === 'balloon' ? b.half : 0.35;
+      if (yHi < b.y - rad || yLo > b.y + rad) continue;
+      if (b.kind !== 'balloon' && !(p0.y >= b.y - 0.05 && p1.y <= b.y + 0.05)) continue;
+      s.x = Math.min(Math.max(s.x, b.x - half), b.x + half);
+      s.y = b.kind === 'balloon' ? b.y : Math.max(s.y, b.y);
+      s.vy = b.kind === 'balloon' ? K.balloonVy : Math.max(K.bounceMinVy, -s.vy * 0.62);
+      s.bounced = [...s.bounced, b.id];
+      s.bounceId = b.id; s.leftBy = 'bounce'; s.launchVy = s.vy;
+      this.emit({ type: 'bounce', bounceId: b.id, kind: b.kind, x: s.x, y: s.y });
+      return true;
+    }
+    return false;
   }
 
   // ================================================================== failure

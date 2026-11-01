@@ -94,7 +94,10 @@ export function orbTouched(o: Orb, prevX: number, st: RiderState): boolean {
   if (o.x <= prevX - 0.05 || o.x > st.x + 0.2) return false;
   if (o.pickup === 'grind') return st.mode === 'grinding' && Math.abs(st.y - o.y) <= ORB.grindBand;
   if (o.pickup === 'wall') return st.mode === 'wallRiding' && Math.abs(st.y - o.y) <= ORB.grindBand + 0.4;
-  if (o.pickup === 'air') return st.mode === 'airborne' && st.y >= o.y - ORB.airBelow && st.y <= o.y + ORB.airAbove;
+  if (o.pickup === 'air') {
+    const aloft = st.mode === 'airborne' || st.mode === 'flying' || st.mode === 'swinging';
+    return aloft && st.y >= o.y - ORB.airBelow && st.y <= o.y + ORB.airAbove;
+  }
   return Math.abs(st.y - o.y) <= ORB.routeBand;
 }
 
