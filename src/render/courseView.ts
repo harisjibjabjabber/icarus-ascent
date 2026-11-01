@@ -51,6 +51,8 @@ function mat(color: string, opts: { vertexColors?: boolean; side?: THREE.Side; r
  * colour) decides the palette; one texture for every surface (tileable in both directions).
  */
 let _cobble: THREE.Texture | null = null;
+/** UV of the first sett's centre (row 0, column 0; canvas y is flipped): a plain stone-coloured texel. */
+const COBBLE_PLAIN_UV: [number, number] = [0.5 / 8, 1 - 0.5 / 6];
 function cobbleTexture(): THREE.Texture | null {
   if (_cobble || typeof document === 'undefined') return _cobble;
   const S = 512, c = document.createElement('canvas');
@@ -60,7 +62,7 @@ function cobbleTexture(): THREE.Texture | null {
   g.fillStyle = `rgb(${m},${m - 4},${m - 10})`;
   g.fillRect(0, 0, S, S);
   const rng = mulberry32(1337);
-  const cols = 8, rows = 6, cw = S / cols, rh = S / rows;
+  const cols = 8, rows = 6, cw = S / cols, rh = S / rows; // COBBLE_PLAIN_UV assumes these
   const stone = (cx: number, cy: number, w: number, h: number, v: number) => {
     for (const ox of [-S, 0, S]) for (const oy of [-S, 0, S]) {
       const x = cx + ox, y = cy + oy;
@@ -81,6 +83,8 @@ function cobbleTexture(): THREE.Texture | null {
     const cx = (i + 0.5 + (j % 2) * 0.5) * cw + (rng() - 0.5) * cw * 0.1, cy = (j + 0.5) * rh + (rng() - 0.5) * rh * 0.08;
     stone(cx, cy, cw * (0.8 + rng() * 0.14), rh * (0.78 + rng() * 0.12), 196 + rng() * 56);
   }
+  // the plain texel for kerbs/sides (COBBLE_PLAIN_UV): a small flat spot of near-white stone
+  g.fillStyle = 'rgb(242,240,236)'; g.beginPath(); g.arc(cw * 0.5, rh * 0.5, 7, 0, Math.PI * 2); g.fill();
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
@@ -151,7 +155,9 @@ export class CourseView {
     this.bx = c.x0; this.by = c.y0;
     const v: ChunkView = { chunk: c, group: g, pooled: [] };
     const surfaces = c.surfaces.map((id) => this.course.findSurface(id)).filter((q): q is Surface => !!q);
-    for (const s of surfaces) g.add(this.surfaceMesh(s), this.lipLine(s));
+    const lip: THREE.Vector3[] = [], edge: THREE.Vector3[] = [];
+    for (const s of surfaces) { g.add(this.surfaceMesh(s)); this.lipLine(s, lip, edge); }
+    for (const [pts, color] of [[lip, COURSE_STYLE.lipLine], [edge, COURSE_STYLE.edgeLine]] as const) if (pts.length) g.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts), lineMat(color)));
     for (const gp of this.course.gaps) if (gp.x0 >= c.x0 - 1e-6 && gp.x0 <= c.x1 + 1e-6) g.add(this.gapPosts(gp.x0, gp.yTakeoff, gp.x1, gp.yReceive));
     for (const id of c.rails) { const r = this.course.rail(id); g.add(this.railMesh(r.points, r.lateral, r.required)); }
     for (const id of c.walls) g.add(this.wallMesh(this.course.wall(id)));
@@ -236,7 +242,8 @@ export class CourseView {
     let grp = 1;
     const push = (x: number, y: number, lat: number, c: THREE.Color) => {
       this.L(x, y, lat, v); pos[grp].push(v.x, v.y, v.z); col[grp].push(c.r, c.g, c.b);
-      uv[grp].push(x / C.cobbleTileU, (lat + W / 2) / C.cobbleTileV);
+      // kerbs, sides and caps sample one fixed texel in the middle of a sett: plain colour, same draw call
+      if (grp === 0) uv[grp].push(x / C.cobbleTileU, (lat + W / 2) / C.cobbleTileV); else uv[grp].push(COBBLE_PLAIN_UV[0], COBBLE_PLAIN_UV[1]);
     };
     const quad = (a: number[], b: number[], c: number[], d: number[], ca: THREE.Color, cb: THREE.Color = ca) => {
       // a,b top edge; c,d bottom edge (each [x,y,lat])
@@ -286,28 +293,25 @@ export class CourseView {
     g.setAttribute('color', new THREE.Float32BufferAttribute([...col[0], ...col[1]], 3));
     g.setAttribute('uv', new THREE.Float32BufferAttribute([...uv[0], ...uv[1]], 2));
     g.computeVertexNormals();
-    const plain = mat('#ffffff', { vertexColors: true, side: THREE.DoubleSide, rim: 0.6, emissive: undefined });
-    let mesh: THREE.Mesh;
-    if (n0 > 0) { g.addGroup(0, n0, 0); g.addGroup(n0, n1, 1); mesh = new THREE.Mesh(g, [cobbleMat(), plain]); }
-    else mesh = new THREE.Mesh(g, plain);
+    void n0; void n1;
+    // one mesh, one material (the textured street and its plain kerbs/sides share a draw call)
+    const mesh = new THREE.Mesh(g, textured ? cobbleMat() : mat('#ffffff', { vertexColors: true, side: THREE.DoubleSide, rim: 0.6, emissive: undefined }));
     mesh.receiveShadow = true;
     mesh.castShadow = true;
     return mesh;
   }
 
-  /** Thin lines on both lips so the riding surface and its edges read crisply at speed. */
-  private lipLine(s: Surface): THREE.Group {
-    const g = new THREE.Group();
-    const mat = lineMat(COURSE_STYLE.lipLine);
+  /** Thin lines on both lips so the riding surface and its edges read crisply at speed. Segments are appended to
+   *  the chunk's two merged LineSegments (lip colour, gap-edge colour): two draw calls per chunk, not ~3 per surface. */
+  private lipLine(s: Surface, lip: THREE.Vector3[], edge: THREE.Vector3[]): void {
     for (const lat of [-COURSE_STYLE.routeWidth / 2, COURSE_STYLE.routeWidth / 2]) {
       const pts = s.points.map((q) => this.L(q.x, q.y + 0.02, lat));
-      g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat));
+      for (let i = 0; i + 1 < pts.length; i++) lip.push(pts[i], pts[i + 1]);
     }
     // a line across each chain end marks takeoff and receiving edges of gaps
     for (const e of [...(s.prev === undefined ? [s.points[0]] : []), ...(s.next === undefined ? [s.points[s.points.length - 1]] : [])]) {
-      g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([this.L(e.x, e.y + 0.03, -COURSE_STYLE.routeWidth / 2), this.L(e.x, e.y + 0.03, COURSE_STYLE.routeWidth / 2)]), lineMat(COURSE_STYLE.edgeLine)));
+      edge.push(this.L(e.x, e.y + 0.03, -COURSE_STYLE.routeWidth / 2), this.L(e.x, e.y + 0.03, COURSE_STYLE.routeWidth / 2));
     }
-    return g;
   }
 
   /** Edge posts: the void of a gap can hide behind a ramp lip from a chase view,
