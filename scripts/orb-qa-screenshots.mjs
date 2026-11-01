@@ -1,77 +1,152 @@
-// Mid-run orb QA at 390×844. Usage: node scripts/orb-qa-screenshots.mjs [baseUrl] [outDir]
+// Mid-run star QA at a 390×844 viewport.
+// Usage: node scripts/orb-qa-screenshots.mjs [baseUrl] [outDir]
 import { chromium } from 'playwright-core';
 
 const base = process.argv[2] ?? 'http://127.0.0.1:4173';
 const out = process.argv[3] ?? '/opt/cursor/artifacts';
+const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 
 const browser = await chromium.launch({
   executablePath: process.env.CHROME ?? '/usr/bin/google-chrome',
-  args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'],
+  args: [
+    '--use-angle=swiftshader',
+    '--use-gl=swiftshader',
+    '--enable-unsafe-swiftshader',
+    '--ignore-gpu-blocklist',
+    '--disable-dev-shm-usage',
+  ],
 });
-
-const phoneShot = async (page, name) => {
-  await page.screenshot({ path: `${out}/${name}-390x844.png` });
-};
-
-const prepEndless = async (page, seed, apOpts) => {
-  await page.goto(`${base}/?endless&seed=${seed}`, { waitUntil: 'networkidle', timeout: 60000 });
-  await page.waitForTimeout(600);
-  await page.evaluate((opts) => {
-    const ic = window.icarus;
-    ic.pause(true);
-    ic.game.retry();
-    document.querySelector('.hint')?.classList.add('gone');
-    document.querySelector('.start')?.classList.remove('show');
-    if (opts) ic.autopilot(opts);
-  }, apOpts);
-};
-
-const advance = (page, ticks) => page.evaluate((t) => { window.icarus.advance(t); }, ticks);
-
 const page = await browser.newPage({
   viewport: { width: 390, height: 844 },
-  deviceScaleFactor: 2,
+  deviceScaleFactor: 1,
   isMobile: true,
   hasTouch: true,
 });
+page.setDefaultTimeout(120000);
+page.on('pageerror', (e) => log('pageerror', e.message));
 
-// HUD orb counter at run start (counter visible at 0)
-await prepEndless(page, 12345, null);
-await phoneShot(page, 'orb-hud-counter');
+const shot = async (name) => {
+  await page.screenshot({ path: `${out}/${name}-390x844.png`, timeout: 180000, animations: 'disabled' });
+  log('shot', name);
+};
 
-// Gold trail ahead — crest-pop with optional rail, early mid-run
-await prepEndless(page, 4, { minSpeed: 15, optionalRail: true, styleFlips: false });
-await advance(page, 120 * 22);
-await page.waitForTimeout(200);
-await phoneShot(page, 'orb-gold-trail-ahead');
+const ready = async (url) => {
+  log('goto', url);
+  await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 90000 });
+  await page.waitForFunction(() => {
+    const v = window.icarus?.game?.view;
+    const veil = document.querySelector('.veil');
+    return !!v?.courseView && v.courseView.chunkCount >= 2 && (!veil || veil.classList.contains('gone'));
+  }, { timeout: 45000 });
+  await page.evaluate(() => {
+    document.querySelector('.veil')?.remove();
+    document.querySelector('.hint')?.classList.add('gone');
+    document.querySelector('.start')?.classList.remove('show');
+  });
+  log('scene ready');
+};
 
-// Purple on high line (hard spot visible)
-await prepEndless(page, 1, { minSpeed: 14, riskyLine: true });
-await advance(page, 120 * 18);
-await page.waitForTimeout(200);
-await phoneShot(page, 'orb-purple-highline');
+const boot = async (seed, zones) => {
+  await ready(`${base}/?endless&seed=${seed}&zones=${zones}`);
+  await page.evaluate(() => {
+    const ic = window.icarus;
+    ic.pause(true);
+    ic.game.retry();
+  });
+};
 
-// Pickup burst + counter bump — ride until orbs collected, pause mid-burst window
-await prepEndless(page, 4, { minSpeed: 16, optionalRail: true, styleFlips: true });
-await advance(page, 120 * 42);
-await page.evaluate(() => window.icarus.pause(true));
-await page.waitForTimeout(180);
-await phoneShot(page, 'orb-pickup-burst-counter');
+/** Coarse ride to a route distance. One render at the end. */
+const gotoX = async (xRel, opts) => {
+  const info = await page.evaluate(({ xRel, opts }) => {
+    const ic = window.icarus;
+    ic.autopilot(opts);
+    ic.advance(120 * 280, (g) => g.sim.state.x - g.course.originX >= xRel, 40);
+    const g = ic.game;
+    const x = g.sim.state.x;
+    const ahead = g.course.orbs
+      .filter((o) => !g.score.tookOrb(o.id) && o.x > x + 2 && o.x < x + 36)
+      .slice(0, 8)
+      .map((o) => ({ tier: o.tier, pickup: o.pickup, dx: +(o.x - x).toFixed(1), lat: +o.lateral.toFixed(2), len: o.trailLen }));
+    return {
+      x: Math.round(x - g.course.originX),
+      mode: g.sim.state.mode,
+      orbs: g.score.orbCount,
+      hud: document.querySelector('.eh-orb-n')?.textContent ?? '',
+      zone: g.course.chunkAt(x)?.zone,
+      ahead,
+    };
+  }, { xRel, opts });
+  log('at', info);
+  return info;
+};
 
-// Run summary — burn through lives with a slow autopilot
-await prepEndless(page, 42, { minSpeed: 3 });
-await page.evaluate(() => {
+const ap = { minSpeed: 14, optionalRail: true, riskyLine: true, pots: 'jump' };
+
+// (a) gold centre-line trail, seed 42 town, first star of the route line near 467 m.
+await boot(42, 'town');
+await gotoX(456, ap);
+await shot('orb-gold-trail-ahead');
+
+// (c) the next pickup on that same line, frozen on the collect frame.
+const burst = await page.evaluate(() => {
   const ic = window.icarus;
-  ic.autopilot({ minSpeed: 3 });
-  for (let n = 0; n < 400 && !ic.game.run.over; n++) {
-    ic.advance(120, (g) => g.run.over || g.sim.state.mode === 'failed', 3);
-    if (ic.game.run.over) break;
-    if (ic.game.sim.state.mode === 'failed') ic.retry();
+  const near = (g) => {
+    const x = g.sim.state.x;
+    const y = g.sim.state.y;
+    return g.course.orbs
+      .filter((o) => !g.score.tookOrb(o.id) && o.pickup === 'route' && Math.abs(o.lateral) < 0.9 && o.x > x + 0.15 && o.x < x + 12 && Math.abs(o.y - y) < 1.4)
+      .sort((a, b) => a.x - b.x)[0];
+  };
+  ic.advance(120 * 40, (g) => {
+    const o = near(g);
+    return !!o && o.x - g.sim.state.x < 1.6;
+  }, 20);
+  const before = ic.game.score.orbCount;
+  let hit = false;
+  let parts = 0;
+  for (let i = 0; i < 28; i++) {
+    ic.advance(1, undefined, 50);
+    const g = ic.game;
+    let n = 0;
+    g.view.scene.traverse((o) => { if (o.isInstancedMesh && o.renderOrder === 650) n = o.count; });
+    if (g.score.orbCount > before) { hit = true; parts = n; break; }
   }
+  // Let the star-pop travel for ~80 ms so the sparkles have left the flash.
+  if (hit) ic.advance(10, undefined, 5);
+  const g = ic.game;
+  let n = 0;
+  g.view.scene.traverse((o) => { if (o.isInstancedMesh && o.renderOrder === 650) n = o.count; });
+  parts = n;
+  return {
+    hit,
+    parts,
+    x: Math.round(g.sim.state.x - g.course.originX),
+    orbs: g.score.orbCount,
+    hud: document.querySelector('.eh-orb-n')?.textContent ?? '',
+    mode: g.sim.state.mode,
+  };
 });
-await page.waitForTimeout(500);
-await phoneShot(page, 'orb-run-summary');
+log('burst', burst);
+await shot('orb-pickup-burst');
 
-const orbs = await page.evaluate(() => window.icarus?.game?.score?.orbCount ?? 0);
-console.log('QA screenshots →', out, 'last orb count', orbs);
+// (e) HUD still showing that count, burst faded.
+await page.evaluate(() => window.icarus.advance(36, undefined, 12));
+const hud = await page.evaluate(() => ({
+  hud: document.querySelector('.eh-orb-n')?.textContent ?? '',
+  x: Math.round(window.icarus.game.sim.state.x - window.icarus.game.course.originX),
+}));
+log('hud', hud);
+await shot('orb-hud-count');
+
+// (b) purple air star on the centre line, seed 1 town, star near 711 m.
+await boot(1, 'town');
+await gotoX(697, ap);
+await shot('orb-purple-ahead');
+
+// (d) harbour centre-line trail, seed 7 at 283 m.
+await boot(7, 'harbour');
+await gotoX(283, ap);
+await shot('orb-harbour-trail');
+
+log('done', out);
 await browser.close();
