@@ -1,7 +1,8 @@
 import { TUNING } from './tuning';
 import { buildLabCourse } from './course/lab';
 import { buildOpeningCourse } from './course/opening';
-import { EndlessCourse } from './course/endless';
+import { EndlessCourse, SPEC } from './course/endless';
+import type { SetPieceSpec } from './course/setpieces';
 import { BUILD_VERSION, VersionWatcher } from './version';
 import type { Course } from './course/course';
 import { Simulation, predictJumpArc } from './sim/simulation';
@@ -15,15 +16,23 @@ import { newSeed } from './rng';
 import { Autopilot } from './diag/autopilot';
 import { Sfx } from './audio/sfx';
 import { LOOKS, nextLook } from './render/heroine/looks';
+import { ScoreKeeper, SCORE } from './score/score';
+import { EndlessHud } from './score/hud';
+import { zonesFromSearch } from './zones/registry';
+import { ZONES } from './zones/registry';
+import type { SimEvent } from './sim/types';
 
 type Mode = 'opening' | 'endless' | 'lab';
 const NEXT_MODE: Record<Mode, Mode> = { opening: 'endless', endless: 'lab', lab: 'opening' };
 const MODE_LABEL: Record<Mode, string> = { opening: 'Course', endless: 'Endless', lab: 'Lab' };
 /** Endless best = longest clean run (no fail) — v2 key: older bests included checkpoint retries. */
 const BEST_KEY = 'icarus.endless.bestClean';
+/** Endless v2: personal best score. */
+const BEST_SCORE_KEY = 'icarus.endless.bestScore';
+/** Endless v2: lives per run. */
+export const MAX_LIVES = 3;
 /** Checkpoint carried across an update reload (sessionStorage). */
 const RESUME_KEY = 'icarus.resume';
-const fmtKm = (m: number) => (m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(2)} km`);
 
 /** Composition root: owns the loop and wires input -> sim -> presentation/diagnostics. */
 export class Game {
@@ -36,6 +45,15 @@ export class Game {
   private attemptStartX = 0;
   /** Endless: distance shown in the HUD, and the local best. */
   private best = 0;
+  /** Endless v2: score, lives, run-over state, personal best score, furthest point reached this run. */
+  readonly score = new ScoreKeeper();
+  lives = MAX_LIVES;
+  runOver = false;
+  private bestScore = 0;
+  private maxX = -Infinity;
+  private lastChunkId = -1;
+  private lastWave = -2;
+  private hud: EndlessHud;
   private startScreen = true;
   /** Opening: index of the furthest lesson checkpoint reached this attempt. */
   private cpIndex = 0;
@@ -80,6 +98,9 @@ export class Game {
       <div class="speed"></div>
       <div class="version"></div>`;
     root.appendChild(hud);
+    this.hud = new EndlessHud(root);
+    this.hud.onAgain = () => this.newRun();
+    this.hud.onSameSeed = () => { this.loadCourse(); this.startRun(); };
     this.overlay = new DevOverlay(root);
     this.view.showArc = this.overlay.visible;
     this.ui = {
@@ -88,6 +109,7 @@ export class Game {
       start: hud.querySelector('.start')!, distance: hud.querySelector('.distance')!,
     };
     try { this.best = Number(localStorage.getItem(BEST_KEY)) || 0; } catch { this.best = 0; }
+    try { this.bestScore = Number(localStorage.getItem(BEST_SCORE_KEY)) || 0; } catch { this.bestScore = 0; }
     this.ui.version.textContent = `v ${BUILD_VERSION}`;
     for (const b of hud.querySelectorAll('button')) {
       b.addEventListener('pointerdown', (e) => e.stopPropagation());
@@ -131,6 +153,10 @@ export class Game {
       /** render stats for perf checks */
       renderInfo: () => ({ ...this.view.renderer.info.render, geometries: this.view.renderer.info.memory.geometries, programs: this.view.renderer.info.programs?.length, quality: this.view.quality.level.name }),
       continueEndless: () => this.continueEndless(),
+      /** dev/review: autopilot off (e.g. to lose a life on purpose) */
+      autopilotOff: () => { this.autopilot = null; },
+      retry: () => this.retry(),
+      score: () => ({ total: this.score.total, chain: this.score.chain, mult: this.score.mult, lives: this.lives, runOver: this.runOver, best: this.score.best }),
       /** dev: jump to an opening lesson's checkpoint */
       lesson: (i: number) => { this.cpIndex = Math.max(0, Math.min(i, this.course.lessons.length - 1)); this.startRun(); },
       // dev: freeze the real-time loop and drive the sim deterministically (screenshots, debugging)
@@ -140,7 +166,7 @@ export class Game {
         for (let i = 0; i < ticks; i++) {
           this.tick();
           this.updateLessons();
-          this.updateHud();
+          this.updateHud(TUNING.sim.dt);
           if (i % renderEvery === renderEvery - 1) this.view.render(TUNING.sim.dt * renderEvery, this.prev, this.curr, 1);
           if (until && until(this)) break;
         }
@@ -190,7 +216,8 @@ export class Game {
 
   private loadCourse(): void {
     if (this.sim) this.saveBest();
-    this.course = this.mode === 'lab' ? buildLabCourse(this.seed) : this.mode === 'endless' ? new EndlessCourse(this.seed) : buildOpeningCourse();
+    this.course = this.mode === 'lab' ? buildLabCourse(this.seed) : this.mode === 'endless' ? new EndlessCourse(this.seed, { zones: zonesFromSearch(location.search) }) : buildOpeningCourse();
+    this.resetEndlessRun();
     this.cpIndex = 0;
     this.endlessCp = null;
     this.view.setCourse(this.course);
@@ -201,7 +228,8 @@ export class Game {
     document.title = this.mode === 'lab' ? "Icarus's Ascent — Movement Lab" : this.mode === 'endless' ? "Icarus's Ascent — Endless" : "Icarus's Ascent";
     const modeBtn = document.querySelector('button.mode'); if (modeBtn) modeBtn.textContent = MODE_LABEL[NEXT_MODE[this.mode]];
     const newBtn = document.querySelector('button.new'); if (newBtn) newBtn.textContent = this.mode === 'opening' ? 'Restart' : 'New run';
-    this.ui.distance.style.display = this.mode === 'endless' ? '' : 'none';
+    this.ui.distance.style.display = 'none'; // endless: the score HUD shows distance
+    this.hud.show(this.mode === 'endless');
     if (this.mode !== 'opening') this.startScreen = false;
     this.ui.start.classList.toggle('show', this.startScreen);
     // the full control sheet is for the lab; the opening teaches through its prompts
@@ -247,6 +275,31 @@ export class Game {
 
   /** Endless: distance of the current clean run (since the attempt started; a retry starts a new one). */
   private distance(): number { return Math.max(0, this.sim.state.x - this.attemptStartX); }
+  /** Endless v2: furthest distance reached this run (across lives). */
+  private runDistance(): number { return Math.max(0, (Number.isFinite(this.maxX) ? this.maxX : this.course.startX) - this.course.startX); }
+
+  /** Endless v2: a fresh run: score, lives, banners. */
+  private resetEndlessRun(): void {
+    this.score.reset();
+    this.lives = MAX_LIVES; this.runOver = false; this.maxX = -Infinity; this.lastChunkId = -1; this.lastWave = -2;
+    this.hud?.hideSummary(); this.hud?.setLives(this.lives, MAX_LIVES);
+  }
+
+  /** Endless v2: wave / set piece / zone banners and the set-piece bonus, as the rider enters a new chunk. */
+  private onChunk(): void {
+    const st = this.sim.state;
+    const c = this.course.chunkAt(st.x);
+    if (!c || c.id === this.lastChunkId) return;
+    const prev = this.lastChunkId >= 0 ? this.course.chunks.find((q) => q.id === this.lastChunkId) : undefined;
+    this.lastChunkId = c.id;
+    if (prev?.setPiece && st.mode !== 'failed') this.score.bonus(`${prev.title} cleared`, SCORE.setPiece);
+    const w = c.wave;
+    if (c.setPiece && w) this.hud.banner(`Wave ${w.index + 1} · peak`, c.title, (SPEC[c.spec ?? ''] as SetPieceSpec | undefined)?.blurb ?? '', 'peak', 3);
+    else if (c.gate) { const z = ZONES[c.gate.to]; this.hud.banner('Now entering', z?.name ?? c.gate.to, `${z?.tagline ?? ''}${z?.experimental ? ' · rough' : ''}`, '', 3.2); }
+    else if (w && w.index !== this.lastWave && w.phase === 'build' && w.index >= 0) this.hud.banner(`Wave ${w.index + 1}`, w.index === 0 ? 'Here we go' : 'Faster, harder', '', '', 2);
+    else if (w && w.phase === 'breather' && prev?.wave?.phase !== 'breather') this.hud.banner('Breather', 'Catch your breath', '', '', 1.8);
+    if (w) this.lastWave = w.index;
+  }
 
   private saveBest(): void {
     if (this.mode !== 'endless' || this.replayer) return;
@@ -273,6 +326,7 @@ export class Game {
     const start = replay ? replay.start : this.startPoint();
     this.sim = new Simulation(this.course, TUNING, start);
     this.attemptStartX = this.sim.state.x;
+    if (this.mode === 'endless') { this.score.respawn(); this.lastChunkId = -1; }
     this.recorder = new Recorder(this.seed, this.course.kind, start);
     this.runStarted = false;
     this.replayer = replay ? new Replayer(replay) : null;
@@ -288,6 +342,7 @@ export class Game {
   }
 
   retry(): void {
+    if (this.mode === 'endless' && this.runOver) { this.newRun(); return; }
     if (this.sim.state.mode === 'finished') this.cpIndex = 0; // finished: ride again from the top
     this.startRun();
   }
@@ -310,6 +365,7 @@ export class Game {
     this.overlay.onAction(a);
     const st = this.sim.state;
     if (st.mode === 'finished' && this.mode === 'opening') return; // finish screen: use its buttons
+    if (this.mode === 'endless' && this.runOver) return; // summary screen: use its buttons
     if (st.mode === 'failed' || st.mode === 'finished') {
       const t = performance.now() / 1000;
       if (t - this.failTime >= TUNING.failure.retryLockout && (a.type === 'tap' || a.type === 'up' || (a.type === 'down' && a.fresh))) this.retry();
@@ -336,7 +392,13 @@ export class Game {
       const c = this.course.chunkAt(st.x);
       if (c && c.cpX <= st.x && (!this.endlessCp || c.cpX > this.endlessCp.x)) this.endlessCp = { x: c.cpX, speed: c.cpSpeed, title: c.title };
     }
-    for (const e of this.sim.drainEvents()) {
+    const events: SimEvent[] = this.sim.drainEvents();
+    if (this.mode === 'endless' && !this.replayer) {
+      this.score.update(TUNING.sim.dt, st, events, this.course);
+      if (st.x > this.maxX) this.maxX = st.x;
+      this.onChunk();
+    }
+    for (const e of events) {
       this.view.onEvent(e, this.curr.speed);
       this.sfx.onEvent(e);
       this.overlay.onEvent(e);
@@ -355,10 +417,21 @@ export class Game {
       this.ui.failSub.textContent = finished ? 'Tap / ↑ to ride again' : l ? `Tap / ↑ to retry · from lesson ${l.id + 1}: ${l.title}` : 'Tap / ↑ to retry · same course';
       this.ui.fail.classList.add('show');
     }
-    if (this.mode === 'endless' && !finished) {
+    if (this.mode === 'endless' && !finished && !this.replayer) {
       this.saveBest();
+      this.lives = Math.max(0, this.lives - 1);
+      this.hud.setLives(this.lives, MAX_LIVES);
       const cp = this.endlessCp;
-      this.ui.failSub.textContent = `${fmtKm(this.distance())} clean run${this.distance() >= this.best - 0.5 && this.best > 0 ? ' · new best' : ` · best ${fmtKm(this.best)}`} — tap / ↑ to retry${cp ? ` from “${cp.title}”` : ''}`;
+      if (this.lives > 0) {
+        this.ui.failSub.textContent = `Life lost · ${this.lives} left — tap / ↑ to carry on${cp ? ` from “${cp.title}”` : ''}`;
+      } else {
+        this.runOver = true;
+        this.score.bank();
+        const total = this.score.banked, newBest = total > this.bestScore;
+        if (newBest) { this.bestScore = total; try { localStorage.setItem(BEST_SCORE_KEY, String(Math.round(total))); } catch { /* private mode */ } }
+        this.ui.fail.classList.remove('show');
+        this.hud.summary({ score: total, best: this.score.best, distance: this.runDistance(), tricks: this.score.tricks, nearMisses: this.score.nearMisses, personalBest: this.bestScore, newBest, seed: this.seed });
+      }
     }
     if (!this.replayer) this.lastTrace = this.recorder.finish(this.sim.state.tick);
     this.versionWatcher?.safePoint();
@@ -408,16 +481,15 @@ export class Game {
         : this.sim.state.mode,
     });
     this.ui.speed.style.setProperty('--v', String(Math.min(1, this.curr.speed / TUNING.movement.hardCap)));
-    this.updateHud();
+    this.updateHud(dtReal);
   }
 
-  private updateHud(): void {
+  private updateHud(dt: number): void {
     // the title card goes once the rider is moving (any input, autopilot or replay)
     if (this.startScreen && this.sim.state.x > this.course.startX + 3) { this.startScreen = false; this.ui.start.classList.remove('show'); }
     if (this.mode === 'endless') {
-      const d = this.distance();
-      const txt = `${fmtKm(d)}${this.best > 0 ? ` · best ${fmtKm(Math.max(this.best, this.replayer ? 0 : d))}` : ''}`;
-      if (this.ui.distance.textContent !== txt) this.ui.distance.textContent = txt;
+      const idle = this.sim.state.mode === 'grounded' ? Math.min(1, this.score.idleTime / SCORE.idle) : 0;
+      this.hud.update(dt, this.score, this.runDistance(), this.bestScore, idle);
     }
   }
 

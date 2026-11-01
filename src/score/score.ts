@@ -55,6 +55,14 @@ export class ScoreKeeper {
   get total(): number { return this.banked + Math.round(this.comboPoints * this.mult); }
 
   drainPopups(): Popup[] { return this.popups.splice(0); }
+  /** Seconds of plain rolling so far (the combo banks at SCORE.idle). */
+  get idleTime(): number { return this.idle; }
+
+  /** A whole new run. */
+  reset(): void {
+    this.banked = 0; this.chain = 0; this.comboPoints = 0; this.best = { points: 0, chain: 0, mult: 1 };
+    this.tricks = 0; this.nearMisses = 0; this.idle = 0; this.maxX = -Infinity; this.popups = []; this.respawn();
+  }
 
   private link(text: string, pts: number, kind: PopupKind = 'trick'): void {
     this.chain++; this.tricks++;
