@@ -129,20 +129,48 @@ export class PhraseBuilder {
    * The street stays continuous. The void is where an airborne miss falls through; it ends before the rail
    * so a clean grind pops onto the street. Height sits inside the rail catch band of a normal jump.
    */
-  highLine(x0: number, len: number, h0 = 1.12, h1 = 0.96): this {
+  highLine(x0: number, len: number, h0 = 1.12, h1 = 0.96, dress: NonNullable<Rail['dress']> = 'wash'): this {
     const n = Math.max(2, Math.ceil(len / 3) + 1);
     const points = Array.from({ length: n }, (_, i) => {
       const t = i / (n - 1);
       const x = x0 + len * t;
       return { x, y: this.yAt(x) + h0 + (h1 - h0) * t };
     });
-    this.rails.push({ points, lateral: 1.15, required: false, risky: true, voidX0: x0 + 0.45, voidX1: x0 + len - 5.2 });
+    this.rails.push({ points, lateral: 1.15, required: false, risky: true, voidX0: x0 + 0.45, voidX1: x0 + len - 5.2, dress });
     this.features.push({ x: x0, kind: 'rail-risky', required: false });
+    return this;
+  }
+  /**
+   * A safe elevated line (no void) dressed as part of the street: laundry, a balcony rail, a gutter
+   * or bunting, hung off the facade. Catchable from a normal jump. Orb trails are stamped later.
+   */
+  lineDress(x0: number, len: number, h: number, dress: NonNullable<Rail['dress']>): this {
+    const n = Math.max(2, Math.ceil(len / 3) + 1);
+    const points = Array.from({ length: n }, (_, i) => {
+      const t = i / (n - 1);
+      const x = x0 + len * t;
+      return { x, y: this.yAt(x) + h };
+    });
+    this.rails.push({ points, lateral: 1.15, required: false, dress });
+    this.features.push({ x: x0, kind: 'rail-optional', required: false });
     return this;
   }
   /** Descent with an optional handrail along most of it. */
   railSlope(len: number, dy: number): this { const a = this.cur().x; this.slope(len, dy); return this.handrail(a + 3, a + len - 4, 0.95); }
-  wall(w: Omit<Wall, 'id'>): void { this.walls.push(w); }
+  /**
+   * A wall ride beside the street. Gold trails are stamped along the wall afterwards.
+   * `trailY` / `purple` are accepted so phrase calls can mark the ride; the stamper owns the orbs.
+   */
+  wall(w: Omit<Wall, 'id'> & { trailY?: number; purple?: boolean }): void {
+    const { trailY: _trailY, purple: _purple, ...rest } = w;
+    void _trailY; void _purple;
+    this.walls.push(rest);
+    if (!rest.required) {
+      this.features.push({ x: rest.x0, kind: 'wall', required: false });
+      // the ride itself is the thing to do; a long wall's far end keeps the next run-in from reading as empty
+      if (rest.x1 - rest.x0 >= 12) this.features.push({ x: rest.x1 - 1, kind: 'wall', required: false });
+    }
+  }
   /** `cluster`: a second pot right behind the first, cleared or skimmed together with it. */
   pot(x: number, cluster = false): void {
     this.obstacles.push({ kind: 'pot', x });
@@ -160,6 +188,11 @@ export class PhraseBuilder {
 }
 
 const HC = TUNING.movement.hardCap;
+
+/** Phrases that offer a wall ride (optional taps, transfers, the gap ride, and the wall set pieces). */
+function isWallRide(id: string): boolean {
+  return id.startsWith('wall-') || id === 'sp-rail-wall' || id === 'sp-canal' || id === 'sp-crest-wall';
+}
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
 /** Phrase library. Entry/exit speeds are checked by tests/endless*.test.ts. */
@@ -218,10 +251,55 @@ export const PHRASES: PhraseSpec[] = [
   },
   {
     id: 'high-line', title: 'High line', tier: 2, style: true, required: false, entry: [8, HC], exit: [8, HC], airtime: 0.55, receiving: 'flat', cpSpeed: 12,
-    build: (b) => {
-      b.flat(40);
+    build: (b, _d, r) => {
+      // a street ramp feeds the line, then the street returns to flat under it (gentle enough not to crest-pop)
+      const dresses = ['wash', 'balcony', 'gutter', 'bunting'] as const;
+      b.flat(14).kicker(16, 1).slope(12, -1, easeOut);
       const x0 = b.cur().x, len = 22;
-      b.flat(len + 6).highLine(x0, len).flat(8).crest(1.6, 9, 1.6, 14).flat(14);
+      b.flat(len + 6).highLine(x0, len, 1.12, 0.96, dresses[Math.floor(r() * dresses.length)]).flat(8).crest(1.6, 9, 1.6, 14).flat(14);
+    },
+  },
+  // optional wall rides: a chance about every 150-250 m. The street stays continuous except wall-gap.
+  {
+    id: 'wall-tap', title: 'Short wall tap', tier: 1, style: false, required: false, entry: [6, HC], exit: [8, HC], airtime: 0.35, receiving: 'flat', cpSpeed: 12,
+    build: (b) => {
+      b.flat(14);
+      const x = b.cur().x, y = b.cur().y;
+      b.flat(22);
+      b.wall({ x0: x + 6, x1: x + 14, yBottom: y - 0.4, yTop: y + 3.6, side: 'right', lateral: 2.4, required: false, trailY: y + 1.5 });
+      b.flat(12);
+    },
+  },
+  {
+    id: 'wall-long', title: 'Long wall ride', tier: 2, style: false, required: false, entry: [6, HC], exit: [8, HC], airtime: 0.4, receiving: 'flat', cpSpeed: 12,
+    build: (b) => {
+      b.flat(12);
+      const x = b.cur().x, y = b.cur().y;
+      b.flat(40);
+      b.wall({ x0: x + 4, x1: x + 28, yBottom: y - 0.4, yTop: y + 3.8, side: 'right', lateral: 2.4, required: false, trailY: y + 1.5, purple: true });
+      b.flat(12);
+    },
+  },
+  {
+    id: 'wall-transfer', title: 'Wall to wall', tier: 2, style: false, required: false, entry: [6, HC], exit: [8, HC], airtime: 0.45, receiving: 'flat', cpSpeed: 12,
+    build: (b) => {
+      b.flat(12);
+      const x = b.cur().x, y = b.cur().y;
+      b.flat(44);
+      b.wall({ x0: x + 4, x1: x + 16, yBottom: y - 0.4, yTop: y + 3.6, side: 'right', lateral: 2.4, required: false, trailY: y + 1.5 });
+      b.wall({ x0: x + 19, x1: x + 33, yBottom: y - 0.4, yTop: y + 3.6, side: 'right', lateral: 2.4, required: false, trailY: y + 1.5, purple: true });
+      b.flat(12);
+    },
+  },
+  {
+    id: 'wall-line', title: 'Wall into a washing line', tier: 2, style: false, required: false, entry: [6, HC], exit: [8, HC], airtime: 0.5, receiving: 'flat', cpSpeed: 12,
+    build: (b) => {
+      b.flat(12);
+      const x = b.cur().x, y = b.cur().y;
+      b.flat(48);
+      b.wall({ x0: x + 4, x1: x + 16, yBottom: y - 0.4, yTop: y + 3.6, side: 'right', lateral: 2.4, required: false, trailY: y + 1.5 });
+      b.lineDress(x + 15, 16, 1.05, 'wash');
+      b.flat(12);
     },
   },
   // ------------------------------------------------------------------ compulsory actions
@@ -554,12 +632,32 @@ export class Assembler {
     if (!cands.length) cands = pool.filter((p) => p !== prev && !p.required && p.tier <= tier);
     if (!cands.length) cands = [SPEC.recovery];
     const topTier = Math.max(...cands.map((p) => p.tier));
+    const tier3open = cands.some((p) => p.tier === 3);
+    // Space wall rides: dampen a second one immediately, and pull one forward once a couple of phrases have had none.
+    // The pull prefers a wall of the hardest tier that actually fits, so a due ride doesn't flatten the later waves.
+    let sinceWall = 0;
+    for (let i = this.history.length - 1; i >= 0; i--) {
+      if (isWallRide(this.history[i].id)) break;
+      sinceWall++;
+    }
     const w = cands.map((p) => {
       let k = p.style ? 1.3 : 1; // the user wants lots of hills/kickers to trick off (but also things to do: dense course)
       if (p.tier === topTier) k *= 1.6; // the hardest on offer (in breathers and peak tails: the bigger style air)
+      if (p.tier === 3) k *= 1.25; // tier-3 phrases are long, so a chunk-average stays harder once they unlock
       if (wave.phase === 'peak' && p.required) k *= 1.5; // peaks: more compulsory chains
       if (p.required && this.requiredRun >= maxRequiredRun(d)) k *= 0.5;
       if (y < y0 - 100 && netDrop(p) < -6) k *= 0.6; // deep below the start: fewer big descents
+      if (isWallRide(p.id)) {
+        if (sinceWall === 0) k *= 0.35;
+        else if (sinceWall >= 2) {
+          const due = sinceWall >= 3 ? 7 : 4.5;
+          // Once tier 3 fits, a due ride is the gap wall. Easier walls stay available, without crowding the hard phrases out.
+          if (topTier >= 3 && tier3open) k *= p.tier === 3 ? due : 1.15;
+          else if (topTier <= 2 && p.id === 'wall-tap') k *= due;
+          else if (p.tier >= 2) k *= due;
+          else k *= 1.4;
+        }
+      }
       return k * this.weightOf(zone, p.id);
     });
     let pick = r() * w.reduce((a, b) => a + b, 0), spec = cands[cands.length - 1];
@@ -642,7 +740,11 @@ export class EndlessCourse extends Course {
     // seamless join onto the previous phrase
     if (this.lastSurface) { this.lastSurface.next = surfaces[0].id; surfaces[0].prev = this.lastSurface.id; }
     const rails: Rail[] = b.rails.map((q) => ({ id: this.ids.r++, ...q }));
-    const walls: Wall[] = b.walls.map((q) => ({ id: this.ids.w++, ...q }));
+    const rawWalls = b.walls.map((q) => ({ ...q }));
+    // harbour walls read as warehouses and hulls; the town keeps the shop front
+    if (plan.zone === 'harbour') for (const w of rawWalls) w.face = (w.x1 - w.x0) >= 16 ? 'warehouse' : 'hull';
+    else for (const w of rawWalls) w.face ??= 'shop';
+    const walls: Wall[] = rawWalls.map((q) => ({ id: this.ids.w++, ...q }));
     const ground = (x: number) => {
       for (const s of surfaces) if (x >= Course.x0(s) && x <= Course.x1(s)) return Course.sample(s, x).y;
       throw new Error(`no ground at ${x} in ${plan.spec.id}`);
@@ -660,6 +762,7 @@ export class EndlessCourse extends Course {
     const last = surfaces[surfaces.length - 1];
     const end = last.points[last.points.length - 1];
     const trailPlacements: OrbPlacement[] = [];
+    const nextRareX = { at: this.nextRareAt };
     stampOrbTrails(trailPlacements, {
       phraseId: plan.spec.id,
       chunkX0: this.endX,
@@ -673,8 +776,9 @@ export class EndlessCourse extends Course {
       yAt: ground,
       rng: this.asm.rngFor(i),
       nextTrailId: () => this.nextTrailId++,
-      nextRareX: { at: this.nextRareAt },
+      nextRareX,
     });
+    this.nextRareAt = nextRareX.at;
     const orbs: Orb[] = trailPlacements.map((q) => ({ id: this.ids.h++, ...q }));
     const chunk: Chunk = {
       id: this.ids.c++, x0: this.endX, x1: end.x, y0: this.endY, y1: end.y, title: plan.spec.title, spec: plan.spec.id, tier: plan.spec.tier,

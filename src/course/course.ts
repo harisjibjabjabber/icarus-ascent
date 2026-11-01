@@ -46,6 +46,11 @@ export interface Rail {
   risky?: boolean;
   voidX0?: number;
   voidX1?: number;
+  /**
+   * How an elevated line is dressed. The grind spline is unchanged; the mesh hangs off a facade
+   * (washing line, balcony rail, gutter or bunting) instead of a fence standing in the street.
+   */
+  dress?: 'wash' | 'balcony' | 'gutter' | 'bunting';
 }
 
 /** Rideable wall (milestone 2 mechanics). */
@@ -58,6 +63,8 @@ export interface Wall {
   side: 'right';
   lateral: number;
   required: boolean;
+  /** Town shop wall, harbour warehouse, or a moored hull. Presentation only. */
+  face?: 'shop' | 'warehouse' | 'hull';
 }
 
 /** An explicit gap between two ground chains. */

@@ -8,10 +8,17 @@ export const TOWN: Zone = {
   phrases: [
     'crest-pop', 'rollers', 'valley-launch', 'pop-chain', 'big-kicker', 'double-pop', 'high-line',
     'hop', 'pot', 'skim-pair', 'pot-pillar', 'stepdowns', 'ramp-flip', 'rail-launch', 'rail-gap',
-    'wall-gap', 'ramp-pillar', 'crest-pillar', 'gap-pillar',
+    'wall-gap', 'wall-tap', 'wall-long', 'wall-transfer', 'wall-line',
+    'ramp-pillar', 'crest-pillar', 'gap-pillar',
   ],
   setPieces: ['sp-pot-gauntlet', 'sp-quay', 'sp-stepdown-flip', 'sp-rooftops', 'sp-rail-wall', 'sp-bell-tower', 'sp-canal', 'sp-crest-wall'],
-  weights: {},
+  weights: {
+    'wall-tap': 2.6,
+    'wall-long': 2.2,
+    'wall-transfer': 2.2,
+    'wall-line': 2.2,
+    'wall-gap': 3.2,
+  },
   waves: 3,
   theme: {
     scenery: 'town',

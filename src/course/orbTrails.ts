@@ -119,13 +119,13 @@ function crestArc(ctx: OrbTrailContext, out: OrbPlacement[], id: number, fx: Fea
 
 function wallTrail(out: OrbPlacement[], id: number, w: Wall): void {
   const len = w.x1 - w.x0;
-  if (len < 8) return;
-  const n = clamp(Math.round(len / 4), 5, 9);
+  if (len < 6) return;
+  const n = clamp(Math.round(len / 3.4), 4, 9);
+  // a flat line in the ride band, just off the face, so holding right collects the whole trail
+  const y = w.yBottom + (w.yTop - w.yBottom) * 0.42;
   const pts = Array.from({ length: n }, (_, i) => {
     const t = (i + 0.5) / n;
-    const x = w.x0 + len * t;
-    const y = w.yBottom + (w.yTop - w.yBottom) * (0.25 + 0.55 * t);
-    return { x, y, lat: w.lateral };
+    return { x: w.x0 + len * t, y, lat: w.lateral - 0.35 };
   });
   pushTrail(out, id, 'common', 'wall', pts);
 }
@@ -153,10 +153,10 @@ export function stampOrbTrails(out: OrbPlacement[], ctx: OrbTrailContext): void 
   }
   for (const w of ctx.walls) {
     wallTrail(out, tid(), w);
-    if (w.required) {
+    if (w.required || w.x1 - w.x0 >= 22) {
       const x = w.x0 + (w.x1 - w.x0) * 0.88;
-      const y = w.yBottom + (w.yTop - w.yBottom) * 0.72;
-      rarePoint(out, tid(), x, y, w.lateral, 'wall');
+      const y = w.yBottom + (w.yTop - w.yBottom) * 0.42;
+      rarePoint(out, tid(), x, y, w.lateral - 0.35, 'wall');
     }
   }
   for (const f of ctx.features) if (f.kind === 'crest') crestArc(ctx, out, tid(), f);

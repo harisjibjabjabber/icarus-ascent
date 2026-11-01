@@ -91,6 +91,24 @@ No new accounts or purchases. Poly Pizza and kenney.nl direct downloads were blo
 
 Bake: `node art/orb/process-assets.mjs` (requires `sharp` for atlas; `ffmpeg` for audio).
 
+The risky high line is no longer a lone fence panel. It is a facade-anchored washing line, balcony rail, gutter or bunting (see the next section). `rail` remains in `props.bin` unused by that mesh.
+
+## Wall rides and dressed lines (2026-11-01)
+
+Downloaded for this pass. Kenney zips from OpenGameArt (CC0 stated on each pack page and in the pack's `License.txt`). Pixor models from `https://pixor.art/library/files/<name>/pixor-library-<name>.glb`. Pixor publishes the library as CC0: https://pixor.art/library/license/ (checked 2026-11-01). No accounts or purchases. `art/pipeline/bake_props.py` recolours Kenney by colormap and Pixor by material name, and drops named parts (posts, poles, smoke).
+
+| Asset | Where | Licence | Evidence | Ships? |
+|---|---|---|---|---|
+| `art/props/kenney/pirate/` (`boat-row-small.glb`, `boat-row-large.glb`, `mast-ropes.glb`, `flag-pennant.glb`, `flag-pirate-pennant.glb`, `colormap.png`, `License.txt`) | Kenney Pirate Kit 2.1. https://opengameart.org/content/pirate-kit — zip `kenney_pirate-kit_2.1.zip` | **CC0 1.0** | `License.txt` ("Creative Commons Zero, CC0", created 17-02-2026); OpenGameArt page lists CC0 | source; baked into `props.bin` (`boat-small`, `boat-large`, `crane`, `pennant`, `pennant-dark`), not instanced yet |
+| `art/props/kenney/town/` (`stall-red.glb`, `stall-green.glb`, `colormap.png`, `License.txt`) | Kenney Fantasy Town Kit 2.0. https://opengameart.org/content/fantasy-town-kit — zip `kenney_fantasy-town-kit_2.0.zip` | **CC0 1.0** | `License.txt` (CC0, created 03-08-2025) | source; baked (`stall-red`, `stall-green`), not instanced yet |
+| `art/props/kenney/holiday/` (`lights-colored.glb`, `colormap.png`, `License.txt`) | Kenney Holiday Kit 2.0. https://opengameart.org/content/holiday-kit — zip `kenney_holiday-kit.zip` | **CC0 1.0** | `License.txt` (CC0, created 11-12-2024) | source; baked (`lights`), not instanced yet |
+| `art/props/kenney/city/` (`detail-awning.glb`, `detail-awning-wide.glb`, `colormap.png`, `License.txt`) | Kenney City Kit Commercial 2.1. https://opengameart.org/content/city-kit-commercial — zip `kenney_city-kit-commercial_2.1.zip` | **CC0 1.0** | `License.txt` (CC0, created 21-07-2025) | source; baked (`awning`, `awning-wide`), not instanced yet |
+| `art/props/pixor/pixor-library-washing-line.glb` | https://pixor.art/library/files/washing-line/pixor-library-washing-line.glb | **CC0** | Pixor library licence page | source; clothes (`cloth-sheet`, `cloth-shirt`, `cloth-sock`, `cloth-towel`) **placed** on dressed washing lines. Posts dropped |
+| `art/props/pixor/pixor-library-sign-inn.glb` | https://pixor.art/library/files/sign-inn/pixor-library-sign-inn.glb | **CC0** | same | source; iron arm baked as `bracket` and **placed** from the line out to the facade. Post dropped |
+| `art/props/pixor/pixor-library-fishing-boat.glb`, `pier-post.glb`, `hot-air-balloon.glb`, `street-lamp-oil.glb`, `lamp-post.glb`, `sign-shop.glb`, `banner-street.glb`, `chimney-pot.glb`, `steam-vent.glb`, `windmill.glb`, `pinwheel.glb` | `https://pixor.art/library/files/<name>/pixor-library-<name>.glb` | **CC0** | same | source; baked (`boat-fish`, `bollard`, `balloon`, `lamp-oil`, `lamp-post`, `sign-shop`, `banner`, `chimney`, `vent`, `windmill`, `pinwheel`), not instanced yet |
+
+Harbour wall rides are drawn in code (warehouse bays, planked hulls), not from these meshes. Town shop walls stay the existing azulejo wall. Gold orb trails along a wall ride use the orb meshes already in the game (pickup `wall`, so a pass on the street does not take them).
+
 ## Vision presets (time of day + hills biome mock, ported from `spike/vision`, 2026-11-01)
 
 | Asset | Where | Licence | Evidence | Ships? |
