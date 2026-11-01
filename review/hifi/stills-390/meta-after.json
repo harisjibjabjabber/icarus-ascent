@@ -1,0 +1,146 @@
+[
+ {
+  "tick": 240,
+  "x": 24,
+  "mode": "grounded",
+  "canvas": [
+   390,
+   844
+  ],
+  "renderDpr": 1,
+  "frame": 210,
+  "calls": 118,
+  "triangles": 895048,
+  "points": 220,
+  "lines": 728,
+  "geometries": 90,
+  "programs": 65,
+  "quality": "ultra"
+ },
+ {
+  "tick": 720,
+  "x": 102,
+  "mode": "grounded",
+  "canvas": [
+   390,
+   844
+  ],
+  "renderDpr": 1,
+  "frame": 455,
+  "calls": 128,
+  "triangles": 874881,
+  "points": 220,
+  "lines": 728,
+  "geometries": 93,
+  "programs": 65,
+  "quality": "ultra"
+ },
+ {
+  "tick": 1200,
+  "x": 174,
+  "mode": "airborne",
+  "canvas": [
+   390,
+   844
+  ],
+  "renderDpr": 1,
+  "frame": 700,
+  "calls": 123,
+  "triangles": 885576,
+  "points": 220,
+  "lines": 728,
+  "geometries": 97,
+  "programs": 65,
+  "quality": "ultra"
+ },
+ {
+  "tick": 1680,
+  "x": 239,
+  "mode": "grounded",
+  "canvas": [
+   390,
+   844
+  ],
+  "renderDpr": 1,
+  "frame": 945,
+  "calls": 120,
+  "triangles": 886168,
+  "points": 220,
+  "lines": 728,
+  "geometries": 96,
+  "programs": 65,
+  "quality": "ultra"
+ },
+ {
+  "tick": 2160,
+  "x": 298,
+  "mode": "grounded",
+  "canvas": [
+   390,
+   844
+  ],
+  "renderDpr": 1,
+  "frame": 1190,
+  "calls": 119,
+  "triangles": 849902,
+  "points": 220,
+  "lines": 728,
+  "geometries": 97,
+  "programs": 65,
+  "quality": "ultra"
+ },
+ {
+  "tick": 2640,
+  "x": 367,
+  "mode": "grounded",
+  "canvas": [
+   390,
+   844
+  ],
+  "renderDpr": 1,
+  "frame": 1435,
+  "calls": 123,
+  "triangles": 726748,
+  "points": 220,
+  "lines": 728,
+  "geometries": 97,
+  "programs": 65,
+  "quality": "ultra"
+ },
+ {
+  "tick": 3120,
+  "x": 433,
+  "mode": "grinding",
+  "canvas": [
+   390,
+   844
+  ],
+  "renderDpr": 1,
+  "frame": 1680,
+  "calls": 118,
+  "triangles": 669557,
+  "points": 220,
+  "lines": 728,
+  "geometries": 96,
+  "programs": 65,
+  "quality": "ultra"
+ },
+ {
+  "tick": 3600,
+  "x": 497,
+  "mode": "grounded",
+  "canvas": [
+   390,
+   844
+  ],
+  "renderDpr": 1,
+  "frame": 1925,
+  "calls": 122,
+  "triangles": 573383,
+  "points": 220,
+  "lines": 728,
+  "geometries": 100,
+  "programs": 67,
+  "quality": "ultra"
+ }
+]

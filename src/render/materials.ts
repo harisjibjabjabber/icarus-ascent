@@ -20,6 +20,16 @@ export const ART = {
   rim: 0.32,
 };
 
+/**
+ * Hi-fi: the sun's shadow box follows the rider, so its edge used to be a visible line where shadows start. Patch
+ * three's PCF lookup (once, before any program compiles) so shadows fade out over the outer ~18% of the box instead.
+ */
+const SHADOW_RET = 'return mix( 1.0, shadow, shadowIntensity );';
+if (THREE.ShaderChunk.shadowmap_pars_fragment.includes(SHADOW_RET) && !THREE.ShaderChunk.shadowmap_pars_fragment.includes('shadowEdgeFade')) {
+  THREE.ShaderChunk.shadowmap_pars_fragment = THREE.ShaderChunk.shadowmap_pars_fragment.replace(SHADOW_RET,
+    'vec2 shadowEdge = min( shadowCoord.xy, 1.0 - shadowCoord.xy ); float shadowEdgeFade = smoothstep( 0.0, 0.18, min( shadowEdge.x, shadowEdge.y ) );\n\t\t\treturn mix( 1.0, shadow, shadowIntensity * shadowEdgeFade );');
+}
+
 export const ART_UNIFORMS = {
   uTime: { value: 0 },
   uWind: { value: 1 },

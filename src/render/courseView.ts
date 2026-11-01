@@ -1,3 +1,4 @@
+import { TEX_ANISO } from './environment';
 import * as THREE from 'three';
 import { Course, type Chunk, type Obstacle, type Surface } from '../course/course';
 import { toScene, toSceneRaw, ROUTE_YAW } from './space';
@@ -55,7 +56,7 @@ let _cobble: THREE.Texture | null = null;
 const COBBLE_PLAIN_UV: [number, number] = [0.5 / 8, 1 - 0.5 / 6];
 function cobbleTexture(): THREE.Texture | null {
   if (_cobble || typeof document === 'undefined') return _cobble;
-  const S = 512, c = document.createElement('canvas');
+  const S = 1024, c = document.createElement('canvas'); // hi-fi: 1024 (sharp at DPR 3)
   c.width = S; c.height = S;
   const g = c.getContext('2d')!;
   const m = Math.round(COURSE_STYLE.cobbleMortar * 255);
@@ -84,11 +85,11 @@ function cobbleTexture(): THREE.Texture | null {
     stone(cx, cy, cw * (0.8 + rng() * 0.14), rh * (0.78 + rng() * 0.12), 196 + rng() * 56);
   }
   // the plain texel for kerbs/sides (COBBLE_PLAIN_UV): a small flat spot of near-white stone
-  g.fillStyle = 'rgb(242,240,236)'; g.beginPath(); g.arc(cw * 0.5, rh * 0.5, 7, 0, Math.PI * 2); g.fill();
+  g.fillStyle = 'rgb(242,240,236)'; g.beginPath(); g.arc(cw * 0.5, rh * 0.5, 14, 0, Math.PI * 2); g.fill();
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.anisotropy = 4;
+  t.anisotropy = TEX_ANISO.value; TEX_ANISO.list.push(t);
   _cobble = t;
   return t;
 }

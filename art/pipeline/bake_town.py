@@ -12,7 +12,7 @@ MVM = '/workspace/assets-dl/mvm/glTF/'
 KT = '/workspace/assets-dl/kenney-town/Models/GLB format/'
 KP = '/workspace/assets-dl/pirate/Models/GLB format/'
 LITE = '/workspace/town-src/'
-OUT = 'public/town/'
+OUT = os.environ.get('OUT', 'public/town/')
 FIXED, PLASTER, SHUTTER, ROOF, TRIM = 0, 1, 2, 3, 4
 hexc = lambda h: np.array([int(h[i:i + 2], 16) for i in (1, 3, 5)], float) / 255
 def grad(a, b, lo=0.1, hi=0.8):
@@ -33,6 +33,10 @@ MAT = {
     'MI_WindowGlass': (FIXED, lambda c: np.repeat(hexc('#4a6a80')[None], len(c), 0)),
 }
 SKIP = {'MI_Vine'}
+# hi-fi pass: source material -> layer of the painted detail array (public/town/detail-array.webp, built by
+# art/pipeline/build_detail_array.py); 255 = no texture (Kenney palette pieces, glass, metal). UVs are kept so the
+# runtime can sample the kit's own (repainted) textures in place of the flat vertex colour.
+LAYER = {'MI_Plaster': 0, 'MI_RoundTiles': 1, 'MI_WoodTrim': 2, 'MI_WoodTrim_Wear': 2, 'MI_RockTrim': 3, 'MI_UnevenBrick': 4, 'MI_Brick': 5, 'MI_RedBrick': 5}
 def load(path):
     if path.endswith('.glb'):
         b = open(path, 'rb').read(); l = struct.unpack('<I', b[12:16])[0]; j = json.loads(b[20:20 + l])
@@ -70,7 +74,7 @@ def node_mat(n):
     M[:3, :3] = R @ S; M[:3, 3] = n.get('translation', [0, 0, 0]); return M
 def bake(path, mat_override=None):
     j, bufs = load(path)
-    P, Nn, C, R, I = [], [], [], [], []; base = 0
+    P, Nn, C, R, I, U, L = [], [], [], [], [], [], []; base = 0
     def walk(ni, M):
         nonlocal base
         n = j['nodes'][ni]; M = M @ node_mat(n)
@@ -99,10 +103,13 @@ def bake(path, mat_override=None):
                 col = fn(src) if fn else src
                 p4 = np.c_[pos, np.ones(len(pos))] @ M.T; nr = nor @ np.linalg.inv(M[:3, :3]).T
                 nl = np.linalg.norm(nr, axis=1, keepdims=True); nr = nr / np.where(nl > 0, nl, 1)
+                uv0 = acc(j, bufs, pr['attributes']['TEXCOORD_0']).astype(float) if 'TEXCOORD_0' in pr['attributes'] else np.zeros((len(pos), 2))
+                lay = LAYER.get(name, 255) if 'TEXCOORD_0' in pr['attributes'] else 255
                 P.append(p4[:, :3]); Nn.append(nr); C.append(col); R.append(np.full(len(pos), role)); I.append(idx + base); base += len(pos)
+                U.append(uv0); L.append(np.full(len(pos), lay))
         for c in n.get('children', []): walk(c, M)
     for r in j['scenes'][j.get('scene', 0)]['nodes']: walk(r, np.eye(4))
-    return np.concatenate(P), np.concatenate(Nn), np.concatenate(C), np.concatenate(R), np.concatenate(I)
+    return np.concatenate(P), np.concatenate(Nn), np.concatenate(C), np.concatenate(R), np.concatenate(I), np.concatenate(U), np.concatenate(L)
 PIECES = {
     # Quaternius walls: 2 m wide, 3.12 m tall, exterior face +Z at z = 0.09
     'wall': MVM + 'Wall_Plaster_Straight.gltf', 'wallWin': MVM + 'Wall_Plaster_Window_Wide_Round.gltf',
@@ -129,7 +136,7 @@ os.makedirs(OUT, exist_ok=True)
 index = {}; blob = bytearray()
 for name, path in PIECES.items():
     if not os.path.exists(path): print('MISSING', name, path); continue
-    P, N, C, R, I = bake(path)
+    P, N, C, R, I, U, L = bake(path)
     v = len(P); entry = {'v': v, 'i': len(I), 'min': P.min(0).round(3).tolist(), 'max': P.max(0).round(3).tolist()}
     def put(arr):
         global blob
@@ -139,8 +146,10 @@ for name, path in PIECES.items():
     entry['nrm'] = put(np.round(N * 127).clip(-127, 127).astype(np.int8))
     entry['col'] = put(np.c_[np.round(np.clip(C, 0, 1) * 255), R].astype(np.uint8))
     entry['idx'] = put(I.astype(np.uint32))
+    entry['uv'] = put(U.astype(np.float32))
+    entry['tl'] = put(L.astype(np.uint8))
     index[name] = entry
     print(f'{name:12s} v={v:6d} tris={len(I)//3:6d} size={np.round(P.max(0)-P.min(0),2).tolist()}')
 open(OUT + 'kit.bin', 'wb').write(blob)
-json.dump({'version': 1, 'pieces': index}, open(OUT + 'kit.json', 'w'), separators=(',', ':'))
+json.dump({'version': 2, 'pieces': index}, open(OUT + 'kit.json', 'w'), separators=(',', ':'))
 print('kit.bin', len(blob) // 1024, 'KiB')

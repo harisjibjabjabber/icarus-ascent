@@ -74,7 +74,10 @@ export class GameView {
     if (new URLSearchParams(location.search).get('outline') === '0') this.post.enabled = false;
     this.scene.add(this.rider.root, this.effects.group, this.speedLines.group, this.petals.mesh);
     this.quality.onChange = (q) => this.applyQuality(q);
+    this.quality.onScale = () => this.applyResolution();
     this.applyQuality(this.quality.level);
+    const qs = new URLSearchParams(location.search);
+    if (qs.has('fps') || qs.has('q')) this.makeHud(container);
     const look = this.rider.setLook(this.rider.look);
     this.env.prepare(this.renderer);
     // load veil: the first view waits (max ~9 s) for Ao, the town kit and the painted textures, all pre-uploaded, so
@@ -100,14 +103,44 @@ export class GameView {
     this.resize();
   }
 
-  /** Apply a render quality level (pixel ratio, shadows, cloud detail, particle counts). */
+  /** Apply a render quality level (pixel ratio, shadows, textures, post effects, LOD, particle counts). */
   applyQuality(q: Quality): void {
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, q.pixelRatio));
     this.renderer.shadowMap.enabled = q.shadowMap > 0;
-    this.env.applyQuality(q);
+    const maxAniso = this.renderer.capabilities.getMaxAnisotropy();
+    this.env.applyQuality(q, maxAniso);
+    this.post.configure({ bloom: q.bloom, ao: q.ao, grade: q.name !== 'low' });
     this.petals.count = q.petals;
-    this.rider.setQuality(q.name);
+    this.rider.setQuality(q.name, Math.min(maxAniso, q.anisotropy));
+    this.applyResolution();
+  }
+
+  /** Render resolution: the tier's (dynamic) pixel ratio, never above the device's own. */
+  applyResolution(): void {
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this.quality.scale));
     this.resize();
+  }
+
+  // ---- on-screen perf readout (?fps=1, or whenever a tier is pinned with ?q=): fps, tier, resolution, cost ----
+  private hud: HTMLDivElement | null = null;
+  private hudT = 0; private hudFrames = 0; private hudLast = 0;
+  private makeHud(container: HTMLElement): void {
+    const d = document.createElement('div');
+    d.className = 'fps-hud';
+    d.style.cssText = 'position:absolute;left:6px;top:calc(env(safe-area-inset-top, 0px) + 6px);z-index:50;pointer-events:none;font:600 11px/1.35 ui-monospace,Menlo,monospace;color:#fff;background:rgba(30,24,40,.55);padding:3px 6px;border-radius:6px;white-space:pre';
+    container.appendChild(d);
+    this.hud = d;
+  }
+  private updateHud(): void {
+    if (!this.hud) return;
+    const now = performance.now();
+    if (!this.hudLast) this.hudLast = now;
+    this.hudFrames++;
+    this.hudT = now - this.hudLast;
+    if (this.hudT < 500) return;
+    const fps = (this.hudFrames * 1000) / this.hudT;
+    this.hudFrames = 0; this.hudLast = now;
+    const i = this.renderer.info.render, q = this.quality, c = this.renderer.domElement;
+    this.hud.textContent = `${fps.toFixed(0)} fps  ${q.level.name}${q.pinned ? ' (pinned)' : ''}\n${this.renderer.getPixelRatio().toFixed(2)}x  ${c.width}x${c.height}\n${i.calls} calls  ${(i.triangles / 1000).toFixed(0)}k tris`;
   }
 
   setCourse(course: Course): void {
@@ -321,6 +354,7 @@ export class GameView {
     this.debris.update(dt);
     if (this.failMarker.visible) this.failMarker.scale.setScalar(1 + 0.1 * Math.sin(performance.now() / 120));
     this.post.render(this.scene, this.rig.camera);
+    this.updateHud();
   }
 
   /** Draw the scene through the post pass from any camera (review/capture scripts). */

@@ -8,6 +8,13 @@ import * as THREE from 'three';
  *
  * Edges come from the Laplacian of inverse view depth, which is exactly zero on any plane, so ground seen at
  * a grazing angle stays clean while silhouettes and creases ink. Lines fade with distance into the haze.
+ *
+ * Hi-fi extras (per quality tier):
+ *  - soft bloom (high/ultra): bright pass at quarter resolution + two separable blur rounds, added before tone mapping,
+ *    so sunlit plaster, sparks and the sky glow bleed softly like a painted highlight (4 extra small passes);
+ *  - ambient occlusion (ultra): 8 taps in the composite against the *plane-predicted* depth (flat ground and walls get
+ *    none; only creases, eaves, doorways and contact under props darken), tinted lavender rather than grey;
+ *  - grade: split-tone (cool lavender shadows, warm highlights) and a soft contrast curve.
  */
 export const POST_STYLE = {
   ink: '#3b2c48',
@@ -18,7 +25,15 @@ export const POST_STYLE = {
   saturation: 1.07,
   warm: [1.025, 1.0, 0.965] as [number, number, number],
   lift: 0.012,
+  /** Split tone: shadow tint, highlight tint, amount. */
+  shadowTint: '#8f86c4', highTint: '#ffe6c2', split: 0.07,
+  /** Soft S-curve amount (0 = off). */
+  contrast: 0.06,
+  bloomThreshold: 0.95, bloomKnee: 0.45, bloomStrength: 0.22,
+  aoRadius: 0.55, aoStrength: 0.55, aoTint: '#7c72a8', aoFar: 70,
 };
+
+const QUAD_VS = 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }';
 
 export class PostPass {
   enabled = true;
@@ -26,26 +41,72 @@ export class PostPass {
   private quad: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial>;
   private cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   private size = new THREE.Vector2();
+  private bloomOn = false;
+  private aoOn = false;
+  private bA: THREE.WebGLRenderTarget;
+  private bB: THREE.WebGLRenderTarget;
+  private brightMat: THREE.ShaderMaterial;
+  private blurMat: THREE.ShaderMaterial;
+  private fsq: THREE.Mesh;
 
   constructor(private renderer: THREE.WebGLRenderer, samples = 4) {
     this.rt = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples, depthBuffer: true });
     this.rt.depthTexture = new THREE.DepthTexture(1, 1);
     this.rt.depthTexture.type = THREE.UnsignedIntType;
+    const mk = () => new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, depthBuffer: false, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter });
+    this.bA = mk(); this.bB = mk();
     const S = POST_STYLE;
+    this.brightMat = new THREE.ShaderMaterial({
+      uniforms: { tColor: { value: this.rt.texture }, uTexel: { value: new THREE.Vector2() }, uThr: { value: S.bloomThreshold }, uKnee: { value: S.bloomKnee } },
+      vertexShader: QUAD_VS,
+      fragmentShader: /* glsl */ `
+        uniform sampler2D tColor; uniform vec2 uTexel; uniform float uThr, uKnee; varying vec2 vUv;
+        void main(){
+          // 4 bilinear taps = a 4x4 box from the full-res HDR target (stable, no shimmer on the quarter-res grid)
+          vec3 c = (texture2D(tColor, vUv + uTexel * vec2(-1.0, -1.0)).rgb + texture2D(tColor, vUv + uTexel * vec2(1.0, -1.0)).rgb
+                  + texture2D(tColor, vUv + uTexel * vec2(-1.0, 1.0)).rgb + texture2D(tColor, vUv + uTexel * vec2(1.0, 1.0)).rgb) * 0.25;
+          float br = max(c.r, max(c.g, c.b));
+          float soft = clamp(br - uThr + uKnee, 0.0, 2.0 * uKnee); soft = soft * soft / (4.0 * uKnee + 1e-4);
+          float w = max(soft, br - uThr) / max(br, 1e-4);
+          gl_FragColor = vec4(c * w, 1.0);
+        }`,
+      depthTest: false, depthWrite: false,
+    });
+    this.blurMat = new THREE.ShaderMaterial({
+      uniforms: { tSrc: { value: null }, uDir: { value: new THREE.Vector2() } },
+      vertexShader: QUAD_VS,
+      fragmentShader: /* glsl */ `
+        uniform sampler2D tSrc; uniform vec2 uDir; varying vec2 vUv;
+        void main(){
+          // 9-tap gaussian folded into 5 bilinear fetches
+          vec3 c = texture2D(tSrc, vUv).rgb * 0.227027;
+          c += (texture2D(tSrc, vUv + uDir * 1.384615).rgb + texture2D(tSrc, vUv - uDir * 1.384615).rgb) * 0.316216;
+          c += (texture2D(tSrc, vUv + uDir * 3.230769).rgb + texture2D(tSrc, vUv - uDir * 3.230769).rgb) * 0.070270;
+          gl_FragColor = vec4(c, 1.0);
+        }`,
+      depthTest: false, depthWrite: false,
+    });
+    this.fsq = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.brightMat);
+    this.fsq.frustumCulled = false;
     this.quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
       uniforms: {
-        tColor: { value: this.rt.texture }, tDepth: { value: this.rt.depthTexture },
+        tColor: { value: this.rt.texture }, tDepth: { value: this.rt.depthTexture }, tBloom: { value: this.bA.texture },
         uTexel: { value: new THREE.Vector2(1, 1) }, uNear: { value: 0.1 }, uFar: { value: 1000 },
         uInk: { value: new THREE.Color(S.ink) }, uInkStrength: { value: S.inkStrength }, uThreshold: { value: S.threshold },
         uFade: { value: new THREE.Vector2(S.fadeNear, S.fadeFar) }, uSat: { value: S.saturation }, uWarm: { value: new THREE.Vector3(...S.warm) }, uLift: { value: S.lift },
         uWidth: { value: 1 },
+        uShadowTint: { value: new THREE.Color(S.shadowTint) }, uHighTint: { value: new THREE.Color(S.highTint) }, uSplit: { value: 0 }, uContrast: { value: 0 },
+        uBloom: { value: S.bloomStrength },
+        uAoRadius: { value: S.aoRadius }, uAoStrength: { value: S.aoStrength }, uAoTint: { value: new THREE.Color(S.aoTint) }, uAoFar: { value: S.aoFar }, uFocal: { value: 1 },
       },
-      vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
+      vertexShader: QUAD_VS,
       fragmentShader: /* glsl */ `
         #include <packing>
-        uniform sampler2D tColor; uniform sampler2D tDepth;
+        uniform sampler2D tColor; uniform sampler2D tDepth; uniform sampler2D tBloom;
         uniform vec2 uTexel; uniform float uNear, uFar, uInkStrength, uThreshold, uSat, uLift, uWidth;
         uniform vec3 uInk, uWarm; uniform vec2 uFade;
+        uniform vec3 uShadowTint, uHighTint; uniform float uSplit, uContrast, uBloom;
+        uniform float uAoRadius, uAoStrength, uAoFar, uFocal; uniform vec3 uAoTint;
         varying vec2 vUv;
         float viewZ(vec2 uv){ float d = texture2D(tDepth, uv).x; return -perspectiveDepthToViewZ(d, uNear, uFar); }
         void main(){
@@ -72,8 +133,37 @@ export class PostPass {
           }
           e *= 1.0 - tag;
           vec3 col = c.rgb;
+          #ifdef USE_AO
+          if (z0 < uAoFar) {
+            // inverse depth is linear in screen space on a plane: predict each tap from the local gradient, count taps
+            // that sit clearly in front of that plane (a crease or an overhang), ignore big jumps (other objects)
+            vec2 g = vec2(1.0/zr - 1.0/zl, 1.0/zu - 1.0/zd) * 0.5 / uWidth;
+            float rpx = clamp(uAoRadius * uFocal / z0, 3.0, 48.0);
+            float ang = 6.2831853 * fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+            float occ = 0.0;
+            for (int i = 0; i < 8; i++) {
+              float fi = (float(i) + 0.5) / 8.0, a = ang + float(i) * 2.3999632;
+              vec2 off = vec2(cos(a), sin(a)) * rpx * sqrt(fi);
+              float zs = viewZ(vUv + off * uTexel);
+              float zp = 1.0 / max(1e-4, w0 + dot(g, off));
+              float dz = zp - zs;
+              occ += smoothstep(0.03 * z0 * 0.05 + 0.04, 0.25, dz) * (1.0 - smoothstep(uAoRadius * 1.5, uAoRadius * 4.0, dz));
+            }
+            float ao = clamp(occ / 8.0, 0.0, 1.0) * uAoStrength * (1.0 - smoothstep(uAoFar * 0.6, uAoFar, z0)) * (1.0 - tag);
+            col *= mix(vec3(1.0), uAoTint * 1.15, ao);
+          }
+          #endif
+          #ifdef USE_BLOOM
+          col += texture2D(tBloom, vUv).rgb * uBloom;
+          #endif
           float l = dot(col, vec3(0.2126, 0.7152, 0.0722));
           col = mix(vec3(l), col, uSat) * uWarm + uLift;
+          // split tone: lavender into the shadows, warm into the lights (painted, not grey)
+          float ln = clamp(l, 0.0, 1.0);
+          col *= mix(vec3(1.0), mix(uShadowTint, uHighTint, smoothstep(0.15, 0.75, ln)) * 1.12, uSplit);
+          // soft S-curve around mid grey (applied pre tone map on 0..1, leaves HDR highlights to the tone mapper)
+          vec3 cc = clamp(col, 0.0, 1.0);
+          col += (cc * cc * (3.0 - 2.0 * cc) - cc) * uContrast;
           col = mix(col, uInk * (0.35 + 0.65 * min(l, 1.0)), e * uInkStrength);
           gl_FragColor = vec4(col, 1.0);
           #include <tonemapping_fragment>
@@ -84,13 +174,36 @@ export class PostPass {
     this.quad.frustumCulled = false;
   }
 
+  /** Tier switches: bloom (high/ultra), AO (ultra), split-tone grade + contrast (medium and up). */
+  configure(opts: { bloom: boolean; ao: boolean; grade: boolean }): void {
+    const m = this.quad.material;
+    if (opts.bloom !== this.bloomOn || opts.ao !== this.aoOn) {
+      this.bloomOn = opts.bloom; this.aoOn = opts.ao;
+      m.defines = {};
+      if (opts.bloom) m.defines.USE_BLOOM = '';
+      if (opts.ao) m.defines.USE_AO = '';
+      m.needsUpdate = true;
+    }
+    m.uniforms.uSplit.value = opts.grade ? POST_STYLE.split : 0;
+    m.uniforms.uContrast.value = opts.grade ? POST_STYLE.contrast : 0;
+  }
+
   setSize(w: number, h: number, dpr: number): void {
     const W = Math.max(1, Math.floor(w * dpr)), H = Math.max(1, Math.floor(h * dpr));
     this.rt.setSize(W, H);
     this.size.set(W, H);
+    const bw = Math.max(1, Math.floor(W / 4)), bh = Math.max(1, Math.floor(H / 4));
+    this.bA.setSize(bw, bh); this.bB.setSize(bw, bh);
+    this.brightMat.uniforms.uTexel.value.set(1 / W, 1 / H);
     const u = this.quad.material.uniforms;
     u.uTexel.value.set(1 / W, 1 / H);
     u.uWidth.value = Math.max(1, Math.round(dpr * 0.85));
+  }
+
+  private pass(mat: THREE.ShaderMaterial, target: THREE.WebGLRenderTarget): void {
+    this.fsq.material = mat;
+    this.renderer.setRenderTarget(target);
+    this.renderer.render(this.fsq, this.cam);
   }
 
   /** Render `scene` through the outline/grade pass (or straight to screen when disabled). */
@@ -100,15 +213,28 @@ export class PostPass {
     const pc = camera as THREE.PerspectiveCamera;
     const u = this.quad.material.uniforms;
     u.uNear.value = pc.near; u.uFar.value = pc.far;
+    u.uFocal.value = this.size.y / (2 * Math.tan(THREE.MathUtils.degToRad(pc.fov ?? 50) / 2));
     // keep renderer.info counting the whole frame (scene + quad), not just the last call
     const info = r.info, ar = info.autoReset; info.autoReset = false; info.reset();
     r.setRenderTarget(this.rt);
     r.render(scene, camera);
+    const auto = r.autoClear;
+    if (this.bloomOn) {
+      this.pass(this.brightMat, this.bA);
+      const bu = this.blurMat.uniforms, tx = 1 / this.bA.width, ty = 1 / this.bA.height;
+      for (const k of [1, 2]) {
+        bu.tSrc.value = this.bA.texture; bu.uDir.value.set(tx * k, 0); this.pass(this.blurMat, this.bB);
+        bu.tSrc.value = this.bB.texture; bu.uDir.value.set(0, ty * k); this.pass(this.blurMat, this.bA);
+      }
+    }
     r.setRenderTarget(null);
-    const auto = r.autoClear; r.autoClear = false;
+    r.autoClear = false;
     r.render(this.quad, this.cam);
     r.autoClear = auto; info.autoReset = ar;
   }
 
-  dispose(): void { this.rt.dispose(); this.quad.geometry.dispose(); this.quad.material.dispose(); }
+  dispose(): void {
+    this.rt.dispose(); this.bA.dispose(); this.bB.dispose();
+    this.quad.geometry.dispose(); this.quad.material.dispose(); this.fsq.geometry.dispose(); this.brightMat.dispose(); this.blurMat.dispose();
+  }
 }

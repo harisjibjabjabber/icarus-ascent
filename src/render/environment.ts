@@ -1,11 +1,11 @@
 import * as THREE from 'three';
 import { mulberry32 } from '../rng';
 import { toon, ART_UNIFORMS } from './materials';
-import { toScene, ORIGIN, ROUTE_DIR, ROUTE_RIGHT, ROUTE_YAW } from './space';
+import { toScene, toSceneRaw, ORIGIN, ROUTE_DIR, ROUTE_RIGHT, ROUTE_YAW } from './space';
 import { GeoBuilder, blob } from './geo';
 import type { Quality } from './quality';
-import { Kit, townMaterial, TOWN_DETAIL, type TownMaterial } from './town/kit';
-import { buildTownChunk, TOWN, type GroundFn, type ChunkOpts } from './town/town';
+import { Kit, townMaterial, TOWN_DETAIL, TOWN_TEX, TEX_WRAP, detailArray, type TownMaterial } from './town/kit';
+import { buildTownChunk, TOWN, TOWN_LOD as TOWN_GEO, type GroundFn, type ChunkOpts } from './town/town';
 
 /**
  * Environment: the witch town (Kiki-style seaside town on a hill). Layers, back to front:
@@ -48,7 +48,7 @@ const loadTex = (url: string, cb?: (t: THREE.Texture) => void): THREE.Texture | 
   let done: (t: THREE.Texture | null) => void = () => {};
   PENDING.push(new Promise((r) => { done = r; }));
   const t = new THREE.TextureLoader().load(url, (tx) => { cb?.(tx); done(tx); }, undefined, () => done(null));
-  t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+  t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = TEX_ANISO.value; TEX_ANISO.list.push(t);
   return t;
 };
 const BASE = (typeof import.meta !== 'undefined' && (import.meta as { env?: { BASE_URL?: string } }).env?.BASE_URL) || './';
@@ -146,6 +146,10 @@ interface TownView { group: THREE.Group; near: THREE.Mesh | null; far: THREE.Mes
  * nothing swaps or appears in one frame. Behind the camera (< `nearBehind`) the switch back to far is hard: unseen.
  */
 export const TOWN_LOD = { behind: 60, ahead: 480, spawnFade: 110, nearFull: 50, nearFadeEnd: 92, nearBehind: -25, spawnTime: 0.7 };
+/** Base near-detail distances; high/ultra scale them out (Quality.lodScale) so the dithered LOD blend happens deep in the haze. */
+const TOWN_LOD_BASE = { nearFull: TOWN_LOD.nearFull, nearFadeEnd: TOWN_LOD.nearFadeEnd };
+/** Anisotropy for every ground/wall texture we own (set per tier). */
+export const TEX_ANISO = { value: 4, list: [] as THREE.Texture[] };
 
 /** Dither ranges for a chunk's near and far meshes. `d`: chunk centre minus rider x; `age`: seconds since built. */
 export function townFade(d: number, age: number): { near: [number, number]; far: [number, number] } {
@@ -181,6 +185,7 @@ export class Environment {
   /** Town streaming window: see TOWN_LOD. */
   static readonly TOWN = TOWN_LOD;
   private renderer: THREE.WebGLRenderer | null = null;
+  private townShadows = false;
   /** Resolves once the kit and every painted texture have loaded (or failed); see View's load veil. */
   ready: Promise<void> = Promise.resolve();
 
@@ -203,6 +208,7 @@ export class Environment {
     this.sun.shadow.bias = -0.0006;
     this.sun.shadow.normalBias = 0.04;
     this.sun.shadow.radius = 3;
+    this.sun.shadow.intensity = 0.85; // painted shade: a touch of bounce light stays in the shadows
     this.sunOffset = ENV_STYLE.sunFrom.clone().normalize().multiplyScalar(60);
     scene.add(this.sun, this.sun.target);
     scene.add(this.group);
@@ -217,6 +223,11 @@ export class Environment {
     if (typeof document !== 'undefined' && typeof fetch !== 'undefined') {
       TOWN_DETAIL.tex = loadTex(`${BASE}town/detail.jpg`, (t) => { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.needsUpdate = true; });
       if (TOWN_DETAIL.tex) { TOWN_DETAIL.tex.colorSpace = THREE.NoColorSpace; TOWN_DETAIL.tex.wrapS = TOWN_DETAIL.tex.wrapT = THREE.RepeatWrapping; }
+      (globalThis as unknown as { __townTex?: unknown }).__townTex = TOWN_TEX; // diagnostics (review scripts)
+      // hi-fi: the kit's painted textures as one array (colour high-pass + normals); ramps in once uploaded
+      PENDING.push(fetch(`${BASE}town/detail-array.webp`).then((r) => r.blob()).then((b) => createImageBitmap(b, { colorSpaceConversion: 'none', premultiplyAlpha: 'none' }))
+        .then((img) => { const t = detailArray(img); t.anisotropy = TEX_ANISO.value; TEX_ANISO.list.push(t); TOWN_TEX.tex.value = t; return t as THREE.Texture; })
+        .catch((e) => { console.warn('town textures failed to load', e); return null; }));
       const kit = Kit.load(`${BASE}town/`).then((k) => this.setKit(k)).catch((e) => console.warn('town kit failed to load', e));
       this.ready = Promise.all([kit, ...PENDING.map((p) => p.then((t) => { if (t && this.renderer) this.renderer.initTexture(t); }))]).then(() => {});
     }
@@ -234,14 +245,35 @@ export class Environment {
   }
   get kitReady(): boolean { return !!this.kit; }
 
-  applyQuality(q: Quality): void {
+  applyQuality(q: Quality, maxAniso = 16): void {
     this.sun.castShadow = q.shadowMap > 0;
     if (q.shadowMap > 0 && this.sun.shadow.mapSize.x !== q.shadowMap) {
       this.sun.shadow.mapSize.set(q.shadowMap, q.shadowMap);
       this.sun.shadow.map?.dispose();
       this.sun.shadow.map = null as unknown as THREE.WebGLRenderTarget;
     }
+    // softness in world units stays about the same across map sizes (radius is in texels)
+    this.sun.shadow.radius = q.shadowSoft;
+    const sc = this.sun.shadow.camera, R = q.shadowRange;
+    if (sc.right !== R) {
+      sc.left = -R; sc.right = R; sc.top = R; sc.bottom = -R; sc.far = 100 + R * 2; sc.updateProjectionMatrix();
+      this.sunOffset.setLength(Math.max(60, R * 1.2));
+      // keep the depth bias about one texel in world units
+      this.sun.shadow.normalBias = 0.04 * ((2 * R) / Math.max(1, q.shadowMap)) / (56 / 1024);
+    }
+    this.townShadows = q.townShadows && q.shadowMap > 0;
+    for (const v of this.town.values()) { if (v.near) v.near.castShadow = this.townShadows; if (v.far) v.far.castShadow = this.townShadows; }
     this.puffs.count = Math.min(24, q.puffs);
+    TOWN_TEX.enabled = q.textures > 0;
+    TOWN_TEX.nrm.value = q.textures > 1 ? 1 : 0;
+    TEX_ANISO.value = Math.max(1, Math.min(q.anisotropy, maxAniso));
+    for (const t of TEX_ANISO.list) if (t.anisotropy !== TEX_ANISO.value) { t.anisotropy = TEX_ANISO.value; if (t.image) t.needsUpdate = true; }
+    TOWN_LOD.nearFull = TOWN_LOD_BASE.nearFull * q.lodScale;
+    TOWN_LOD.nearFadeEnd = TOWN_LOD_BASE.nearFadeEnd * q.lodScale;
+    if (TOWN_GEO.fullRoofs !== q.fullRoofs) {
+      TOWN_GEO.fullRoofs = q.fullRoofs;
+      if (this.kit) this.setKit(this.kit); // rebuild the chunks with the other roof set
+    }
   }
 
   /**
@@ -297,9 +329,12 @@ export class Environment {
     const c = buildTownChunk(this.kit!, k, this.seed, this.groundAt, this.townOpts);
     const group = new THREE.Group();
     const nearMat = townMaterial(), farMat = townMaterial();
-    const mk = (g: THREE.BufferGeometry | null, mat: TownMaterial) => { if (!g) return null; const m = new THREE.Mesh(g, mat); m.receiveShadow = true; m.visible = false; group.add(m); return m; };
+    const mk = (g: THREE.BufferGeometry | null, mat: TownMaterial) => { if (!g) return null; const m = new THREE.Mesh(g, mat); m.receiveShadow = true; m.castShadow = this.townShadows; m.visible = false; group.add(m); return m; };
     const near = mk(c.near, nearMat), far = mk(c.far, farMat);
     group.position.copy(toScene(k * TOWN.chunk, c.y0));
+    // chunk origin in origin-free scene space, wrapped: world-projected textures continue seamlessly across chunks
+    const o = toSceneRaw(k * TOWN.chunk, c.y0), wrapOf = (v: number) => ((v % TEX_WRAP) + TEX_WRAP) % TEX_WRAP;
+    nearMat.wrap.set(wrapOf(o.x), wrapOf(o.y), wrapOf(o.z)); farMat.wrap.copy(nearMat.wrap);
     this.group.add(group);
     return { group, near, far, nearMat, farMat, x0: k * TOWN.chunk, tris: [c.trisNear, c.trisFar], born: ART_UNIFORMS.uTime.value };
   }
@@ -351,8 +386,10 @@ export class Environment {
 
   /** Keep the shadow frustum, sky layers, sea and clouds centred on the action; switch town LODs. */
   follow(focus: THREE.Vector3, cameraPos: THREE.Vector3, routeX = 0, routeY = 0): void {
-    this.sun.target.position.copy(focus);
-    this.sun.position.copy(focus).add(this.sunOffset);
+    // bigger shadow boxes (high/ultra) are centred further ahead: the rider and the street in front get the coverage
+    const ahead = Math.max(0, this.sun.shadow.camera.right - 28) * 0.45;
+    this.sun.target.position.copy(focus).addScaledVector(ROUTE_DIR, ahead);
+    this.sun.position.copy(this.sun.target.position).add(this.sunOffset);
     this.dome.position.copy(cameraPos);
     this.pano.position.copy(cameraPos);
     // the far-town layer sits at a fixed height below the horizon band (it is a hillside, not the horizon)
@@ -370,6 +407,8 @@ export class Environment {
     // painted detail on the plaster eases in once its texture is on the GPU (never snaps)
     const tex = TOWN_DETAIL.tex, loaded = !!(tex && (tex.image as { width?: number } | undefined)?.width);
     TOWN_DETAIL.strength.value = loaded ? Math.min(1, TOWN_DETAIL.strength.value + 0.04) : 0;
+    const arr = TOWN_TEX.tex.value, arrReady = !!(arr && TOWN_TEX.enabled && this.renderer && this.renderer.properties.get(arr) && (this.renderer.properties.get(arr) as { __webglTexture?: unknown }).__webglTexture);
+    TOWN_TEX.on.value = arrReady ? Math.min(1, TOWN_TEX.on.value + 0.05) : 0;
     const seaRoute = this.sea.position.y + ORIGIN.y;
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3();
     const t = ART_UNIFORMS.uTime.value;
