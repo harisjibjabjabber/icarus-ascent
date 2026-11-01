@@ -61,6 +61,19 @@ export interface Gap {
 
 export interface Marker { x: number; label: string }
 
+/**
+ * Optional lantern on a line you can choose to take. Not a collider: missing it never fails.
+ * `pop` sits in the air past a crest (only a real launch reaches it). `rail` sits on an optional handrail.
+ */
+export interface Charm {
+  id: number;
+  x: number;
+  y: number;
+  /** Presentation only (+ = right). Gameplay uses x/y and the rider's mode. */
+  lateral: number;
+  line: 'pop' | 'rail';
+}
+
 /** Breakable obstacle standing on the ground at x (brief §8). */
 export interface Obstacle {
   id: number;
@@ -130,6 +143,8 @@ export interface Chunk {
   walls: number[];
   obstacles: number[];
   markers: Marker[];
+  /** Optional lanterns owned by this chunk (endless). Recycled with it. */
+  charms?: number[];
 }
 
 export interface SurfaceSample {
@@ -151,6 +166,9 @@ export class Course {
   private rById = new Map<number, Rail>();
   private wById = new Map<number, Wall>();
   private oById = new Map<number, Obstacle>();
+  private hById = new Map<number, Charm>();
+  /** Optional lanterns currently streamed (endless). */
+  readonly charms: Charm[] = [];
   /** Presentation hint (opening only): route x where the harbour town (quay, sea on the right) begins. */
   harbourX?: number;
   /** Authored lessons in order (opening only). */
@@ -195,6 +213,7 @@ export class Course {
   rail(id: number): Rail { const r = this.rById.get(id); if (!r) throw new Error(`rail ${id} missing`); return r; }
   wall(id: number): Wall { const w = this.wById.get(id); if (!w) throw new Error(`wall ${id} missing`); return w; }
   obstacle(id: number): Obstacle | undefined { return this.oById.get(id); }
+  charm(id: number): Charm | undefined { return this.hById.get(id); }
   hasObstacle(id: number): boolean { return this.oById.has(id); }
 
   /** Static courses: one chunk owning everything (call after construction is complete). */
@@ -214,11 +233,12 @@ export class Course {
   stream(_x: number, _active?: { surfaceId: number; railId: number; wallId: number }): void {}
 
   /** Append a chunk's content (streamed courses). */
-  protected addChunk(c: Chunk, surfaces: Surface[], rails: Rail[], walls: Wall[], obstacles: Obstacle[], gaps: Gap[]): void {
+  protected addChunk(c: Chunk, surfaces: Surface[], rails: Rail[], walls: Wall[], obstacles: Obstacle[], gaps: Gap[], charms: Charm[] = []): void {
     for (const q of surfaces) { this.surfaces.push(q); this.sById.set(q.id, q); }
     for (const q of rails) { this.rails.push(q); this.rById.set(q.id, q); }
     for (const q of walls) { this.walls.push(q); this.wById.set(q.id, q); }
     for (const q of obstacles) { this.obstacles.push(q); this.oById.set(q.id, q); }
+    for (const q of charms) { this.charms.push(q); this.hById.set(q.id, q); }
     this.gaps.push(...gaps);
     this.markers.push(...c.markers);
     this.chunks.push(c);
@@ -235,6 +255,11 @@ export class Course {
     drop(this.rails, c.rails, this.rById);
     drop(this.walls, c.walls, this.wById);
     drop(this.obstacles, c.obstacles, this.oById);
+    if (c.charms?.length) {
+      const set = new Set(c.charms);
+      for (let i = this.charms.length - 1; i >= 0; i--) if (set.has(this.charms[i].id)) this.charms.splice(i, 1);
+      for (const id of c.charms) this.hById.delete(id);
+    }
     for (let i = this.gaps.length - 1; i >= 0; i--) if (this.gaps[i].x0 >= c.x0 - 1e-6 && this.gaps[i].x0 <= c.x1 + 1e-6) this.gaps.splice(i, 1);
     for (let i = this.markers.length - 1; i >= 0; i--) if (c.markers.includes(this.markers[i])) this.markers.splice(i, 1);
     for (const s of this.surfaces) if (s.prev !== undefined && c.surfaces.includes(s.prev)) delete s.prev;

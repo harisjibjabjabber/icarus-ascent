@@ -44,6 +44,8 @@ export class GameView {
   private effects = new Effects();
   private debris = new Debris();
   private speedLines = new SpeedLines();
+  /** 0..1 from the score's flow meter. Presentation only: speed lines thicken when a combo is flowing. */
+  styleFlow = 0;
   private petals = new Petals();
   readonly quality: QualityManager;
   private trail: Vec2[] = [];
@@ -334,7 +336,7 @@ export class GameView {
       case 'land':
         this.rider.kick(Math.min(0.45, TUNING.feedback.landSquash * (0.4 + e.impact / 10)));
         this.effects.landPuff(e.x, e.y, e.impact, e.material, e.speedAfter);
-        if (e.flipped) this.effects.ring(e.x, e.y, 0, '#fff3c4');
+        if (e.flipped) { this.effects.ring(e.x, e.y, 0, '#fff3c4'); this.rig.jolt(TUNING.feedback.flipLandShake); }
         break;
       case 'break': {
         const o = this.courseView?.course.obstacle(e.obstacleId);
@@ -457,7 +459,7 @@ export class GameView {
     this.env.follow(toScene(x + 18, y, 0, this.focus), this.rig.camera.position, x, y);
     this.petals.update(dt, x, y);
     // restrained air-cutting streaks scale with actual speed
-    this.speedLines.update(dt, x, y, failed ? 0 : curr.speed);
+    this.speedLines.update(dt, x, y, failed ? 0 : curr.speed, this.styleFlow);
     if (SpeedLines.intensity(curr.speed) > 0.3 && !failed) {
       this.streakTimer -= dt * (curr.speed - 12) * 0.6;
       if (this.streakTimer <= 0) { this.effects.speedStreak(x, y, curr.speed); this.streakTimer = 1; }
@@ -474,6 +476,15 @@ export class GameView {
     this.frameTiming();
     this.updateHud();
   }
+
+  /** Restrained camera punch. Does not change the frame step. */
+  punch(amount: number): void { this.rig.jolt(amount); }
+  /** Lantern pickup: a ring at the lantern and a small punch. */
+  burst(x: number, y: number, lateral = 0): void {
+    this.effects.ring(x, y + 0.3, lateral, '#ffd36b');
+    this.rig.jolt(TUNING.feedback.charmShake);
+  }
+  hideCharm(id: number): void { this.courseView?.hideCharm(id); }
 
   /** Draw the scene through the post pass from any camera (review/capture scripts). */
   present(camera: THREE.Camera = this.rig.camera): void { this.post.render(this.scene, camera); }

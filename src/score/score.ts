@@ -1,22 +1,22 @@
 import type { RiderState, SimEvent } from '../sim/types';
-import type { Course } from '../course/course';
+import type { Charm, Course } from '../course/course';
 
 /**
  * Endless scoring (pure, deterministic: sim state + events in, numbers and pop-ups out). Lives outside the sim.
  *
- * - Score = distance + style, added (not multiplied): deliberate, so a long clean run and a
- *   trick-heavy one both count and neither multiplies the other.
+ * - Score = distance + style. Distance is never multiplied. Style (the combo) is.
  * - Trick points: flips, grabs, grinds and wall rides (per second), heel skims, pot / pillar smashes.
- * - Combo: every trick adds a link to the chain; the multiplier grows x1 -> x5 with the chain. The combo's
- *   points are banked (points x multiplier) once the rider rolls plain on the ground for SCORE.idle seconds,
- *   and are lost on a bail (a fail). A sloppy landing does not break the combo, only a fail does (deliberate:
- *   the sim already makes a bad landing cost speed).
- * - Air: points per second of real airborne time (a flight that ends in a landing; grind / wall / skim time
- *   is not air). Not a combo link: see `update`.
- * - Near misses (links, with a pop-up): landing just past a gap's far lip, catching a wall late (at the
- *   kicker's lip or over the gap), clearing a pot by a hair, smashing a pillar at its very edge.
- * - Re-ridden ground (a checkpoint retry behind the furthest point already reached) pays nothing again:
- *   no distance, tricks, air, near misses or set-piece bonus.
+ * - Combo: every trick adds a link. The chain multiplier still grows x1 -> x5 with the length, then a
+ *   variety factor pulls it down when the combo repeats one kind and up when the kinds mix. Repeating the
+ *   previous kind also pays SCORE.staleScale of the points. A short run of one kind can still reach x3;
+ *   holding x5 takes a mix. Banked (points x multiplier x flow) once the rider rolls plain for SCORE.idle
+ *   seconds, and lost on a bail. A sloppy landing does not break the combo, only a fail does.
+ * - Flow: 0..1. Fresh links and carrying speed raise it; a repeated kind and plain rolling lower it.
+ *   It scales the combo when it banks (and the live total), never the distance.
+ * - Air: points per second of real airborne time. Not a combo link: see `update`.
+ * - Near misses (links, with a pop-up). Closer to the line pays more; the trigger windows are unchanged.
+ * - Lanterns: optional crest / rail pickups, banked at once, never a failure. See `charmTouched`.
+ * - Re-ridden ground pays nothing again: no distance, tricks, air, near misses or set-piece bonus.
  * - Distance: SCORE.perMetre per metre of new ground.
  */
 export const SCORE = {
@@ -46,12 +46,54 @@ export const SCORE = {
   /** Seconds of plain rolling (no trick, not airborne) that bank the combo. */
   idle: 2.5,
   maxMult: 5,
-  /** Links per multiplier step. */
+  /** Links per multiplier step (before variety). */
   linksPerStep: 2,
+  /** A repeated kind pays this fraction of its points and drags the multiplier down. */
+  staleScale: 0.45,
+  /** Variety added per distinct kind after the first, subtracted per extra repeat. */
+  varietyPerKind: 0.12,
+  varietyPerRepeat: 0.04,
+  varietyMin: 0.55,
+  varietyMax: 1.35,
+  /** Flow: fresh link raises it, a repeat lowers it, plain rolling drains it, speed fills it. */
+  flowPerFresh: 0.18,
+  flowPerStale: 0.1,
+  flowDecay: 0.1,
+  flowGain: 0.08,
+  flowSpeedMin: 14,
+  /** Combo bank (and the live total) is multiplied by 1 + flowBank * flow. */
+  flowBank: 0.4,
+  /** Optional lanterns. Rail is the detour; crest is the launch. */
+  charmPop: 450,
+  charmRail: 700,
+  /** A step longer than this (m) is a teleport, not a pickup. */
+  charmStepMax: 4,
+  /** Feet may be this far below / above a crest lantern (m). */
+  popBelow: 1.15,
+  popAbove: 2.4,
+  /** Grind lock vs the rail lantern (m). */
+  railBand: 0.85,
 };
 
 export type PopupKind = 'near' | 'bank' | 'bail' | 'bonus';
 export interface Popup { text: string; pts: number; kind: PopupKind }
+export type Cue = 'near' | 'rank' | 'charm' | 'bank';
+export const TRICK_KINDS = ['flip', 'grab', 'grind', 'wall', 'skim', 'pot', 'pillar', 'near'] as const;
+export type TrickKind = typeof TRICK_KINDS[number];
+export interface BailInfo { mult: number; chain: number; points: number }
+
+function isKind(v: unknown): v is TrickKind { return typeof v === 'string' && (TRICK_KINDS as readonly string[]).includes(v); }
+
+/**
+ * Did this tick pass a lantern? Only a real launch (airborne, in the arc) takes a crest lantern,
+ * and only a grind takes a rail lantern. A step that teleports across the course collects nothing.
+ */
+export function charmTouched(c: Charm, prevX: number, st: RiderState): boolean {
+  if (!(st.x > prevX) || st.x - prevX > SCORE.charmStepMax) return false;
+  if (c.x <= prevX - 0.05 || c.x > st.x + 0.2) return false;
+  if (c.line === 'rail') return st.mode === 'grinding' && Math.abs(st.y - c.y) <= SCORE.railBand;
+  return st.mode === 'airborne' && st.y >= c.y - SCORE.popBelow && st.y <= c.y + SCORE.popAbove;
+}
 
 /** Everything a ScoreKeeper needs to carry a run across a page reload (JSON-safe). */
 export interface ScoreSnapshot {
@@ -63,6 +105,16 @@ export interface ScoreSnapshot {
   maxX: number | null;
   /** Set pieces whose bonus was paid (chunk ids). */
   bonusKeys: number[];
+  /** Optional, so a snapshot from before variety / flow / lanterns still restores. */
+  flow?: number;
+  flowPeak?: number;
+  lastKind?: TrickKind | null;
+  comboKinds?: TrickKind[];
+  runKinds?: TrickKind[];
+  charmIds?: number[];
+  charmPop?: number;
+  charmRail?: number;
+  lastBail?: BailInfo | null;
 }
 
 export class ScoreKeeper {
@@ -90,14 +142,50 @@ export class ScoreKeeper {
   private takeoffX = -Infinity;
   private bonusKeys: number[] = [];
   private popups: Popup[] = [];
+  private cues: Cue[] = [];
+  /** Kinds linked in the combo in progress, in order. */
+  private comboKinds = new Set<TrickKind>();
+  /** Kinds whose combo was banked (a bail does not count). */
+  private runKinds = new Set<TrickKind>();
+  private lastKind: TrickKind | null = null;
+  /** Multiplier last announced, so a drop doesn't re-fire and a reload doesn't either. */
+  private rankShown = 0;
+  flow = 0;
+  flowPeak = 0;
+  private charmIds: number[] = [];
+  charmPop = 0;
+  charmRail = 0;
+  lastBail: BailInfo | null = null;
 
-  get mult(): number { return Math.min(SCORE.maxMult, 1 + Math.floor(this.chain / SCORE.linksPerStep)); }
+  /** Chain length only, before variety. */
+  get chainMult(): number { return Math.min(SCORE.maxMult, 1 + Math.floor(this.chain / SCORE.linksPerStep)); }
+  /**
+   * 1 when the combo is a single link. Mixing kinds raises it (capped); repeating the same kind lowers it.
+   * Tuned so four of a kind still reach x3, and a long repeat cannot hold x5.
+   */
+  get variety(): number {
+    if (this.chain <= 1 || this.comboKinds.size === 0) return 1;
+    const unique = this.comboKinds.size;
+    const repeats = Math.max(0, this.chain - unique);
+    const v = 1 + SCORE.varietyPerKind * Math.max(0, unique - 1) - SCORE.varietyPerRepeat * repeats;
+    return Math.min(SCORE.varietyMax, Math.max(SCORE.varietyMin, v));
+  }
+  /** What the HUD shows and what a bank pays. */
+  get mult(): number { return Math.min(SCORE.maxMult, Math.max(1, Math.round(this.chainMult * this.variety))); }
+  /** Distinct trick kinds in the combo (a near miss is not a trick). */
+  get comboTrickKinds(): number { let n = 0; for (const k of this.comboKinds) if (k !== 'near') n++; return n; }
+  /** Kinds actually banked this run. */
+  get runKindCount(): number { return this.runKinds.size; }
+  get flowPay(): number { return 1 + SCORE.flowBank * this.flow; }
   /** Banked + what the current combo would bank now (the HUD's score). */
-  get total(): number { return this.banked + Math.round(this.comboPoints * this.mult); }
+  get total(): number { return this.banked + Math.round(this.comboPoints * this.mult * this.flowPay); }
+  get charmCount(): number { return this.charmPop + this.charmRail; }
+  tookCharm(id: number): boolean { return this.charmIds.includes(id); }
   /** Furthest x reached this run (-Infinity before the first update). */
   get furthestX(): number { return this.maxX; }
 
   drainPopups(): Popup[] { return this.popups.splice(0); }
+  drainCues(): Cue[] { return this.cues.splice(0); }
   /** Seconds of plain rolling so far (the combo banks at SCORE.idle). */
   get idleTime(): number { return this.idle; }
 
@@ -105,19 +193,36 @@ export class ScoreKeeper {
   reset(): void {
     this.banked = 0; this.chain = 0; this.comboPoints = 0; this.best = { points: 0, chain: 0, mult: 1 };
     this.tricks = 0; this.nearMisses = 0; this.comboTricks = 0; this.comboNear = 0; this.idle = 0;
-    this.maxX = -Infinity; this.bonusKeys = []; this.popups = []; this.respawn();
+    this.maxX = -Infinity; this.bonusKeys = []; this.popups = []; this.cues = [];
+    this.comboKinds.clear(); this.runKinds.clear(); this.lastKind = null; this.rankShown = 0;
+    this.flow = 0; this.flowPeak = 0; this.charmIds = []; this.charmPop = 0; this.charmRail = 0; this.lastBail = null;
+    this.respawn();
   }
 
-  private link(pts: number): void {
+  private noteFlow(): void { if (this.flow > this.flowPeak) this.flowPeak = this.flow; }
+
+  /** One combo link. A kind that matches the previous link is stale: fewer points, less flow. */
+  private addLink(kind: TrickKind, pts: number): number {
+    const freshKind = this.lastKind !== kind;
+    const paid = Math.round(pts * (freshKind ? 1 : SCORE.staleScale));
     this.chain++; this.tricks++; this.comboTricks++;
-    this.comboPoints += pts;
+    if (kind === 'near') { this.nearMisses++; this.comboNear++; }
+    this.comboPoints += paid;
+    this.comboKinds.add(kind);
+    this.lastKind = kind;
     this.idle = 0;
+    this.flow = Math.min(1, Math.max(0, this.flow + (freshKind ? SCORE.flowPerFresh : -SCORE.flowPerStale)));
+    this.noteFlow();
+    if (this.mult >= 2 && this.mult > this.rankShown) this.cues.push('rank');
+    this.rankShown = this.mult;
+    return paid;
   }
-  private near(text: string, pts: number): void {
-    this.chain++; this.nearMisses++; this.comboNear++;
-    this.comboPoints += pts;
-    this.idle = 0;
-    this.popups.push({ text, pts, kind: 'near' });
+  /** `closeness` is 0 at the edge of the window and 1 on the line. The window itself is unchanged. */
+  private near(text: string, base: number, closeness: number): void {
+    const scaled = Math.round(base * (0.75 + 0.5 * Math.min(1, Math.max(0, closeness))));
+    const paid = this.addLink('near', scaled);
+    this.popups.push({ text, pts: paid, kind: 'near' });
+    this.cues.push('near');
   }
   private endFlight(): void { this.inAir = false; this.airTime = 0; }
 
@@ -129,30 +234,36 @@ export class ScoreKeeper {
     for (const e of events) {
       switch (e.type) {
         case 'jump': case 'leave-edge': this.flipsThisAir = 0; break;
-        case 'flip-complete': this.flipsThisAir++; if (fresh) this.link(SCORE.flip * this.flipsThisAir); break;
-        case 'grab-end': if (fresh && e.held >= SCORE.grabMin) this.link(Math.round(SCORE.grab + SCORE.grabPerSec * Math.min(e.held, 1.5))); break;
+        case 'flip-complete': this.flipsThisAir++; if (fresh) this.addLink('flip', SCORE.flip * this.flipsThisAir); break;
+        case 'grab-end': if (fresh && e.held >= SCORE.grabMin) this.addLink('grab', Math.round(SCORE.grab + SCORE.grabPerSec * Math.min(e.held, 1.5))); break;
         // contact starts end the flight: time on a rail / wall / heel is not air
-        case 'grind-start': this.endFlight(); if (fresh) this.link(SCORE.grind); break;
-        case 'skim-start': this.endFlight(); if (fresh) this.link(SCORE.skim); break;
+        case 'grind-start': this.endFlight(); if (fresh) this.addLink('grind', SCORE.grind); break;
+        case 'skim-start': this.endFlight(); if (fresh) this.addLink('skim', SCORE.skim); break;
         case 'wall-start': {
           this.endFlight();
           if (!fresh) break;
-          this.link(SCORE.wall);
+          this.addLink('wall', SCORE.wall);
           const w = course.walls.find((q) => q.id === e.wallId);
-          if (w && e.x > w.x0 + 4 + SCORE.lateWallOver) this.near('Late catch!', SCORE.lateWall); // walls start 4 m before the takeoff lip
+          if (w && e.x > w.x0 + 4 + SCORE.lateWallOver) {
+            const late = e.x - (w.x0 + 4 + SCORE.lateWallOver);
+            this.near('Late catch!', SCORE.lateWall, Math.min(1, late / 2.5)); // walls start 4 m before the takeoff lip
+          }
           break;
         }
         case 'break': {
           if (!fresh) break;
-          this.link(e.kind === 'pillar' ? SCORE.pillar : SCORE.pot);
+          this.addLink(e.kind === 'pillar' ? 'pillar' : 'pot', e.kind === 'pillar' ? SCORE.pillar : SCORE.pot);
           const o = e.kind === 'pillar' ? course.obstacle(e.obstacleId) : undefined;
-          if (o && (e.x >= o.x - o.halfWidth - SCORE.pillarEdgeWithin || e.y >= o.baseY + o.height - SCORE.pillarEdgeWithin)) this.near('Clipped it!', SCORE.pillarEdge);
+          if (o && (e.x >= o.x - o.halfWidth - SCORE.pillarEdgeWithin || e.y >= o.baseY + o.height - SCORE.pillarEdgeWithin)) {
+            const into = Math.max(e.x - (o.x - o.halfWidth - SCORE.pillarEdgeWithin), e.y - (o.baseY + o.height - SCORE.pillarEdgeWithin), 0);
+            this.near('Clipped it!', SCORE.pillarEdge, Math.min(1, into / Math.max(0.2, SCORE.pillarEdgeWithin)));
+          }
           break;
         }
         case 'land': {
           if (fresh && this.inAir) {
             const g = course.gaps.find((q) => q.x1 <= e.x && e.x - q.x1 < SCORE.edgeWithin && q.x0 >= this.takeoffX - 0.5 && q.requires === 'jump');
-            if (g) this.near('Close call!', SCORE.edge);
+            if (g) this.near('Close call!', SCORE.edge, 1 - (e.x - g.x1) / SCORE.edgeWithin);
             if (this.airTime >= SCORE.airMin) {
               const pts = Math.round(this.airTime * SCORE.airPerSec);
               // Air is not a combo link. Inside a combo it rides along (multiplied, lost on a bail); with no
@@ -176,7 +287,7 @@ export class ScoreKeeper {
       if (fresh && Number.isFinite(this.prevX)) for (const o of course.obstacles) {
         if (o.kind !== 'pot' || st.broken.includes(o.id) || !(this.prevX < o.x && st.x >= o.x)) continue;
         const clear = st.y - (o.baseY + o.height);
-        if (clear >= 0 && clear < SCORE.closePotClearance) this.near('Close!', SCORE.closePot);
+        if (clear >= 0 && clear < SCORE.closePotClearance) this.near('Close!', SCORE.closePot, 1 - clear / SCORE.closePotClearance);
       }
     } else this.endFlight();
     // sustained contact points
@@ -185,27 +296,52 @@ export class ScoreKeeper {
     // banking: plain rolling for a while ends the combo
     if (st.mode === 'grounded') {
       this.idle += dt;
+      this.flow = Math.max(0, this.flow - dt * SCORE.flowDecay);
       if (this.chain > 0 && this.idle >= SCORE.idle) this.bank();
-    } else if (st.mode !== 'failed' && st.mode !== 'finished') this.idle = Math.min(this.idle, SCORE.idle * 0.5);
+    } else if (st.mode !== 'failed' && st.mode !== 'finished') {
+      this.idle = Math.min(this.idle, SCORE.idle * 0.5);
+      const speed = st.mode === 'airborne' ? Math.hypot(st.vx, st.vy) : st.speed;
+      if (this.chain > 0 && speed >= SCORE.flowSpeedMin) this.flow = Math.min(1, this.flow + dt * SCORE.flowGain);
+    }
+    this.noteFlow();
     this.prevX = st.x;
   }
 
   /** End the combo and bank its points (plain rolling, or the run ending cleanly). */
   bank(): void {
     if (this.chain === 0 && this.comboPoints === 0) return;
-    const mult = this.mult, pts = Math.round(this.comboPoints * mult);
+    const mult = this.mult, pts = Math.round(this.comboPoints * mult * this.flowPay);
+    for (const k of this.comboKinds) if (k !== 'near') this.runKinds.add(k);
     this.banked += pts;
     if (pts > this.best.points) this.best = { points: pts, chain: this.chain, mult };
-    if (this.chain >= 2) this.popups.push({ text: `Combo ×${mult}`, pts, kind: 'bank' });
+    if (this.chain >= 2) { this.popups.push({ text: `Combo ×${mult}`, pts, kind: 'bank' }); this.cues.push('bank'); }
     this.chain = 0; this.comboPoints = 0; this.idle = 0; this.comboTricks = 0; this.comboNear = 0;
+    this.comboKinds.clear(); this.lastKind = null; this.rankShown = 0;
   }
 
   /** A bail loses the combo in progress (its points, and its tricks / near misses from the counts). */
   bail(): void {
-    if (this.chain > 0) this.popups.push({ text: 'Bail! combo lost', pts: -Math.round(this.comboPoints * this.mult), kind: 'bail' });
+    if (this.chain > 0) {
+      const lost = Math.round(this.comboPoints * this.mult * this.flowPay);
+      this.lastBail = { mult: this.mult, chain: this.chain, points: lost };
+      this.popups.push({ text: 'Bail! combo lost', pts: -lost, kind: 'bail' });
+    } else this.lastBail = null;
     this.tricks -= this.comboTricks; this.nearMisses -= this.comboNear;
     this.chain = 0; this.comboPoints = 0; this.idle = 0; this.comboTricks = 0; this.comboNear = 0;
+    this.comboKinds.clear(); this.lastKind = null; this.rankShown = 0;
     this.endFlight();
+  }
+
+  /** A lantern, banked at once. Paying twice for the same id is refused. */
+  collectCharm(c: Charm): boolean {
+    if (this.charmIds.includes(c.id)) return false;
+    this.charmIds.push(c.id);
+    const pts = c.line === 'rail' ? SCORE.charmRail : SCORE.charmPop;
+    if (c.line === 'rail') this.charmRail++; else this.charmPop++;
+    this.banked += pts;
+    this.popups.push({ text: c.line === 'rail' ? 'Rail lantern' : 'Crest lantern', pts, kind: 'bonus' });
+    this.cues.push('charm');
+    return true;
   }
 
   /** A retry starts mid-route: forget the last position (no phantom flight / distance); ground up to the
@@ -228,6 +364,8 @@ export class ScoreKeeper {
       v: 1, banked: this.banked, chain: this.chain, comboPoints: this.comboPoints, idle: this.idle, best: { ...this.best },
       tricks: this.tricks, nearMisses: this.nearMisses, comboTricks: this.comboTricks, comboNear: this.comboNear,
       maxX: Number.isFinite(this.maxX) ? this.maxX : null, bonusKeys: [...this.bonusKeys],
+      flow: this.flow, flowPeak: this.flowPeak, lastKind: this.lastKind, comboKinds: [...this.comboKinds], runKinds: [...this.runKinds],
+      charmIds: [...this.charmIds], charmPop: this.charmPop, charmRail: this.charmRail, lastBail: this.lastBail ? { ...this.lastBail } : null,
     };
   }
 
@@ -245,6 +383,17 @@ export class ScoreKeeper {
     this.tricks = q.tricks!; this.nearMisses = q.nearMisses!; this.comboTricks = q.comboTricks!; this.comboNear = q.comboNear!;
     this.maxX = q.maxX ?? -Infinity;
     this.bonusKeys = Array.isArray(q.bonusKeys) ? q.bonusKeys.filter(num).slice(-64) : [];
+    if (num(q.flow)) this.flow = Math.min(1, Math.max(0, q.flow));
+    if (num(q.flowPeak)) this.flowPeak = Math.min(1, Math.max(0, q.flowPeak));
+    this.lastKind = isKind(q.lastKind) ? q.lastKind : null;
+    for (const k of q.comboKinds ?? []) if (isKind(k)) this.comboKinds.add(k);
+    for (const k of q.runKinds ?? []) if (isKind(k)) this.runKinds.add(k);
+    this.charmIds = Array.isArray(q.charmIds) ? q.charmIds.filter(num) : [];
+    if (num(q.charmPop)) this.charmPop = q.charmPop;
+    if (num(q.charmRail)) this.charmRail = q.charmRail;
+    const bail = q.lastBail;
+    if (bail && num(bail.mult) && num(bail.chain) && num(bail.points)) this.lastBail = { mult: bail.mult, chain: bail.chain, points: bail.points };
+    this.rankShown = this.mult;
     this.respawn();
     return true;
   }

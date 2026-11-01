@@ -1,6 +1,6 @@
 import { TEX_ANISO } from './environment';
 import * as THREE from 'three';
-import { Course, type Chunk, type Obstacle, type Surface } from '../course/course';
+import { Course, type Charm, type Chunk, type Obstacle, type Surface } from '../course/course';
 import { toScene, toSceneRaw, ROUTE_YAW } from './space';
 import type { Vector3 } from 'three';
 import { toon } from './materials';
@@ -118,6 +118,9 @@ export class CourseView {
   readonly group = new THREE.Group();
   private views = new Map<number, ChunkView>();
   private obstacleMeshes = new Map<number, THREE.Group>();
+  private charmMeshes = new Map<number, THREE.Object3D>();
+  private takenCharms = new Set<number>();
+  private charmMat = new THREE.MeshBasicMaterial({ color: '#ffc44d' });
   private pool: Record<'pot' | 'pillar', THREE.Group[]> = { pot: [], pillar: [] };
   private bx = 0;
   private by = 0;
@@ -130,6 +133,8 @@ export class CourseView {
 
   /** Hide a broken obstacle (debris takes over). */
   setBroken(id: number, broken: boolean): void { const m = this.obstacleMeshes.get(id); if (m) m.visible = !broken; }
+  /** A lantern was taken. Stays hidden if its chunk is rebuilt. */
+  hideCharm(id: number): void { this.takenCharms.add(id); const m = this.charmMeshes.get(id); if (m) m.visible = false; }
   resetObstacles(): void { for (const m of this.obstacleMeshes.values()) m.visible = true; }
 
   constructor(readonly course: Course) { this.sync(); }
@@ -163,6 +168,14 @@ export class CourseView {
     for (const id of c.rails) { const r = this.course.rail(id); g.add(this.railMesh(r.points, r.lateral, r.required)); }
     for (const id of c.walls) g.add(this.wallMesh(this.course.wall(id)));
     if (typeof document !== 'undefined') for (const m of c.markers) g.add(this.marker(m.x, m.label));
+    for (const id of c.charms ?? []) {
+      const charm = this.course.charm(id);
+      if (!charm) continue;
+      const m = this.charmObject(charm);
+      m.visible = !this.takenCharms.has(id);
+      g.add(m);
+      this.charmMeshes.set(id, m);
+    }
     for (const id of c.obstacles) {
       const o = this.course.obstacle(id);
       if (!o) continue;
@@ -182,6 +195,7 @@ export class CourseView {
   private drop(v: ChunkView): void {
     for (const p of v.pooled) { v.group.remove(p.obj); p.obj.visible = false; this.pool[p.kind].push(p.obj); }
     for (const id of v.chunk.obstacles) this.obstacleMeshes.delete(id);
+    for (const id of v.chunk.charms ?? []) this.charmMeshes.delete(id);
     this.group.remove(v.group);
     disposeTree(v.group);
     this.views.delete(v.chunk.id);
@@ -192,6 +206,7 @@ export class CourseView {
     for (const v of [...this.views.values()]) this.drop(v);
     for (const k of ['pot', 'pillar'] as const) for (const m of this.pool[k]) disposeTree(m);
     this.pool = { pot: [], pillar: [] };
+    this.charmMat.dispose();
   }
 
   private obstacleMesh(o: Obstacle): THREE.Group {
@@ -395,6 +410,24 @@ export class CourseView {
     const m = new THREE.Mesh(gb.build()!, vc(0.9));
     m.castShadow = m.receiveShadow = true;
     return m;
+  }
+
+  /** A small unlit lantern. Geometry is per charm so chunk disposal doesn't free a shared buffer. */
+  private charmObject(c: Charm): THREE.Group {
+    const g = new THREE.Group();
+    const gem = new THREE.Mesh(new THREE.OctahedronGeometry(c.line === 'pop' ? 0.42 : 0.32, 0), this.charmMat);
+    gem.position.y = c.line === 'rail' ? 0.46 : 0;
+    const stem = new THREE.Mesh(new THREE.BoxGeometry(0.06, c.line === 'pop' ? 0.9 : 0.4, 0.06), this.charmMat);
+    stem.position.y = c.line === 'pop' ? -0.55 : 0.1;
+    g.add(gem, stem);
+    g.position.copy(this.L(c.x, c.y, c.lateral));
+    const base = g.position.y;
+    g.onBeforeRender = () => {
+      const t = performance.now() / 1000;
+      g.position.y = base + Math.sin(t * 2.4 + c.id) * 0.1;
+      gem.rotation.y = t * 1.3 + c.id;
+    };
+    return g;
   }
 
   private marker(x: number, label: string): THREE.Sprite {
