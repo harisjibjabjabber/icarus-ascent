@@ -57,3 +57,14 @@ Content rule kept: Ao is an adult-presenting character; animations are playful b
 - MiniPoly – "Witch Broom" – CC0 – https://poly.pizza/m/gwE8397gO3 (palette atlas recoloured by us: minipoly-witch-broom-palette-retex.png)
 - Painted backdrop + tileable textures (plaster, roof tiles, cobbles, wood) – generated for this project (ours).
 - Evaluated, not shipped: Kenney Fantasy Town Kit 2.0 (CC0), Kenney Pirate Kit 2.1 (CC0), poly.pizza brooms by Jarlan Perez / Garrett LeFever / Don Carson (CC-BY), Polygonal Mind Broom Character (CC0).
+
+## Hi-fi render pass (branch `render/hifi`, 2026-11-01)
+
+| Asset | Where | Licence | Evidence | Ships? |
+|---|---|---|---|---|
+| `public/town/detail-array.webp` layers 0-5 (plaster, round roof tiles, wood trim, rock trim, uneven brick, brick: luminance + normal map) | Quaternius Medieval Village MegaKit textures (`T_*_BaseColor.png`, `T_*_Normal.png`), repacked by `art/pipeline/build_detail_array.py` (luminance only, median-softened; colour comes from our palette) | CC0 1.0 | `spikes/town-proof/assets/mvm/LICENSE.txt` | yes (branch only) |
+| `public/town/detail-array.webp` layers 6-7 (planks, cobbles) | Our painted tiles `spikes/town-proof/assets/painted/{wood,cobbles}.jpg` (generated for this project), normals derived from luminance | ours | listed above | yes (branch only) |
+| `public/town/kit.bin` v2 (adds UVs + texture layer per vertex) | Same CC0 kit pieces as before (Quaternius MVM, Kenney Fantasy Town 2.0, Kenney Pirate 2.1), re-baked by `art/pipeline/bake_town.py` | CC0 1.0 | as above | yes (branch only) |
+| Cobble street texture (1024², was 512²), bloom / AO / grade shaders | procedural, written for this project | project code | — | yes (branch only) |
+
+No new third-party downloads, accounts or purchases.

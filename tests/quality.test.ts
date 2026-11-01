@@ -42,9 +42,23 @@ describe('render quality manager', () => {
     feed(q, 52, 30);
     expect(q.scale).toBe(QUALITY.high.minPixelRatio); // floor, still high
     expect(q.level.name).toBe('high');
-    feed(q, 60, 120);
+    feed(q, 60, 40);
     expect(q.scale).toBe(QUALITY.high.pixelRatio); // recovered, never above the tier
+    expect(q.level.name).toBe('high');
     expect(Math.max(...scales)).toBeLessThanOrEqual(QUALITY.high.pixelRatio);
+  });
+  it('a phone that holds 60 fps at full resolution earns ultra; never after a step down', () => {
+    const q = new QualityManager('', true);
+    feed(q, 60, AUTO.warmup + AUTO.window * AUTO.promoteWindows + 0.5);
+    expect(q.level.name).toBe('ultra');
+    const w = new QualityManager('', true);
+    feed(w, 30, AUTO.warmup + AUTO.window * AUTO.strikes + 0.5);
+    expect(w.level.name).toBe('medium');
+    feed(w, 60, 200);
+    expect(w.level.name).toBe('medium');
+    const pinned = new QualityManager('?q=high', true);
+    feed(pinned, 60, 200);
+    expect(pinned.level.name).toBe('high');
   });
   it('levels scale cost monotonically', () => {
     for (let i = 1; i < ORDER.length; i++) {

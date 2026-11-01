@@ -10,7 +10,9 @@
  * Every 2 s window (after a warm-up):
  *  - fps below `AUTO.softFps` lowers the render resolution one notch (down to the tier's floor), keeping 60 fps;
  *  - fps below `AUTO.minFps` for `AUTO.strikes` windows steps the tier down (a real deficit, not a dip);
- *  - fps at the refresh cap for `AUTO.upWindows` windows raises the resolution back a notch (never above the tier).
+ *  - fps at the refresh cap for `AUTO.upWindows` windows raises the resolution back a notch (never above the tier);
+ *  - a phone that holds the cap at the tier's full resolution for `AUTO.promoteWindows` windows (~20 s) earns the next
+ *    tier up (high -> ultra on flagships). Never again once the tier has had to step down (no ping-pong).
  */
 export type QualityName = 'low' | 'medium' | 'high' | 'ultra';
 
@@ -54,7 +56,7 @@ export const QUALITY: Record<QualityName, Quality> = {
 
 export const ORDER: QualityName[] = ['low', 'medium', 'high', 'ultra'];
 
-export const AUTO = { minFps: 45, softFps: 55, capFps: 58, window: 2.0, strikes: 2, warmup: 3.0, step: 0.25, upWindows: 4 };
+export const AUTO = { minFps: 45, softFps: 55, capFps: 58, window: 2.0, strikes: 2, warmup: 3.0, step: 0.25, upWindows: 4, promoteWindows: 10 };
 
 export class QualityManager {
   level: Quality;
@@ -65,6 +67,9 @@ export class QualityManager {
   private frames = 0;
   private strikes = 0;
   private good = 0;
+  private promote = 0;
+  /** Set once the tier has stepped down: no more automatic promotion. */
+  private noPromote = false;
   private warm = AUTO.warmup;
   lastFps = 0;
   /** Called when the tier changes (apply to renderer/env/effects). */
@@ -93,6 +98,9 @@ export class QualityManager {
       this.good = 0;
       if (++this.strikes >= AUTO.strikes) { this.strikes = 0; this.step(-1); return; }
     } else this.strikes = 0;
+    if (this.lastFps >= AUTO.capFps && this.scale >= L.pixelRatio && !this.noPromote && L.name !== 'ultra') {
+      if (++this.promote >= AUTO.promoteWindows) { this.promote = 0; this.step(1); return; }
+    } else this.promote = 0;
     if (this.lastFps < AUTO.softFps) {
       this.good = -AUTO.upWindows; // after a drop, wait twice as long before trying more pixels again
       this.setScale(Math.max(L.minPixelRatio, this.scale - AUTO.step));
@@ -111,6 +119,8 @@ export class QualityManager {
     const i = ORDER.indexOf(this.level.name) + dir;
     if (i < 0 || i >= ORDER.length) return;
     this.level = QUALITY[ORDER[i]];
+    if (dir < 0) this.noPromote = true;
+    this.promote = 0;
     // stepping down: start the lower tier at its full resolution (it is cheaper per pixel already)
     this.scale = this.level.pixelRatio;
     this.warm = AUTO.warmup;
