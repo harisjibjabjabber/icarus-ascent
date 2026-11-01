@@ -128,8 +128,10 @@ export class GameView {
       if (!streamed && x > course.finishX - 0.5) return { y: endY, gap: false };
       const g = course.groundBelow(x, 1e6); return g ? { y: g.sample.y, gap: false } : { y: heightAt(x), gap: true };
     };
-    const towers = streamed ? Array.from({ length: 200 }, (_, i) => 520 + i * 900) : [course.finishX * 0.22, course.finishX * 0.64];
-    const harbourFrom = streamed ? undefined : Math.floor((course.finishX - 220) / 40) * 40;
+    // opening: the course says where its harbour begins (big-jump landing); one clock tower over the old town the
+    // tutorial rolls through, one marking the way down into the harbour
+    const harbourFrom = streamed ? undefined : course.harbourX ?? Math.floor((course.finishX - 220) / 40) * 40;
+    const towers = streamed ? Array.from({ length: 200 }, (_, i) => 520 + i * 900) : [harbourFrom! * 0.45, harbourFrom! - 50];
     this.env.buildScenery(course.seed, course.finishX, heightAt, minY, streamed, groundAt, { harbourFrom, clockTowers: towers, endless: streamed });
     this.env.streamScenery(course.startX, streamed ? (course as unknown as { generatedTo: number }).generatedTo : Infinity);
   }

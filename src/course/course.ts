@@ -146,6 +146,8 @@ export class Course {
   private rById = new Map<number, Rail>();
   private wById = new Map<number, Wall>();
   private oById = new Map<number, Obstacle>();
+  /** Presentation hint (opening only): route x where the harbour town (quay, sea on the right) begins. */
+  harbourX?: number;
   /** Authored lessons in order (opening only). */
   lessons: Lesson[] = [];
 

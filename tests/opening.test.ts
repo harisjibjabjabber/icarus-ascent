@@ -5,6 +5,7 @@ import { Autopilot, type AutopilotOptions } from '../src/diag/autopilot';
 import { TUNING } from '../src/tuning';
 import type { SimEvent } from '../src/sim/types';
 import { replayHeadless, Recorder } from '../src/diag/recorder';
+import { density, courseElements } from '../src/course/stats';
 
 const course = buildOpeningCourse();
 const dt = TUNING.sim.dt;
@@ -33,6 +34,8 @@ const CONFIGS: AutopilotOptions[] = [
   { minSpeed: 12, optionalRail: true }, { minSpeed: 15, pots: 'heel', pillarTrick: 'flip', optionalRail: true },
 ];
 
+const L = (t: string) => course.lessons.find((l) => l.title === t)!;
+
 describe('authored opening', () => {
   it('teaches the brief §10 sequence, one idea per lesson, each with a checkpoint and a short prompt', () => {
     expect(course.kind).toBe('opening');
@@ -42,7 +45,6 @@ describe('authored opening', () => {
       expect(l.promptX0).toBeLessThanOrEqual(l.cpX + 2);
       expect(course.groundBelow(l.cpX, 1e6)).toBeTruthy();
     }
-    const L = (t: string) => course.lessons.find((l) => l.title === t)!;
     const inLesson = (t: string, x: number) => { const i = course.lessons.indexOf(L(t)); const next = course.lessons[i + 1]?.cpX ?? course.finishX; return x >= L(t).cpX && x < next; };
     expect(course.gaps.filter((g) => inLesson('Jump', g.x0) && g.requires === 'jump').length).toBe(1);
     expect(course.obstacles.filter((o) => o.kind === 'pot' && inLesson('Pot', o.x)).length).toBe(1);
@@ -98,12 +100,24 @@ describe('authored opening', () => {
     expect(short).toEqual([]);
   });
 
-  it('alternates concentrated sections with recovery: compulsory features are spaced, and no long empty stretch', () => {
+  it('dense: compulsory features stay spaced for their prompts, but there is always something coming up', () => {
     const f = course.lessons.filter((l) => l.required).map((l) => l.featureX);
     for (let i = 1; i < f.length; i++) expect(f[i] - f[i - 1]).toBeGreaterThan(40);
-    // something to do (a feature or a descent's lesson) at least every ~120 m (~6 s at speed)
-    const all = [...course.gaps.map((g) => g.x0), ...course.obstacles.map((o) => o.x), ...course.rails.map((r) => r.points[0].x), ...course.lessons.map((l) => l.featureX), course.finishX].sort((a, b) => a - b);
-    for (let i = 1; i < all.length; i++) expect(all[i] - all[i - 1], `empty stretch before ${all[i].toFixed(0)}`).toBeLessThan(120);
+    // tutorial (push, descent, first jump) may breathe; from the Pot lesson on, the next element (gap, rail, wall,
+    // pot, pillar) is never more than ~3 s away at normal riding speed
+    const from = L('Pot').cpX;
+    const d = density(course, from, course.finishX);
+    expect(d.longestEmpty, `empty stretch from ${d.longestEmptyAt.toFixed(0)}`).toBeLessThanOrEqual(48);
+    expect(density(course, 0, course.finishX).per100m).toBeGreaterThanOrEqual(2.5);
+    const { timeAt, sim } = ride({ minSpeed: 13 });
+    expect(sim.state.mode).toBe('finished');
+    let x = from;
+    for (const q of courseElements(course, from, course.finishX)) { if (q.x0 > x) expect(timeAt(q.x0) - timeAt(x), `empty ${x.toFixed(0)}..${q.x0.toFixed(0)}`).toBeLessThanOrEqual(3.5); x = Math.max(x, q.x1); }
+    // the tutorial stays gentle (first compulsory feature no sooner than ~10 s) and the harbour arrives quickly
+    expect(timeAt(L('Jump').featureX)).toBeGreaterThanOrEqual(9);
+    expect(timeAt(course.harbourX!)).toBeLessThanOrEqual(30);
+    expect(timeAt(course.walls.find((w) => w.required)!.x0)).toBeLessThanOrEqual(38);
+    expect(course.harbourX!).toBeLessThan(course.walls.find((w) => w.required)!.x0); // both wall runs sit in the harbour
   });
 
   it('compulsory features are visible from the chase camera before commitment (no blind crest)', () => {
