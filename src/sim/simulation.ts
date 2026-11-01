@@ -58,7 +58,7 @@ export class Simulation {
       mode: 'grounded', tick: 0, x, y: g.sample.y, vx: 0, vy: 0, speed: this.start ? this.start.speed : this.M.restCreep,
       surfaceId: g.surface.id, seg: g.sample.seg, angle: Math.atan(g.sample.slope),
       airTime: 0, groundTime: 0, coyote: 0, jumpBuffer: 0, pushStrokeId: -1, pushApplied: 0, jumpStrokeId: -1,
-      air: 'none', flip: 0, flipsThisJump: 0, sideStrokeId: -1, prepStrokeId: -1, prepTimer: 0, prepHeld: false,
+      air: 'none', flip: 0, flipsThisJump: 0, flipQueued: false, sideStrokeId: -1, prepStrokeId: -1, prepTimer: 0, prepHeld: false,
       prepAge: 0, prepStrength: 0, skimPendingPush: false, wallExit: 'none', railBlockedByFlip: false,
       railId: -1, wallId: -1, contactTime: 0, wallEntrySpeed: 0, lastContact: 'ground', lastContactId: g.surface.id,
       prepTriedThisAir: false, sideTriedThisAir: false,
@@ -240,20 +240,36 @@ export class Simulation {
           s.jumpBuffer = this.M.jumpBufferTime;
           return this.resolve(name, `jump buffered (${ms(pc.t)} ms before contact)`);
         }
+        if (s.air === 'flip') return this.queueFlip(name, pc, ms);
         // a flip that cannot finish before touchdown is never started: the press is a buffered jump
         const needs = K.flipDuration * K.flipLandTolerance;
-        if (pc.kind === 'ground' && pc.t < needs + (s.air === 'flip' ? 0 : 0)) {
+        if (pc.kind === 'ground' && pc.t < needs) {
           s.jumpBuffer = pc.t + 0.05;
           return this.resolve(name, `jump buffered: a flip would not finish (${ms(pc.t)} ms to touchdown, needs ${ms(needs)})`);
         }
-        if (s.air === 'flip') return this.reject(name, 'already flipping');
         if (s.air === 'grabLeft' || s.air === 'grabRight') return this.reject(name, 'release the grab before flipping');
-        if (s.flipsThisJump >= K.maxFlipsPerJump) return this.reject(name, 'one flip per jump');
-        s.air = 'flip'; s.flip = 0; s.flipsThisJump++;
+        if (s.flipsThisJump >= K.maxFlipsPerJump) return this.reject(name, K.maxFlipsPerJump > 1 ? 'two flips per jump' : 'one flip per jump');
+        s.air = 'flip'; s.flip = 0; s.flipsThisJump++; s.flipQueued = false;
         this.emit({ type: 'flip-start', x: s.x, y: s.y });
         return this.resolve(name, `backflip (${pc.kind === 'ground' ? ms(pc.t) : '∞'} ms to contact, needs ${ms(K.flipDuration)})`);
       }
     }
+  }
+
+  /** Second Up during a flip. Queues one more rotation when it can finish; otherwise buffers the jump. */
+  private queueFlip(name: string, pc: { kind: string; t: number }, ms: (t: number) => string): void {
+    const s = this.state, K = this.K;
+    const rest = (1 - s.flip) * K.flipDuration;
+    const need = rest + K.flipDuration * K.flipLandTolerance;
+    if (pc.kind === 'ground' && pc.t < need) {
+      s.jumpBuffer = pc.t + 0.05;
+      return this.resolve(name, `jump buffered: a second flip would not finish (${ms(pc.t)} ms to touchdown, needs ${ms(need)})`);
+    }
+    if (s.flip < K.flipReadable) return this.reject(name, 'the first flip is not readable yet');
+    if (s.flipQueued) return this.reject(name, 'second flip already queued');
+    if (s.flipsThisJump >= K.maxFlipsPerJump) return this.reject(name, 'two flips per jump');
+    s.flipQueued = true;
+    return this.resolve(name, 'second flip queued');
   }
 
   /** A right-hand wall beside the rider (catchable now) or starting within wallUpLookahead m ahead. */
@@ -271,7 +287,7 @@ export class Simulation {
     const c = new Simulation(this.course, this.T, undefined, { stream: false });
     c.cloneFrom(this);
     const cs = c.state;
-    cs.air = 'none'; cs.flip = 0; cs.prepStrokeId = -1; cs.prepHeld = false; cs.prepTimer = 0; cs.jumpBuffer = 0;
+    cs.air = 'none'; cs.flip = 0; cs.flipQueued = false; cs.prepStrokeId = -1; cs.prepHeld = false; cs.prepTimer = 0; cs.jumpBuffer = 0;
     c.sideHeld = null; c.upAsSide = -1;
     const n = Math.round(maxSeconds / this.dt);
     for (let i = 1; i <= n; i++) {
@@ -382,7 +398,7 @@ export class Simulation {
 
   private resetAir(): void {
     const s = this.state;
-    s.air = 'none'; s.flip = 0; s.flipsThisJump = 0; s.airTime = 0;
+    s.air = 'none'; s.flip = 0; s.flipsThisJump = 0; s.flipQueued = false; s.airTime = 0;
     s.prepTriedThisAir = s.prepHeld; s.sideTriedThisAir = false; s.grabbedThisAir = false; s.railBlockedByFlip = false;
     s.trickCredit = 'none'; s.creditGround = 0; // a pillar needs a trick from the jump before it
   }
@@ -506,14 +522,15 @@ export class Simulation {
     if (s.prepStrokeId !== -1) s.prepAge += dt;
     if (s.air === 'flip') {
       s.flip = Math.min(1, s.flip + dt / K.flipDuration);
-      if (s.flip >= 1) { s.air = 'none'; s.flip = 0; this.emit({ type: 'flip-complete', x: s.x, y: s.y }); this.earnCredit('flip'); }
+      if (s.flip >= 1) this.finishRotation();
     } else if (s.air === 'grabLeft' || s.air === 'grabRight') s.contactTime += dt;
     s.vy -= M.airGravity * dt;
     s.vx -= Math.sign(s.vx) * M.airDrag * s.vx * s.vx * dt;
     s.vx = Math.min(s.vx, M.hardCap);
     const p0 = { x: s.x, y: s.y };
     const p1 = { x: s.x + s.vx * dt, y: s.y + s.vy * dt };
-    const hit = this.sweep(p0, p1);
+    // A risky high line keeps the street, but the street does not catch anyone airborne inside its void.
+    const hit = this.inRiskyVoid(p1.x) ? null : this.sweep(p0, p1);
     if (hit) {
       if (hit.kind === 'land') return this.land(hit.surface, hit.x);
       if (hit.kind === 'snap') { s.x = p1.x; s.y = hit.y; return; }
@@ -530,7 +547,61 @@ export class Simulation {
         this.startWall(w.wall, s.sideStrokeId);
       }
     }
+    if (s.mode === 'airborne') {
+      const miss = this.highLineMiss();
+      if (miss) return this.fail(miss);
+    }
     if (s.mode === 'airborne' && s.y < this.course.lowestNear(s.x) - M.failDepth) this.failGap();
+  }
+
+  /** The current rotation is done. A queued second one starts only when a full extra rotation still fits. */
+  private finishRotation(): void {
+    const s = this.state, K = this.K;
+    const rotation = Math.max(1, s.flipsThisJump);
+    this.emit({ type: 'flip-complete', x: s.x, y: s.y, rotation });
+    this.earnCredit('flip');
+    if (s.flipQueued && s.flipsThisJump < K.maxFlipsPerJump) {
+      const pc = this.predictContact();
+      const need = K.flipDuration * K.flipLandTolerance;
+      if (pc.kind !== 'ground' || pc.t >= need) {
+        s.flipsThisJump++;
+        s.flip = 0;
+        s.flipQueued = false;
+        s.air = 'flip';
+        this.emit({ type: 'flip-start', x: s.x, y: s.y });
+        return;
+      }
+    }
+    s.air = 'none';
+    s.flip = 0;
+    s.flipQueued = false;
+  }
+
+  private inRiskyVoid(x: number): boolean {
+    for (const r of this.course.rails) {
+      if (r.risky && r.voidX0 !== undefined && r.voidX1 !== undefined && x >= r.voidX0 && x <= r.voidX1) return true;
+    }
+    return false;
+  }
+
+  /** Airborne and below the street inside a high-line void: the safe line was the street, or the rail to its end. */
+  private highLineMiss(): FailInfo | null {
+    const s = this.state;
+    if (s.mode !== 'airborne') return null;
+    for (const r of this.course.rails) {
+      if (!r.risky || r.voidX0 === undefined || r.voidX1 === undefined) continue;
+      if (s.x < r.voidX0 || s.x > r.voidX1) continue;
+      const along = Math.min(Math.max(s.x, r.points[0].x), r.points[r.points.length - 1].x);
+      const street = this.course.groundBelow(s.x, Course.railSample(r, along).y);
+      if (!street || s.y >= street.sample.y - this.K.riskyFailDrop) continue;
+      return {
+        kind: 'missed-rail', x: s.x, y: s.y,
+        message: s.lastContact === 'rail'
+          ? 'Came off the high line — ride it to the end, or stay on the street'
+          : 'Missed the high line — the street underneath was the safe way',
+      };
+    }
+    return null;
   }
 
   private isPrepArmed(): boolean {
@@ -608,7 +679,8 @@ export class Simulation {
       return this.fail({ kind: 'landed-grabbing', x, y: sm.y, message: `Landed still holding the ${s.air === 'grabLeft' ? 'left' : 'right'} grab — let go before touchdown` });
     }
     const flipped = s.flipsThisJump > 0;
-    if (s.air === 'flip') { this.emit({ type: 'flip-complete', x, y: sm.y }); this.earnCredit('flip'); } // absorbed by the landing (within tolerance)
+    if (s.air === 'flip') { this.emit({ type: 'flip-complete', x, y: sm.y, rotation: Math.max(1, s.flipsThisJump) }); this.earnCredit('flip'); } // absorbed by the landing (within tolerance)
+    s.flipQueued = false;
     const before = Math.hypot(s.vx, s.vy);
     const tangential = s.vx * Math.cos(th) + s.vy * Math.sin(th);
     const impact = Math.max(0, -(-s.vx * Math.sin(th) + s.vy * Math.cos(th)));
@@ -679,7 +751,7 @@ export class Simulation {
     const speedIn = Math.hypot(s.vx, s.vy);
     s.speed = Math.min(Math.max(s.vx * Math.cos(th) + s.vy * Math.sin(th), this.M.landingRetention * s.vx, 0), this.M.hardCap);
     s.mode = 'grinding'; s.railId = r.id; s.x = x; s.y = sm.y; s.angle = th; s.contactTime = 0; s.jumpBuffer = 0;
-    s.air = 'none'; s.flip = 0;
+    s.air = 'none'; s.flip = 0; s.flipQueued = false;
     s.prepStrokeId = -1; s.prepHeld = false; s.prepTimer = 0;
     this.syncContactVelocity();
     this.emit({ type: 'grind-start', railId: r.id, x, y: sm.y, speed: speedIn });

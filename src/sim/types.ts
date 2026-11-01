@@ -59,6 +59,8 @@ export interface RiderState {
   /** Flip progress 0..1 (1 = full rotation). */
   flip: number;
   flipsThisJump: number;
+  /** A second rotation is waiting for the current one to finish, and only starts if it can land. */
+  flipQueued: boolean;
   /** Stroke holding the current grab / wall ride. */
   sideStrokeId: number;
   /** Landing preparation: held (stroke id or -1) and armed-until timer (s). */
@@ -115,7 +117,7 @@ export type SimEvent =
   | { type: 'leave-edge'; x: number; y: number; crest: boolean }
   | { type: 'land'; x: number; y: number; impact: number; speedBefore: number; speedAfter: number; material: string; flipped: boolean }
   | { type: 'flip-start'; x: number; y: number }
-  | { type: 'flip-complete'; x: number; y: number }
+  | { type: 'flip-complete'; x: number; y: number; rotation?: number }
   | { type: 'grab-start'; side: 'left' | 'right' }
   | { type: 'grab-end'; side: 'left' | 'right'; held: number }
   | { type: 'prep'; armed: boolean }

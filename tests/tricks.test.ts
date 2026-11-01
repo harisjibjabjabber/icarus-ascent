@@ -183,17 +183,47 @@ describe('backflip', () => {
     expect(sim.state.speed).toBeGreaterThan(10.5);
   });
 
-  it('only one flip per jump', () => {
+  it('a second rotation completes when the air holds it, and a third is refused', () => {
     const c = chains([{ x: -10, y: 12 }, { x: 10, y: 12 }], [{ x: 30, y: 0 }, { x: 300, y: 0 }]);
     const sim = new Simulation(c);
     sim.state.speed = 12;
     stepUntil(sim, (s) => s.state.x > 8);
     sim.enqueue(up()); sim.step(); run(sim, 0.05);
-    sim.enqueue(up());
-    stepUntil(sim, (s) => s.state.air === 'none' && s.state.flipsThisJump === 1, 2);
+    sim.enqueue(up()); sim.step();
+    expect(sim.state.air).toBe('flip');
+    // too early: the first flip has to read before the second is accepted
+    sim.enqueue(up()); sim.step();
+    expect(sim.drainEvents().some((e) => e.type === 'reject' && e.reason === 'the first flip is not readable yet')).toBe(true);
+    expect(sim.state.air).toBe('flip');
+    expect(sim.state.flipQueued).toBe(false);
+    stepUntil(sim, (s) => s.state.flip >= K.flipReadable, 1);
     sim.drainEvents();
     sim.enqueue(up()); sim.step();
+    expect(sim.state.flipQueued).toBe(true);
+    const ev: SimEvent[] = [];
+    stepUntil(sim, (s) => { ev.push(...s.drainEvents()); return s.state.flipsThisJump === 2 && s.state.air === 'none'; }, 2);
+    ev.push(...sim.drainEvents());
+    expect(ev.some((e) => e.type === 'flip-complete' && (e.rotation ?? 1) >= 2)).toBe(true);
+    expect(sim.state.mode).not.toBe('failed');
+    sim.enqueue(up()); sim.step();
+    expect(sim.drainEvents().some((e) => e.type === 'reject' && e.reason === 'two flips per jump')).toBe(true);
     expect(sim.drainEvents().some((e) => e.type === 'flip-start')).toBe(false);
+  });
+
+  it('a flat jump cannot finish a second rotation, so the press buffers and the landing is clean', () => {
+    const sim = new Simulation(flatCourse());
+    sim.state.speed = 14;
+    sim.enqueue(up()); sim.step();
+    run(sim, 0.08);
+    sim.enqueue(up()); sim.step();
+    stepUntil(sim, (s) => s.state.flip >= K.flipReadable, 1);
+    sim.drainEvents();
+    sim.enqueue(up()); sim.step();
+    const ev = sim.drainEvents();
+    expect(ev.some((e) => e.type === 'resolve' && /second flip would not finish/.test(e.result))).toBe(true);
+    expect(sim.state.flipQueued).toBe(false);
+    stepUntil(sim, (s) => s.state.mode !== 'airborne', 2);
+    expect(sim.state.mode).not.toBe('failed');
   });
 });
 

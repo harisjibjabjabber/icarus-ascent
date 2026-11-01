@@ -35,6 +35,13 @@ export interface Rail {
   lateral: number;
   /** Compulsory rails bridge a gap; optional ones run alongside the ordinary route. */
   required: boolean;
+  /**
+   * Optional high line. The street stays continuous underneath (a grounded rider never leaves it).
+   * An airborne rider between voidX0 and voidX1 falls through that street, so a mistimed attempt can fail.
+   */
+  risky?: boolean;
+  voidX0?: number;
+  voidX1?: number;
 }
 
 /** Rideable wall (milestone 2 mechanics). */
@@ -64,6 +71,7 @@ export interface Marker { x: number; label: string }
 /**
  * Optional lantern on a line you can choose to take. Not a collider: missing it never fails.
  * `pop` sits in the air past a crest (only a real launch reaches it). `rail` sits on an optional handrail.
+ * `risk` sits on a high line: only a grind reaches it, and it pays more.
  */
 export interface Charm {
   id: number;
@@ -71,7 +79,7 @@ export interface Charm {
   y: number;
   /** Presentation only (+ = right). Gameplay uses x/y and the rider's mode. */
   lateral: number;
-  line: 'pop' | 'rail';
+  line: 'pop' | 'rail' | 'risk';
 }
 
 /** Breakable obstacle standing on the ground at x (brief §8). */
@@ -106,7 +114,7 @@ export interface Lesson {
 /** Something to do on the course (tests use these for spacing/approach checks). */
 export interface Feature {
   x: number;
-  kind: 'gap' | 'rail' | 'rail-optional' | 'wall' | 'pot' | 'pillar' | 'crest' | 'rollers';
+  kind: 'gap' | 'rail' | 'rail-optional' | 'rail-risky' | 'wall' | 'pot' | 'pillar' | 'crest' | 'rollers';
   required: boolean;
   /** Where the approach to this feature starts (run-in begins), for required features. */
   approachX?: number;

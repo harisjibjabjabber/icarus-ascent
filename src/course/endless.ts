@@ -62,7 +62,7 @@ export class PhraseBuilder {
   readonly rails: Omit<Rail, 'id'>[] = [];
   readonly walls: Omit<Wall, 'id'>[] = [];
   readonly obstacles: { kind: Obstacle['kind']; x: number }[] = [];
-  /** Optional lanterns. `pop` is in the air past a crest; `rail` sits on a handrail. */
+  /** Optional lanterns. `pop` is in the air past a crest; `rail` sits on a handrail; `risk` sits on a high line. */
   readonly charms: Omit<Charm, 'id'>[] = [];
   readonly requires: [number, Gap['requires']][] = [];
   readonly features: Feature[] = [];
@@ -111,16 +111,38 @@ export class PhraseBuilder {
     this.rails.push({ points, lateral, required });
     if (!required) this.features.push({ x, kind: 'rail-optional', required: false });
   }
+  /** Ground height of the chain being built, at x. */
+  private yAt(x: number): number {
+    for (let i = 1; i < this.pts.length; i++) if (this.pts[i].x >= x) {
+      const a = this.pts[i - 1], b = this.pts[i];
+      return a.y + ((b.y - a.y) * (x - a.x)) / Math.max(1e-6, b.x - a.x);
+    }
+    return this.cur().y;
+  }
   /** Optional handrail (right of the route) following the ground just built from x0 to x1: something to grind on descents. `charm`: a lantern on the rail. */
   handrail(x0: number, x1: number, h = 0.95, charm = false): this {
-    const yAt = (x: number) => {
-      for (let i = 1; i < this.pts.length; i++) if (this.pts[i].x >= x) { const a = this.pts[i - 1], b = this.pts[i]; return a.y + ((b.y - a.y) * (x - a.x)) / Math.max(1e-6, b.x - a.x); }
-      return this.cur().y;
-    };
     const n = Math.max(2, Math.ceil((x1 - x0) / 3) + 1);
-    this.rails.push({ points: Array.from({ length: n }, (_, i) => { const x = x0 + ((x1 - x0) * i) / (n - 1); return { x, y: yAt(x) + h }; }), lateral: 1.2, required: false });
+    this.rails.push({ points: Array.from({ length: n }, (_, i) => { const x = x0 + ((x1 - x0) * i) / (n - 1); return { x, y: this.yAt(x) + h }; }), lateral: 1.2, required: false });
     this.features.push({ x: x0, kind: 'rail-optional', required: false });
-    if (charm) { const x = x0 + (x1 - x0) * 0.72; this.charms.push({ x, y: yAt(x) + h, lateral: 1.2, line: 'rail' }); }
+    if (charm) { const x = x0 + (x1 - x0) * 0.72; this.charms.push({ x, y: this.yAt(x) + h, lateral: 1.2, line: 'rail' }); }
+    return this;
+  }
+  /**
+   * Optional high line over a street that is already built (call after the flat that carries it).
+   * The street stays continuous. The void is where an airborne miss falls through; it ends before the rail
+   * so a clean grind pops onto the street. Height sits inside the rail catch band of a normal jump.
+   */
+  highLine(x0: number, len: number, h0 = 1.12, h1 = 0.96): this {
+    const n = Math.max(2, Math.ceil(len / 3) + 1);
+    const points = Array.from({ length: n }, (_, i) => {
+      const t = i / (n - 1);
+      const x = x0 + len * t;
+      return { x, y: this.yAt(x) + h0 + (h1 - h0) * t };
+    });
+    this.rails.push({ points, lateral: 1.15, required: false, risky: true, voidX0: x0 + 0.45, voidX1: x0 + len - 5.2 });
+    this.features.push({ x: x0, kind: 'rail-risky', required: false });
+    const cx = x0 + len * 0.7;
+    this.charms.push({ x: cx, y: this.yAt(cx) + h0 + (h1 - h0) * 0.7, lateral: 1.15, line: 'risk' });
     return this;
   }
   /** Descent with an optional handrail along most of it. */
@@ -192,11 +214,20 @@ export const PHRASES: PhraseSpec[] = [
   },
   {
     id: 'big-kicker', title: 'Big kicker', tier: 2, style: true, required: false, entry: [6, HC], exit: [15, HC], airtime: 1.2, receiving: 'downslope', cpSpeed: 11,
-    build: (b, d) => { b.flat(4).railSlope(44, -(13 + 3 * d), true).flat(8).crest(3.0, 12, 3.6, 24, true).flat(16); },
+    // Steep lip and a long landing: one flip is comfortable, a second rotation still finishes.
+    build: (b, d) => { b.flat(4).railSlope(44, -(13 + 3 * d), true).flat(8).crest(4.6 + 0.5 * d, 8, 7.4, 28, true).flat(4).rollers(1, 0.55, 18).flat(6); },
   },
   {
     id: 'double-pop', title: 'Double crest', tier: 2, style: true, required: false, entry: [6, HC], exit: [12, HC], airtime: 0.7, receiving: 'downslope', cpSpeed: 11,
     build: (b) => { b.flat(4).railSlope(36, -9).flat(4).crest(1.8, 9, 1.6, 14).flat(12).crest(2.0, 10, 2.2, 16, true).flat(12); },
+  },
+  {
+    id: 'high-line', title: 'High line', tier: 2, style: true, required: false, entry: [8, HC], exit: [8, HC], airtime: 0.55, receiving: 'flat', cpSpeed: 12,
+    build: (b) => {
+      b.flat(40);
+      const x0 = b.cur().x, len = 22;
+      b.flat(len + 6).highLine(x0, len).flat(8).crest(1.6, 9, 1.6, 14).flat(14);
+    },
   },
   // ------------------------------------------------------------------ compulsory actions
   {

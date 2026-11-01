@@ -1,7 +1,9 @@
 import { TEX_ANISO } from './environment';
 import * as THREE from 'three';
-import { Course, type Charm, type Chunk, type Obstacle, type Surface } from '../course/course';
-import { toScene, toSceneRaw, ROUTE_YAW } from './space';
+import { Course, type Charm, type Chunk, type Obstacle, type Rail, type Surface } from '../course/course';
+import { toScene, toSceneRaw, ROUTE_DIR, ROUTE_RIGHT, ROUTE_YAW } from './space';
+import { loadProps, type PropSet } from './props';
+import { townMaterial } from './town/kit';
 import type { Vector3 } from 'three';
 import { toon } from './materials';
 import { GeoBuilder, blob } from './geo';
@@ -118,9 +120,17 @@ export class CourseView {
   readonly group = new THREE.Group();
   private views = new Map<number, ChunkView>();
   private obstacleMeshes = new Map<number, THREE.Group>();
-  private charmMeshes = new Map<number, THREE.Object3D>();
   private takenCharms = new Set<number>();
-  private charmMat = new THREE.MeshBasicMaterial({ color: '#ffc44d' });
+  /** Painted CC0 props (hanging lantern, high-line rail, beacon). Null until the bake loads. */
+  private props: PropSet | null = null;
+  private propsGen = 0;
+  /** Shared with every high line and the instanced collectibles. */
+  private iron = townMaterial();
+  private glowMat = toon('#fff6d4', { vertexColors: true, emissive: '#ff8a2a', emissiveIntensity: 1.15, side: THREE.DoubleSide });
+  private charmBody: THREE.InstancedMesh | null = null;
+  private charmGlow: THREE.InstancedMesh | null = null;
+  private charmList: { id: number; x: number; y: number; lat: number; line: Charm['line'] }[] = [];
+  private charmDummy = new THREE.Object3D();
   private pool: Record<'pot' | 'pillar', THREE.Group[]> = { pot: [], pillar: [] };
   private bx = 0;
   private by = 0;
@@ -134,20 +144,53 @@ export class CourseView {
   /** Hide a broken obstacle (debris takes over). */
   setBroken(id: number, broken: boolean): void { const m = this.obstacleMeshes.get(id); if (m) m.visible = !broken; }
   /** A lantern was taken. Stays hidden if its chunk is rebuilt. */
-  hideCharm(id: number): void { this.takenCharms.add(id); const m = this.charmMeshes.get(id); if (m) m.visible = false; }
+  hideCharm(id: number): void { this.takenCharms.add(id); this.layoutCharms(); }
   resetObstacles(): void { for (const m of this.obstacleMeshes.values()) m.visible = true; }
 
-  constructor(readonly course: Course) { this.sync(); }
+  constructor(readonly course: Course) {
+    this.iron.side = THREE.DoubleSide;
+    loadProps().then((p) => {
+      this.props = p;
+      this.propsGen++;
+      this.signature = '';
+      this.sync();
+      if (typeof window === 'undefined') return;
+      const flag = (window as unknown as { icarus?: { props?: boolean } }).icarus;
+      if (flag) flag.props = true;
+      (window as unknown as { __props?: boolean }).__props = true;
+    });
+    this.sync();
+  }
 
   /** Add meshes for new chunks and recycle those the course dropped. Cheap when nothing changed. */
   sync(): void {
     const cs = this.course.chunks;
-    const sig = cs.length ? `${cs[0].id}:${cs[cs.length - 1].id}:${cs.length}` : '';
+    const sig = cs.length ? `${cs[0].id}:${cs[cs.length - 1].id}:${cs.length}:${this.propsGen}` : '';
     if (sig === this.signature) return;
     this.signature = sig;
     const live = new Set(cs.map((c) => c.id));
     for (const [id, v] of this.views) if (!live.has(id)) this.drop(v);
     for (const c of cs) if (!this.views.has(c.id)) this.build(c);
+    this.layoutCharms();
+  }
+
+  /** Float the collectible lanterns. Called every frame; positions go through toScene so a rebase just works. */
+  animate(time: number): void {
+    if (!this.charmBody) return;
+    this.glowMat.emissiveIntensity = 1.05 + Math.sin(time * 5.5) * 0.22;
+    for (let i = 0; i < this.charmList.length; i++) {
+      const c = this.charmList[i];
+      const bob = Math.sin(time * 2.3 + c.id) * 0.1;
+      const s = c.line === 'risk' ? 1.95 : c.line === 'pop' ? 1.7 : 1.55;
+      this.charmDummy.position.copy(toScene(c.x, c.y + bob, c.lat));
+      this.charmDummy.quaternion.identity();
+      this.charmDummy.scale.setScalar(s * (1 + Math.sin(time * 5.5 + c.id) * 0.035));
+      this.charmDummy.updateMatrix();
+      this.charmBody.setMatrixAt(i, this.charmDummy.matrix);
+      this.charmGlow?.setMatrixAt(i, this.charmDummy.matrix);
+    }
+    this.charmBody.instanceMatrix.needsUpdate = true;
+    if (this.charmGlow) this.charmGlow.instanceMatrix.needsUpdate = true;
   }
 
   /** The floating origin moved: re-place every chunk. */
@@ -165,17 +208,9 @@ export class CourseView {
     for (const s of surfaces) { g.add(this.surfaceMesh(s)); this.lipLine(s, lip, edge); }
     for (const [pts, color] of [[lip, COURSE_STYLE.lipLine], [edge, COURSE_STYLE.edgeLine]] as const) if (pts.length) g.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts), lineMat(color)));
     for (const gp of this.course.gaps) if (gp.x0 >= c.x0 - 1e-6 && gp.x0 <= c.x1 + 1e-6) g.add(this.gapPosts(gp.x0, gp.yTakeoff, gp.x1, gp.yReceive));
-    for (const id of c.rails) { const r = this.course.rail(id); g.add(this.railMesh(r.points, r.lateral, r.required)); }
+    for (const id of c.rails) g.add(this.railMesh(this.course.rail(id)));
     for (const id of c.walls) g.add(this.wallMesh(this.course.wall(id)));
     if (typeof document !== 'undefined') for (const m of c.markers) g.add(this.marker(m.x, m.label));
-    for (const id of c.charms ?? []) {
-      const charm = this.course.charm(id);
-      if (!charm) continue;
-      const m = this.charmObject(charm);
-      m.visible = !this.takenCharms.has(id);
-      g.add(m);
-      this.charmMeshes.set(id, m);
-    }
     for (const id of c.obstacles) {
       const o = this.course.obstacle(id);
       if (!o) continue;
@@ -195,7 +230,6 @@ export class CourseView {
   private drop(v: ChunkView): void {
     for (const p of v.pooled) { v.group.remove(p.obj); p.obj.visible = false; this.pool[p.kind].push(p.obj); }
     for (const id of v.chunk.obstacles) this.obstacleMeshes.delete(id);
-    for (const id of v.chunk.charms ?? []) this.charmMeshes.delete(id);
     this.group.remove(v.group);
     disposeTree(v.group);
     this.views.delete(v.chunk.id);
@@ -206,7 +240,10 @@ export class CourseView {
     for (const v of [...this.views.values()]) this.drop(v);
     for (const k of ['pot', 'pillar'] as const) for (const m of this.pool[k]) disposeTree(m);
     this.pool = { pot: [], pillar: [] };
-    this.charmMat.dispose();
+    this.charmBody?.dispose();
+    this.charmGlow?.dispose();
+    this.iron.dispose();
+    this.glowMat.dispose();
   }
 
   private obstacleMesh(o: Obstacle): THREE.Group {
@@ -350,7 +387,9 @@ export class CourseView {
     return m;
   }
 
-  private railMesh(points: { x: number; y: number }[], lateral: number, required: boolean): THREE.Group {
+  private railMesh(r: Rail): THREE.Group {
+    if (r.risky && this.props?.piece('rail')) return this.highLineMesh(r);
+    const { points, lateral, required } = r;
     const g = new THREE.Group();
     const curve = new THREE.CurvePath<THREE.Vector3>();
     for (let i = 0; i + 1 < points.length; i++) curve.add(new THREE.LineCurve3(this.L(points[i].x, points[i].y, lateral), this.L(points[i + 1].x, points[i + 1].y, lateral)));
@@ -412,22 +451,105 @@ export class CourseView {
     return m;
   }
 
-  /** A small unlit lantern. Geometry is per charm so chunk disposal doesn't free a shared buffer. */
-  private charmObject(c: Charm): THREE.Group {
+  /**
+   * Risky high line: a painted fence panel (the grind is its top rail) and two post lanterns
+   * framing the street before it. The street mesh itself is untouched, so the safe line stays readable.
+   */
+  private highLineMesh(r: Rail): THREE.Group {
     const g = new THREE.Group();
-    const gem = new THREE.Mesh(new THREE.OctahedronGeometry(c.line === 'pop' ? 0.42 : 0.32, 0), this.charmMat);
-    gem.position.y = c.line === 'rail' ? 0.46 : 0;
-    const stem = new THREE.Mesh(new THREE.BoxGeometry(0.06, c.line === 'pop' ? 0.9 : 0.4, 0.06), this.charmMat);
-    stem.position.y = c.line === 'pop' ? -0.55 : 0.1;
-    g.add(gem, stem);
-    g.position.copy(this.L(c.x, c.y, c.lateral));
-    const base = g.position.y;
-    g.onBeforeRender = () => {
-      const t = performance.now() / 1000;
-      g.position.y = base + Math.sin(t * 2.4 + c.id) * 0.1;
-      gem.rotation.y = t * 1.3 + c.id;
-    };
+    const rail = this.props!.piece('rail')!;
+    const beacon = this.props!.piece('beacon');
+    const ironParts: THREE.BufferGeometry[] = [];
+    const glowParts: THREE.BufferGeometry[] = [];
+    const x0 = r.points[0].x, x1 = r.points[r.points.length - 1].x;
+    const n = Math.max(1, Math.round((x1 - x0) / 1.08));
+    for (let i = 0; i < n; i++) {
+      const a = x0 + ((x1 - x0) * i) / n, b = x0 + ((x1 - x0) * (i + 1)) / n;
+      const mid = (a + b) / 2;
+      const top = Course.railSample(r, mid).y;
+      const gnd = this.course.groundBelow(mid, top)?.sample.y ?? top - 1.1;
+      ironParts.push(this.stamp(rail.body, (u, v, w) => ({ x: a + u * (b - a), y: gnd + v * (top - gnd), lat: r.lateral + w })));
+    }
+    const mouth = x0 - 5.5;
+    const base = this.course.groundBelow(mouth, 1e6)?.sample.y ?? r.points[0].y - 1.1;
+    if (beacon) for (const lat of [-1.25, 1.25]) {
+      const sc = 1.55;
+      const place = (u: number, v: number, w: number) => ({ x: mouth + u * sc, y: base + v * sc, lat: lat + w * sc });
+      ironParts.push(this.stamp(beacon.body, place));
+      if (beacon.glow) glowParts.push(this.stamp(beacon.glow, place));
+    }
+    const im = mergeAttrs(ironParts), gm = mergeAttrs(glowParts);
+    if (im) { const mesh = new THREE.Mesh(im, this.iron); mesh.castShadow = true; g.add(mesh); }
+    if (gm) { const mesh = new THREE.Mesh(gm, this.glowMat); mesh.castShadow = false; g.add(mesh); }
     return g;
+  }
+
+  /** Copy a prop into chunk-local scene space. `place` is in route metres (x, height, lateral). */
+  private stamp(src: THREE.BufferGeometry, place: (u: number, v: number, w: number) => { x: number; y: number; lat: number }): THREE.BufferGeometry {
+    const P = src.getAttribute('position'), N = src.getAttribute('normal'), C = src.getAttribute('color');
+    const U = src.getAttribute('tuv'), T = src.getAttribute('tl');
+    const I = src.getIndex()!;
+    const g = new THREE.BufferGeometry();
+    const pos = new Float32Array(P.count * 3), nrm = new Float32Array(P.count * 3);
+    const col = new Float32Array(P.count * 3), uv = new Float32Array(P.count * 2), tl = new Float32Array(P.count);
+    const tmp = new THREE.Vector3(), nn = new THREE.Vector3();
+    for (let i = 0; i < P.count; i++) {
+      const q = place(P.getX(i), P.getY(i), P.getZ(i));
+      tmp.copy(this.L(q.x, q.y, q.lat));
+      // normals: piece +X is along the route, +Z is lateral, +Y is up
+      const nx = N.getX(i), ny = N.getY(i), nz = N.getZ(i);
+      nn.set(ROUTE_DIR.x * nx + ROUTE_RIGHT.x * nz, ny, ROUTE_DIR.z * nx + ROUTE_RIGHT.z * nz).normalize();
+      pos.set([tmp.x, tmp.y, tmp.z], i * 3);
+      nrm.set([nn.x, nn.y, nn.z], i * 3);
+      col.set([C.getX(i), C.getY(i), C.getZ(i)], i * 3);
+      uv.set([U.getX(i), U.getY(i)], i * 2);
+      tl[i] = T.getX(i);
+    }
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    g.setAttribute('tuv', new THREE.BufferAttribute(uv, 2));
+    g.setAttribute('tl', new THREE.BufferAttribute(tl, 1));
+    g.setIndex(new THREE.BufferAttribute(I.array.slice(0), 1));
+    return g;
+  }
+
+  /** One instanced hanging lantern per streamed charm. Shared geometry, two draw calls (iron + flame). */
+  private layoutCharms(): void {
+    const piece = this.props?.piece('lantern');
+    const list: CourseView['charmList'] = [];
+    if (piece) for (const c of this.course.chunks) for (const id of c.charms ?? []) {
+      if (this.takenCharms.has(id)) continue;
+      const ch = this.course.charm(id);
+      if (ch) list.push({ id, x: ch.x, y: ch.y, lat: ch.lateral, line: ch.line });
+    }
+    this.charmList = list;
+    const n = Math.max(1, list.length);
+    const make = (geo: THREE.BufferGeometry, mat: THREE.Material, prev: THREE.InstancedMesh | null) => {
+      prev?.dispose();
+      const m = new THREE.InstancedMesh(geo, mat, n);
+      m.count = list.length;
+      m.frustumCulled = false;
+      m.castShadow = true;
+      return m;
+    };
+    if (!piece || !list.length) {
+      if (this.charmBody) this.group.remove(this.charmBody);
+      if (this.charmGlow) this.group.remove(this.charmGlow);
+      this.charmBody?.dispose(); this.charmGlow?.dispose();
+      this.charmBody = this.charmGlow = null;
+      return;
+    }
+    if (this.charmBody) this.group.remove(this.charmBody);
+    if (this.charmGlow) this.group.remove(this.charmGlow);
+    this.charmBody = make(piece.body, this.iron, this.charmBody);
+    this.group.add(this.charmBody);
+    if (piece.glow) {
+      this.charmGlow = make(piece.glow, this.glowMat, this.charmGlow);
+      this.charmGlow.castShadow = false;
+      this.group.add(this.charmGlow);
+    }
+    this.animate(performance.now() / 1000);
   }
 
   private marker(x: number, label: string): THREE.Sprite {
@@ -446,6 +568,36 @@ export class CourseView {
     sp.scale.set(3.2, 0.8, 1);
     return sp;
   }
+}
+
+/** Merge stamped prop copies. Disposes the parts. Empty input returns null. */
+function mergeAttrs(parts: THREE.BufferGeometry[]): THREE.BufferGeometry | null {
+  if (!parts.length) return null;
+  let nv = 0, ni = 0;
+  for (const p of parts) { nv += p.getAttribute('position').count; ni += p.getIndex()!.count; }
+  const pos = new Float32Array(nv * 3), nrm = new Float32Array(nv * 3), col = new Float32Array(nv * 3);
+  const uv = new Float32Array(nv * 2), tl = new Float32Array(nv), idx = new Uint32Array(ni);
+  let v = 0, ii = 0;
+  for (const p of parts) {
+    const P = p.getAttribute('position'), N = p.getAttribute('normal'), C = p.getAttribute('color');
+    const U = p.getAttribute('tuv'), T = p.getAttribute('tl'), I = p.getIndex()!;
+    pos.set(P.array as Float32Array, v * 3);
+    nrm.set(N.array as Float32Array, v * 3);
+    col.set(C.array as Float32Array, v * 3);
+    uv.set(U.array as Float32Array, v * 2);
+    tl.set(T.array as Float32Array, v);
+    for (let k = 0; k < I.count; k++) idx[ii++] = I.getX(k) + v;
+    v += P.count;
+    p.dispose();
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  g.setAttribute('tuv', new THREE.BufferAttribute(uv, 2));
+  g.setAttribute('tl', new THREE.BufferAttribute(tl, 1));
+  g.setIndex(new THREE.BufferAttribute(idx, 1));
+  return g;
 }
 
 /** Dispose geometries (and non-shared textures) under a node. Shared materials stay. */

@@ -1,6 +1,6 @@
 import type { Action } from '../input/actions';
 import { Simulation } from '../sim/simulation';
-import type { Obstacle } from '../course/course';
+import type { Obstacle, Rail } from '../course/course';
 
 export interface AutopilotOptions {
   minSpeed: number;
@@ -11,10 +11,16 @@ export interface AutopilotOptions {
   flipAtFirstGap?: boolean;
   /** Backflip off crest launches (no gap) for style. */
   styleFlips?: boolean;
+  /** Queue a second rotation once the first flip is readable and a full extra one still fits. */
+  styleDouble?: boolean;
   /** Grab off crest launches (no gap) for style. */
   styleGrabs?: boolean;
-  /** Ride the optional rail. */
+  /** Ride the optional (non-risky) rail. */
   optionalRail?: boolean;
+  /** Take the risky high line: jump it and swipe down. */
+  riskyLine?: boolean;
+  /** Jump the risky high line but never swipe down, so the attempt misses. */
+  riskyMistime?: 'nodown';
   /** How to deal with pots: jump over them (default) or heel-break them. */
   pots?: 'jump' | 'heel';
   /** How to smash pillars: jump into them grabbing (default) or flipping, or heel-skim through. */
@@ -31,6 +37,7 @@ export class Autopilot {
   private prepDone = false;
   private wallStroke = -1;
   private flipDone = false;
+  private doubleSent = false;
   private sid = 1_000_000;
   private airPlan: 'none' | 'flip' | 'grab' | 'done' = 'none';
   private grabStroke = -1;
@@ -73,7 +80,7 @@ export class Autopilot {
     this.lastMode = st.mode;
     const pots = this.opts.pots ?? 'jump';
     if (st.mode === 'grounded') {
-      this.prepDone = false; this.airPlan = 'none'; this.pillarId = -1;
+      this.prepDone = false; this.airPlan = 'none'; this.pillarId = -1; this.doubleSent = false;
       if (this.wallStroke !== -1) { out.push({ type: 'side', side: 'right', held: false, strokeId: this.wallStroke, source: 'test' }); this.wallStroke = -1; }
       if (this.heelStroke !== -1) { out.push({ type: 'release', dir: 'down', strokeId: this.heelStroke, source: 'test' }); this.heelStroke = -1; this.heelNext = false; }
       if (this.t % (this.opts.pushEvery ?? 36) === 0 && st.speed < this.opts.minSpeed) out.push({ type: 'down', strokeId: this.id(), strength: this.opts.strength ?? 0.65, fresh: true, source: 'test' });
@@ -82,7 +89,7 @@ export class Autopilot {
         const early = g.requires === 'rail' ? 2.2 : (this.opts.jumpEarly ?? 0.8);
         if (st.x > g.x0 - early && st.x < g.x0 - early + 0.6) jump = true;
       }
-      const r = this.opts.optionalRail ? course.rails.find((q) => !q.required && q.points[0].x > st.x - 4) : undefined;
+      const r = course.rails.find((q) => this.takes(q) && q.points[0].x > st.x - 4);
       if (r && st.x > r.points[0].x - 3.2 && st.x < r.points[0].x - 2.6) jump = true;
       for (const o of course.obstacles) {
         if (o.kind !== 'pot' || st.broken.includes(o.id) || this.potsTried.has(o.id)) continue;
@@ -110,9 +117,10 @@ export class Autopilot {
       else if (this.heelStroke === -1) out.push({ type: 'down', strokeId: this.id(), strength: 0.65, fresh: true, source: 'test' });
     } else if (st.mode === 'airborne') {
       const g = course.gaps.find((q) => st.x > q.x0 - 4 && st.x < q.x1);
-      const r = this.opts.optionalRail ? course.rails.find((q) => !q.required && q.points[q.points.length - 1].x > st.x) : undefined;
+      const r = course.rails.find((q) => this.takes(q) && q.points[q.points.length - 1].x > st.x);
       const nearOptional = r && st.x > r.points[0].x - 3.5 && st.x < r.points[0].x + 2;
-      if ((g?.requires === 'rail' || nearOptional) && !this.prepDone) { out.push({ type: 'down', strokeId: this.id(), strength: 0.65, fresh: true, source: 'test' }); this.prepDone = true; }
+      const skipDown = !!r?.risky && this.opts.riskyMistime === 'nodown';
+      if ((g?.requires === 'rail' || (nearOptional && !skipDown)) && !this.prepDone) { out.push({ type: 'down', strokeId: this.id(), strength: 0.65, fresh: true, source: 'test' }); this.prepDone = true; }
       if (g?.requires === 'wall' && this.wallStroke === -1 && st.lastContact !== 'wall') {
         const w = course.walls.find((q) => st.x > q.x0 - 6 && st.x < q.x1) ?? course.walls[0];
         if (w && st.x >= w.x0) { this.wallStroke = this.id(); out.push({ type: 'side', side: 'right', held: true, strokeId: this.wallStroke, source: 'test' }); }
@@ -133,6 +141,11 @@ export class Autopilot {
         this.airPlan = this.predictAirtime(sim) > 0.45 ? 'grab' : 'done';
       }
       if (this.airPlan === 'flip' && st.airTime > 0.06 && st.air === 'none') { out.push({ type: 'up', strokeId: this.id(), source: 'test' }); this.airPlan = 'done'; this.flipDone = true; }
+      if (this.opts.styleDouble && !this.doubleSent && st.air === 'flip' && st.flipsThisJump === 1 && !st.flipQueued && st.flip >= sim.K.flipReadable) {
+        const pc = sim.predictContact();
+        const need = (1 - st.flip) * sim.K.flipDuration + sim.K.flipDuration * sim.K.flipLandTolerance;
+        if (pc.kind !== 'ground' || pc.t >= need) { out.push({ type: 'up', strokeId: this.id(), source: 'test' }); this.doubleSent = true; }
+      }
       if (this.airPlan === 'grab' && st.airTime > 0.06 && st.air === 'none' && this.grabStroke === -1) {
         this.grabStroke = this.id(); this.grabTicks = 0;
         out.push({ type: 'side', side: 'left', held: true, strokeId: this.grabStroke, source: 'test' });
@@ -145,5 +158,12 @@ export class Autopilot {
       }
     }
     return out;
+  }
+
+  /** Risky rails only for a high-line rider. Other optional rails only when optionalRail is set. */
+  private takes(q: Rail): boolean {
+    if (q.required) return false;
+    if (q.risky) return !!this.opts.riskyLine || this.opts.riskyMistime === 'nodown';
+    return !!this.opts.optionalRail;
   }
 }
