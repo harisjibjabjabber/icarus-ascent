@@ -46,8 +46,6 @@ const BEST_KEY = 'icarus.endless.bestClean';
 const BEST_SCORE_KEY = 'icarus.endless.bestScore';
 /** Furthest distance of a finished or abandoned endless run. */
 const BEST_DISTANCE_KEY = 'icarus.endless.bestDistance';
-/** Endless v2: lives per run (src/score/run.ts). */
-export { MAX_LIVES };
 /** Checkpoint carried across an update reload (sessionStorage). */
 const RESUME_KEY = 'icarus.resume';
 
@@ -111,13 +109,13 @@ export class Game {
     hud.innerHTML = `
       <div class="hint">Swipe <b>down</b> push · <b>up</b> jump<br>In the air: <b>up</b> backflip · <b>down</b> grind a rail · hold <b>right</b> by a wall to wall-ride (else grab)<br>Hold <b>down</b> into a landing to heel-skim (slows you)<br>Pots: jump them or heel-break them · Pillars: smash through mid-grab, mid-flip or heel-skimming<br><span>Keys: ↓ push/grind/skim · ↑ / Space jump/flip · → / ← hold wall-ride/grab · M sound</span></div>
       <div class="prompt"><div class="prompt-lesson"></div><div class="prompt-text"></div><div class="prompt-keys"></div></div>
-      <div class="fail"><div class="fail-text"></div><div class="fail-sub">Tap / ↑ to retry · same course</div></div>
-      <div class="finish"><div class="finish-title">Course complete</div><div class="finish-sub">That's every move. Keep going — endless strings them together.</div>
-        <div class="finish-buttons"><button data-act="endless" class="primary">Continue endless</button><button data-act="again">Ride again</button><button data-act="lab">Go to the lab</button></div></div>
-      <div class="start"><div class="start-title">${GAME_TITLE}</div><div class="start-sub">Swipe down to start the course</div>
-        <div class="start-buttons"><button data-act="endless">Endless</button><button data-act="lab">Lab</button></div></div>
+      <div class="fail ui-panel"><div class="fail-text"></div><div class="fail-sub">Tap / ↑ to retry · same course</div></div>
+      <div class="finish ui-panel ui-panel--strong"><div class="finish-title">Course complete</div><div class="finish-sub">That's every move. Keep going — endless strings them together.</div>
+        <div class="finish-buttons"><button data-act="endless" class="ui-btn ui-btn--primary">Continue endless</button><button data-act="again" class="ui-btn ui-btn--secondary">Ride again</button><button data-act="lab" class="ui-btn ui-btn--secondary">Go to the lab</button></div></div>
+      <div class="start ui-panel ui-panel--strong"><div class="start-title">${GAME_TITLE}</div><div class="start-sub">Swipe down to start the course</div>
+        <div class="start-buttons"><button data-act="endless" class="ui-btn ui-btn--secondary">Endless</button><button data-act="lab" class="ui-btn ui-btn--secondary">Lab</button></div></div>
       <div class="distance"></div>
-      <div class="buttons"><button data-act="sound" class="sound"></button><button data-act="mode" class="mode"></button><button data-act="look" class="look"></button><button data-act="new" class="new">New run</button><button data-act="dev">Dev</button></div>
+      <div class="ui-bar"><button data-act="sound" class="sound ui-btn ui-btn--compact"></button><button data-act="mode" class="mode ui-btn ui-btn--compact"></button><button data-act="new" class="new ui-btn ui-btn--compact">New run</button><button data-act="look" class="look ui-btn ui-btn--compact ui-dev-only"></button><button data-act="dev" class="dev ui-btn ui-btn--compact ui-dev-only">Dev</button></div>
       <div class="speed"></div>
       <div class="version"></div>`;
     root.appendChild(hud);
@@ -153,6 +151,7 @@ export class Game {
     }
     this.updateSoundButton(); this.updateLookButton();
     const params = new URLSearchParams(location.search);
+    if (params.has('dev')) document.body.classList.add('ui-dev-tools');
     this.seed = params.has('seed') ? Number(params.get('seed')) >>> 0 : newSeed();
     this.mode = params.has('lab') ? 'lab' : params.has('endless') ? 'endless' : 'opening';
     this.startScreen = this.mode === 'opening';
@@ -219,7 +218,7 @@ export class Game {
 
   private updateSoundButton(): void {
     const b = document.querySelector('button.sound');
-    if (b) b.textContent = this.sfx.muted ? 'Sound off' : 'Sound on';
+    if (b) b.textContent = this.sfx.muted ? 'Muted' : 'Sound';
   }
 
   private toggleDev(): void { this.overlay.toggle(); this.view.showArc = this.overlay.visible; }

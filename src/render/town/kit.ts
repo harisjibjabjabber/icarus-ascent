@@ -8,7 +8,7 @@ import { TOD_UNIFORMS } from '../timeOfDay';
  * public/town/kit.json indexes public/town/kit.bin. At runtime pieces are only *placed* and merged per chunk
  * (one draw call per chunk and LOD), never modelled here.
  */
-export const ROLE = { FIXED: 0, PLASTER: 1, SHUTTER: 2, ROOF: 3, TRIM: 4 } as const;
+const ROLE = { FIXED: 0, PLASTER: 1, SHUTTER: 2, ROOF: 3, TRIM: 4 } as const;
 
 export interface Piece { v: number; i: number; min: number[]; max: number[]; pos: Float32Array; nrm: Int8Array; col: Uint8Array; idx: Uint32Array; uv: Float32Array | null; tl: Uint8Array | null }
 
@@ -18,9 +18,9 @@ export interface Piece { v: number; i: number; min: number[]; max: number[]; pos
  * is projected in world space (planar by dominant normal).
  */
 export const TEX = { NONE: -1, PLASTER: 0, TILES: 1, WOOD: 2, ROCK: 3, RUBBLE: 4, BRICK: 5, PLANKS: 6, COBBLES: 7 } as const;
-export const TEX_LAYERS = 8;
+const TEX_LAYERS = 8;
 /** World-projected tile size (m) per layer; all divide TEX_WRAP so chunk-local projection is seamless across chunks. */
-export const TEX_TILE = [2, 2, 1.5, 2, 2.5, 2, 1.5, 2.5];
+const TEX_TILE = [2, 2, 1.5, 2, 2.5, 2, 1.5, 2.5];
 export const TEX_WRAP = 60;
 
 export class Kit {

@@ -56,7 +56,7 @@ const m = (...ps: Pose[]): Pose => Object.assign({}, ...ps);
 const LEGS: Pose = { leftUpperLeg: E(-0.32, -0.1, 0.02), leftLowerLeg: E(0.62, 0, 0), rightUpperLeg: E(-0.34, 0.2, -0.02), rightLowerLeg: E(0.66, 0, 0), leftFoot: E(), rightFoot: E() };
 
 /** The riding stance every clip starts from. */
-export const STANCE: Pose = m(
+const STANCE: Pose = m(
   {
     hips: E(0.05, 0.22, -0.06),
     spine: E(0.03, 0.1, 0.06), chest: E(-0.02, 0.08, 0.03), upperChest: E(-0.03, 0.04, 0),

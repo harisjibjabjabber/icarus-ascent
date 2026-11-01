@@ -127,7 +127,7 @@ export class EndlessHud {
         <span>Lanterns</span><span>${r.charms ?? 0}</span>
         <span>Challenges</span><span>${r.challenges ?? 0}</span>
       </div>
-      <div class="eh-sum-buttons"><button data-act="again">Ride again</button><button data-act="same">Same route</button></div>`;
+      <div class="eh-sum-buttons"><button data-act="again" class="ui-btn ui-btn--primary">Ride again</button><button data-act="same" class="ui-btn ui-btn--secondary">Same route</button></div>`;
     for (const b of this.el.sum.querySelectorAll('button')) {
       b.addEventListener('pointerdown', (e) => e.stopPropagation());
       b.addEventListener('click', (e) => { e.stopPropagation(); if ((b as HTMLElement).dataset.act === 'again') this.onAgain(); else this.onSameSeed(); });

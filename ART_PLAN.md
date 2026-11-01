@@ -1,5 +1,7 @@
 # Art plan — Icarus's Ascent
 
+> **Superseded.** The floating-islands “Icarus's Ascent” world plan below is retired. The shipped game is **Witch Broom** (Mediterranean seaside town); see [VISION.md](VISION.md) for art direction and roadmap. This file is kept for historical reference only.
+
 **Phase 1 = the character.** See `art/CHARACTER_PLAN.md` (look, animation list, blending, appeal,
 pipeline, proof). Concepts: `art/concepts/`. Licences: `art/LICENSES.md`.
 

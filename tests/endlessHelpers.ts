@@ -89,7 +89,7 @@ export function seedBlock(from: number, to: number, km = 5): { fails: string[]; 
 }
 
 /** Required features: enough approach time from their run-in start to commitment. */
-export const APPROACH = { first: 2.0, combo: 1.2 };
+const APPROACH = { first: 2.0, combo: 1.2 };
 export function approachIssues(r: RideResult, seed: number): string[] {
   const out: string[] = [];
   for (const c of r.chunks.values()) {

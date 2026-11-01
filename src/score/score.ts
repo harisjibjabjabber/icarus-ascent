@@ -78,7 +78,7 @@ export const SCORE = {
 export type PopupKind = 'near' | 'bank' | 'bail' | 'bonus';
 export interface Popup { text: string; pts: number; kind: PopupKind }
 export type Cue = 'near' | 'rank' | 'charm' | 'bank';
-export const TRICK_KINDS = ['flip', 'grab', 'grind', 'wall', 'skim', 'pot', 'pillar', 'near'] as const;
+const TRICK_KINDS = ['flip', 'grab', 'grind', 'wall', 'skim', 'pot', 'pillar', 'near'] as const;
 export type TrickKind = typeof TRICK_KINDS[number];
 export interface BailInfo { mult: number; chain: number; points: number }
 

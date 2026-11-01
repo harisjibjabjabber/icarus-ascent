@@ -172,7 +172,7 @@ const RIM_BASE = ART.rimColor.clone();
  * they finish while still in the haze (town streams 480 m ahead) instead of hitching the frame that needs them.
  * `0` forces a single slice per call (tests).
  */
-export const SCENERY_SLICE_MS = 2;
+const SCENERY_SLICE_MS = 2;
 
 export class Environment {
   readonly group = new THREE.Group();

@@ -6,7 +6,7 @@ import { TUNING } from '../src/tuning';
 export type P = [number, number];
 /** Deterministic RNG for fuzz traces. */
 export function rng(seed: number) { let a = seed >>> 0; return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
-export function gauss(r: () => number) { return Math.sqrt(-2 * Math.log(r() + 1e-12)) * Math.cos(2 * Math.PI * r()); }
+function gauss(r: () => number) { return Math.sqrt(-2 * Math.log(r() + 1e-12)) * Math.cos(2 * Math.PI * r()); }
 export const ray = (start: P, angDeg: number, len: number): P => [start[0] + Math.cos((angDeg * Math.PI) / 180) * len, start[1] - Math.sin((angDeg * Math.PI) / 180) * len];
 export const fires = (ev: GestureEvent[]) => ev.filter((e) => e.kind === 'fire').map((e: any) => e.dir as string);
 

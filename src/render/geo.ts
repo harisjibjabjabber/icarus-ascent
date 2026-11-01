@@ -67,20 +67,6 @@ export function jitter(g: THREE.BufferGeometry, amount: number, rng: () => numbe
   return g;
 }
 
-/** Fluted column shaft: a cylinder whose radius dips at every other radial vertex. */
-export function flutedShaft(r: number, h: number, flutes = 16, depth = 0.07, taper = 0.9): THREE.BufferGeometry {
-  const g = new THREE.CylinderGeometry(r * taper, r, h, flutes * 2, 1, false);
-  const p = g.getAttribute('position');
-  for (let i = 0; i < p.count; i++) {
-    const x = p.getX(i), z = p.getZ(i);
-    const a = Math.atan2(z, x);
-    const k = Math.round((a / (2 * Math.PI)) * flutes * 2);
-    if (k % 2 !== 0 && Math.hypot(x, z) > 1e-4) { p.setX(i, x * (1 - depth)); p.setZ(i, z * (1 - depth)); }
-  }
-  g.computeVertexNormals();
-  return g;
-}
-
 /** A few pre-jittered unit blobs (clouds, foliage, rocks), cloned on use: cheap streaming. */
 const blobCache = new Map<string, THREE.BufferGeometry[]>();
 export function blob(detail: number, amount: number, pick: number): THREE.BufferGeometry {

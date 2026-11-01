@@ -20,7 +20,7 @@ export interface ChallengeDef {
   minDist: number;
 }
 
-export const CHALLENGE_POOL: ChallengeDef[] = [
+const CHALLENGE_POOL: ChallengeDef[] = [
   { id: 'flip', text: 'Land a backflip', goal: 1, pts: 700, minDist: 0 },
   { id: 'grind', text: 'Catch a rail', goal: 1, pts: 700, minDist: 0 },
   { id: 'pots', text: 'Smash 2 pots', goal: 2, pts: 800, minDist: 0 },

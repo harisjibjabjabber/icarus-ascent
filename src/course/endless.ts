@@ -295,7 +295,7 @@ export function netDrop(p: PhraseSpec): number {
  * so a set piece starts right at its wave's peak instead of drifting into the build or spilling
  * past the peak. A connector like `recovery` (same entry/exit), never compulsory.
  */
-export function runwaySpec(len: number): PhraseSpec {
+function runwaySpec(len: number): PhraseSpec {
   return {
     id: 'runway', title: 'Run-up', tier: 0, style: false, required: false, entry: [6, HC], exit: [8, HC], airtime: 0, receiving: 'flat', cpSpeed: 13,
     build: (b) => {
@@ -307,7 +307,7 @@ export function runwaySpec(len: number): PhraseSpec {
 /** Shortest run-up the assembler inserts (m). */
 const MIN_RUNWAY = 4;
 /** A connector with `extra` m of calm run-up (as a runway) in front: same id, entry and exit, just longer. */
-export function paddedSpec(spec: PhraseSpec, extra: number): PhraseSpec {
+function paddedSpec(spec: PhraseSpec, extra: number): PhraseSpec {
   const lead = runwaySpec(extra);
   return { ...spec, build: (b, d, r) => { lead.build(b, d, r); spec.build(b, d, r); } };
 }
@@ -323,7 +323,7 @@ function measureLength(spec: PhraseSpec, d: number): number {
 }
 /** Per spec: lengths at d = 0 and 1 when the length is affine in d (every authored phrase lerps), else null. */
 const lengthCache = new Map<string, [number, number] | null>();
-export function phraseLength(spec: PhraseSpec, d: number): number {
+function phraseLength(spec: PhraseSpec, d: number): number {
   if (spec.id === 'runway' || SPEC[spec.id] !== spec) return measureLength(spec, d); // one-off (padded) lengths
   let e = lengthCache.get(spec.id);
   if (e === undefined) {
@@ -336,8 +336,6 @@ export function phraseLength(spec: PhraseSpec, d: number): number {
 export const LIBRARY = PHRASES.filter((p) => !CONNECTORS.has(p.id));
 export { SET_PIECES };
 
-/** Difficulty 0..1 by distance (m from the start): in waves (build, peak, breather), see waves.ts. */
-export function difficultyAt(dist: number): number { return waveAt(dist).d; }
 /** Highest tier allowed at difficulty d. */
 export function maxTier(d: number): Tier { return d >= 0.35 ? 3 : d >= 0.1 ? 2 : 1; }
 /** Longest run of consecutive compulsory phrases allowed at difficulty d (longer combinations later). */
