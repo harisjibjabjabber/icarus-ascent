@@ -1,5 +1,5 @@
 import { TUNING, type Tuning } from '../tuning';
-import { Course, type Obstacle, type Rail, type Surface, type Swing, type Updraft, type Vec2, type Wall } from '../course/course';
+import { Course, type Obstacle, type Rail, type Surface, type Updraft, type Vec2, type Wall } from '../course/course';
 import { describeAction, type Action } from '../input/actions';
 import type { FailInfo, RiderState, SimEvent } from './types';
 
@@ -16,8 +16,6 @@ import type { FailInfo, RiderState, SimEvent } from './types';
  *   airborne --right held + valid wall proximity-----> wallRiding
  *   grinding --rail end / up-------------------------> airborne
  *   wallRiding --wall end / release / slid off / up--> airborne
- *   airborne --down held near a rope-----------------> swinging
- *   swinging --release / up / street / timeout-------> airborne
  *   airborne --updraft has lifted enough-------------> flying
  *   flying --corridor ends / time / ground-----------> airborne | grounded
  *   airborne --descending through a bounce pad-------> airborne (bounced)
@@ -67,8 +65,9 @@ export class Simulation {
       airTime: 0, groundTime: 0, coyote: 0, jumpBuffer: 0, pushStrokeId: -1, pushApplied: 0, jumpStrokeId: -1,
       air: 'none', flip: 0, flipsThisJump: 0, flipQueued: false, sideStrokeId: -1, prepStrokeId: -1, prepTimer: 0, prepHeld: false,
       prepAge: 0, prepStrength: 0, skimPendingPush: false, wallExit: 'none', railBlockedByFlip: false,
-      railId: -1, wallId: -1, swingId: -1, swingPhi: 0, swingOmega: 0, updraftId: -1, gustY: NaN, flightX1: Infinity, flightTime: 0,
+      railId: -1, wallId: -1, updraftId: -1, gustY: NaN, flightX1: Infinity, flightTime: 0,
       bounced: [], bounceId: -1, launchVy: 0, contactTime: 0, wallEntrySpeed: 0, lastContact: 'ground', lastContactId: g.surface.id,
+      layer: 'street', tuftId: -1, gustT: 0, gustFrom: { x: 0, y: 0 },
       prepTriedThisAir: false, sideTriedThisAir: false,
       broken: [], trickCredit: 'none', creditGround: 0, grabbedThisAir: false,
       takeoffX: x, takeoffY: g.sample.y, takeoffSpeed: 0, leftBy: 'none', fail: null,
@@ -110,7 +109,7 @@ export class Simulation {
       case 'airborne': this.stepAirborne(); break;
       case 'grinding': this.stepGrinding(); break;
       case 'wallRiding': this.stepWall(); break;
-      case 'swinging': this.stepSwing(); break;
+      case 'gusting': this.stepGusting(); break;
       case 'flying': this.stepFlying(); break;
       case 'failed': case 'finished': break;
     }
@@ -235,9 +234,8 @@ export class Simulation {
       case 'wallRiding':
         this.jump('wall', strokeId);
         return this.resolve(name, 'jump off wall');
-      case 'swinging':
-        this.releaseSwing('up');
-        return this.resolve(name, 'release the rope upward');
+      case 'gusting':
+        return this.reject(name, 'riding the gust');
       case 'flying':
         this.upHeld = strokeId;
         return this.resolve(name, 'climb');
@@ -337,14 +335,13 @@ export class Simulation {
         this.emit({ type: 'prep', armed: true });
         this.resolve(name, 'landing prep armed (rail catch / heel skim)');
         this.tryRailCatch(); // already in a catch band? catch now
-        this.trySwing();
+        return;
+      case 'gusting':
         return;
       case 'flying':
         if (!fresh) return;
         s.prepStrokeId = strokeId; s.prepHeld = true; s.prepTimer = this.K.prepArmWindow; s.prepAge = 0; s.prepStrength = strength;
         return this.resolve(name, 'dive');
-      case 'swinging':
-        return;
       case 'grinding': case 'wallRiding':
         if (fresh) this.reject(name, `down has no meaning while ${s.mode === 'grinding' ? 'grinding' : 'wall riding'}`);
         return;
@@ -393,7 +390,6 @@ export class Simulation {
       }
       return;
     }
-    if (s.mode === 'swinging') { this.releaseSwing('release'); return; }
     if (dir !== 'down' || strokeId !== s.prepStrokeId) return;
     s.prepHeld = false;
     if (s.mode === 'heelSkim') {
@@ -577,7 +573,7 @@ export class Simulation {
     }
     s.x = p1.x; s.y = p1.y;
     // contacts that need a held / armed intent
-    if (this.isPrepArmed()) { this.tryRailCatch(); this.trySwing(); }
+    if (this.isPrepArmed()) this.tryRailCatch();
     if (s.mode === 'airborne' && this.sideHeld?.side === 'right' && s.air === 'grabRight' && this.sideHeld.strokeId === s.sideStrokeId) {
       const w = this.wallCatchable();
       if (w.wall) {
@@ -903,62 +899,19 @@ export class Simulation {
 
   private washReachable(): boolean {
     const s = this.state;
-    const trick = s.leftBy === 'crest' || s.leftBy === 'rail' || s.leftBy === 'wall' || s.leftBy === 'swing' || s.leftBy === 'bounce' || s.leftBy === 'flight';
+    const trick = s.leftBy === 'crest' || s.leftBy === 'rail' || s.leftBy === 'wall' || s.leftBy === 'bounce' || s.leftBy === 'flight';
     return trick || s.launchVy > this.M.jumpVelocity + this.K.washLaunchExtra;
   }
 
-  /** Hook the nearest rope when a fresh down is held at its low point. A stale swipe (for a rail) does not hook. */
-  private trySwing(): void {
-    const s = this.state, K = this.K;
-    if (s.mode !== 'airborne' || !s.prepHeld || s.prepAge > 0.5) return;
-    let best: Swing | null = null, bestD: number = K.swingCatch;
-    for (const sw of this.course.swings) {
-      const d = Math.hypot(s.x - sw.ax, s.y - (sw.ay - sw.length));
-      if (d < bestD && s.y < sw.ay - 0.5) { best = sw; bestD = d; }
-    }
-    if (!best) return;
-    const phi = Math.atan2(s.x - best.ax, best.ay - s.y);
-    s.swingPhi = phi;
-    s.swingOmega = (s.vx * Math.cos(phi) + s.vy * Math.sin(phi)) / best.length;
-    s.x = best.ax + best.length * Math.sin(phi);
-    s.y = best.ay - best.length * Math.cos(phi);
-    s.mode = 'swinging'; s.swingId = best.id; s.contactTime = 0; s.air = 'none'; s.flip = 0; s.flipQueued = false;
-    s.vx = s.swingOmega * best.length * Math.cos(phi);
-    s.vy = s.swingOmega * best.length * Math.sin(phi);
-    this.emit({ type: 'swing-start', swingId: best.id, x: s.x, y: s.y });
-  }
-
-  private stepSwing(): void {
-    const s = this.state, sw = this.course.swing(s.swingId);
-    if (!sw) { s.mode = 'airborne'; s.swingId = -1; return; }
-    const L = sw.length, g = this.M.airGravity, dt = this.dt;
-    s.swingOmega += -(g / L) * Math.sin(s.swingPhi) * dt;
-    s.swingPhi += s.swingOmega * dt;
-    s.x = sw.ax + L * Math.sin(s.swingPhi);
-    s.y = sw.ay - L * Math.cos(s.swingPhi);
-    s.vx = s.swingOmega * L * Math.cos(s.swingPhi);
-    s.vy = s.swingOmega * L * Math.sin(s.swingPhi);
-    s.contactTime += dt;
-    const street = this.course.groundBelow(s.x, s.y + 2);
-    if (street && s.y <= street.sample.y + this.K.swingStreet) this.releaseSwing('street');
-    else if (s.contactTime > this.K.swingMax) this.releaseSwing('timeout');
-  }
-
-  private releaseSwing(reason: 'release' | 'up' | 'street' | 'timeout'): void {
-    const s = this.state;
-    const id = s.swingId;
-    if (reason === 'up') s.vy += this.K.swingPop;
-    s.mode = 'airborne'; s.leftBy = 'swing'; s.launchVy = s.vy; s.swingId = -1; s.jumpStrokeId = -1; s.coyote = 0;
-    this.resetAir();
-    s.takeoffX = s.x; s.takeoffY = s.y; s.takeoffSpeed = Math.hypot(s.vx, s.vy);
-    s.prepHeld = false; s.prepStrokeId = -1;
-    this.emit({ type: 'swing-end', swingId: id, x: s.x, y: s.y, reason });
+  /** Workstream A: fixed-path tuft lift. */
+  private stepGusting(): void {
+    // Stub until sky mechanics land.
   }
 
   /** Columns only catch a deliberate launch, not a crest the street itself threw the rider off. */
   private liftUpdraft(dt: number): void {
     const s = this.state, K = this.K;
-    const deliberate = s.leftBy === 'jump' || s.leftBy === 'swing' || s.leftBy === 'bounce' || s.leftBy === 'rail' || s.leftBy === 'wall' || s.leftBy === 'flight';
+    const deliberate = s.leftBy === 'jump' || s.leftBy === 'bounce' || s.leftBy === 'rail' || s.leftBy === 'wall' || s.leftBy === 'flight';
     if (!deliberate) return;
     for (const u of this.course.updrafts) {
       if (s.x < u.x0 || s.x > u.x1 || s.y < u.y0 || s.y > u.y1) continue;

@@ -8,8 +8,10 @@
  */
 
 import type { Orb, OrbPickup } from './orbs';
+import type { SkySegment, Tuft } from './skyTypes';
 
 export type { Orb, OrbPlacement, OrbTier, OrbPickup } from './orbs';
+export type { SkySegment, SkyVariant, Tuft, SkyAnchor, SkyLine, SkyCluster, SkyHop } from './skyTypes';
 
 export interface Vec2 { x: number; y: number }
 
@@ -56,6 +58,8 @@ export interface Rail {
    * A flat jump cannot catch it: the rider has to arrive off a crest, another trick, or a harder launch.
    */
   wash?: boolean;
+  /** Sky-layer line: grindable along the street (not a cross-street wash line). */
+  sky?: true;
 }
 
 /** Rideable wall (milestone 2 mechanics). */
@@ -72,25 +76,19 @@ export interface Wall {
   face?: 'shop' | 'warehouse' | 'hull';
 }
 
-/** A rope hung off a post, sign or crane. Gameplay is the pendulum; lateral keeps it off the street centre. */
-export interface Swing {
-  id: number;
-  ax: number;
-  ay: number;
-  length: number;
-  lateral: number;
-  anchor: 'lamp' | 'sign' | 'crane';
-}
-
-/** One bounce. Balloons are spent after a single hit; boats and awnings are one trigger per pass too. */
+/** One bounce. Balloons are spent after a single hit; boats are one trigger per pass too. */
 export interface Bounce {
   id: number;
-  kind: 'boat' | 'balloon' | 'awning';
+  kind: 'boat' | 'balloon';
   x: number;
   y: number;
   /** Horizontal half-width. A balloon uses this as its radius. */
   half: number;
   lateral: number;
+  /** Sky-layer balloon ladder pad (harbour boat conversion skips these). */
+  sky?: true;
+  /** Gameplay radius for sky clusters (m). */
+  rad?: number;
 }
 
 /** A column of lift. Once it has raised the rider, a short steered flight runs to corridorX1. */
@@ -108,7 +106,7 @@ export interface Updraft {
 
 /** Ideal line through a set piece, for the orb placer. The hardest point is also spawned as a purple orb. */
 export interface RideHook {
-  activity: 'wash' | 'swing' | 'flight' | 'bounce';
+  activity: 'wash' | 'flight' | 'bounce' | 'sky';
   path: { x: number; y: number; lateral: number }[];
   hardest: { x: number; y: number; lateral: number; pickup: OrbPickup };
 }
@@ -157,7 +155,7 @@ export interface Lesson {
 /** Something to do on the course (tests use these for spacing/approach checks). */
 export interface Feature {
   x: number;
-  kind: 'gap' | 'rail' | 'rail-optional' | 'rail-risky' | 'wall' | 'pot' | 'pillar' | 'crest' | 'rollers' | 'swing' | 'updraft' | 'bounce';
+  kind: 'gap' | 'rail' | 'rail-optional' | 'rail-risky' | 'wall' | 'pot' | 'pillar' | 'crest' | 'rollers' | 'updraft' | 'bounce' | 'tuft';
   required: boolean;
   /** Where the approach to this feature starts (run-in begins), for required features. */
   approachX?: number;
@@ -196,9 +194,11 @@ export interface Chunk {
   markers: Marker[];
   /** Optional orbs owned by this chunk (endless). Recycled with it. */
   orbs?: number[];
-  swings?: number[];
   bounces?: number[];
   updrafts?: number[];
+  tufts?: number[];
+  /** Sky segment authored in this chunk (streamed). */
+  sky?: number;
   /** Ideal path and hardest point for each activity in this chunk. The placer may follow `path`. */
   rides?: RideHook[];
 }
@@ -223,12 +223,14 @@ export class Course {
   private wById = new Map<number, Wall>();
   private oById = new Map<number, Obstacle>();
   private oOrbById = new Map<number, Orb>();
-  readonly swings: Swing[] = [];
   readonly bounces: Bounce[] = [];
   readonly updrafts: Updraft[] = [];
-  private swById = new Map<number, Swing>();
+  readonly tufts: Tuft[] = [];
+  readonly sky: SkySegment[] = [];
   private boById = new Map<number, Bounce>();
   private upById = new Map<number, Updraft>();
+  private tuftById = new Map<number, Tuft>();
+  private skyById = new Map<number, SkySegment>();
   /** Optional orbs currently streamed (endless). */
   readonly orbs: Orb[] = [];
   /** Presentation hint (opening only): route x where the harbour town (quay, sea on the right) begins. */
@@ -277,9 +279,15 @@ export class Course {
   obstacle(id: number): Obstacle | undefined { return this.oById.get(id); }
   orb(id: number): Orb | undefined { return this.oOrbById.get(id); }
   hasObstacle(id: number): boolean { return this.oById.has(id); }
-  swing(id: number): Swing | undefined { return this.swById.get(id); }
   bounce(id: number): Bounce | undefined { return this.boById.get(id); }
   updraft(id: number): Updraft | undefined { return this.upById.get(id); }
+  tuft(id: number): Tuft | undefined { return this.tuftById.get(id); }
+
+  skyAt(x: number): SkySegment | undefined {
+    let best: SkySegment | undefined;
+    for (const s of this.sky) if (s.x0 <= x + 1e-6 && x <= s.x1 + 1e-6) best = s;
+    return best;
+  }
 
   /** Static courses: one chunk owning everything (call after construction is complete). */
   sealAsSingleChunk(title: string): void {
@@ -290,7 +298,7 @@ export class Course {
       id: 0, x0, x1, y0: ys[0].y, y1: ys[ys.length - 1].y, title, cpX: this.startX, cpSpeed: 0, features: [],
       surfaces: this.surfaces.map((q) => q.id), rails: this.rails.map((q) => q.id), walls: this.walls.map((q) => q.id),
       obstacles: this.obstacles.map((q) => q.id), markers: [...this.markers],
-      swings: [], bounces: [], updrafts: [], rides: [],
+      bounces: [], updrafts: [], rides: [],
     });
   }
 
@@ -299,15 +307,16 @@ export class Course {
   stream(_x: number, _active?: { surfaceId: number; railId: number; wallId: number }): void {}
 
   /** Append a chunk's content (streamed courses). */
-  protected addChunk(c: Chunk, surfaces: Surface[], rails: Rail[], walls: Wall[], obstacles: Obstacle[], gaps: Gap[], orbs: Orb[] = [], extra: { swings?: Swing[]; bounces?: Bounce[]; updrafts?: Updraft[] } = {}): void {
+  protected addChunk(c: Chunk, surfaces: Surface[], rails: Rail[], walls: Wall[], obstacles: Obstacle[], gaps: Gap[], orbs: Orb[] = [], extra: { bounces?: Bounce[]; updrafts?: Updraft[]; tufts?: Tuft[]; sky?: SkySegment[] } = {}): void {
     for (const q of surfaces) { this.surfaces.push(q); this.sById.set(q.id, q); }
     for (const q of rails) { this.rails.push(q); this.rById.set(q.id, q); }
     for (const q of walls) { this.walls.push(q); this.wById.set(q.id, q); }
     for (const q of obstacles) { this.obstacles.push(q); this.oById.set(q.id, q); }
     for (const q of orbs) { this.orbs.push(q); this.oOrbById.set(q.id, q); }
-    for (const q of extra.swings ?? []) { this.swings.push(q); this.swById.set(q.id, q); }
     for (const q of extra.bounces ?? []) { this.bounces.push(q); this.boById.set(q.id, q); }
     for (const q of extra.updrafts ?? []) { this.updrafts.push(q); this.upById.set(q.id, q); }
+    for (const q of extra.tufts ?? []) { this.tufts.push(q); this.tuftById.set(q.id, q); }
+    for (const q of extra.sky ?? []) { this.sky.push(q); this.skyById.set(q.id, q); }
     this.gaps.push(...gaps);
     this.markers.push(...c.markers);
     this.chunks.push(c);
@@ -324,8 +333,16 @@ export class Course {
     drop(this.rails, c.rails, this.rById);
     drop(this.walls, c.walls, this.wById);
     drop(this.obstacles, c.obstacles, this.oById);
-    if (c.swings?.length) drop(this.swings, c.swings, this.swById);
     if (c.bounces?.length) drop(this.bounces, c.bounces, this.boById);
+    if (c.tufts?.length) drop(this.tufts, c.tufts, this.tuftById);
+    if (c.sky != null) {
+      const seg = this.skyById.get(c.sky);
+      if (seg) {
+        const i = this.sky.indexOf(seg);
+        if (i >= 0) this.sky.splice(i, 1);
+        this.skyById.delete(c.sky);
+      }
+    }
     if (c.updrafts?.length) drop(this.updrafts, c.updrafts, this.upById);
     if (c.orbs?.length) {
       const set = new Set(c.orbs);
@@ -421,12 +438,6 @@ export class Course {
     return o;
   }
 
-  addSwing(s: Omit<Swing, 'id'>): Swing {
-    const swing: Swing = { id: this.swings.length ? Math.max(...this.swings.map((q) => q.id)) + 1 : 0, ...s };
-    this.swings.push(swing); this.swById.set(swing.id, swing);
-    if (this.chunks.length === 1) (this.chunks[0].swings ??= []).push(swing.id);
-    return swing;
-  }
   addBounce(b: Omit<Bounce, 'id'>): Bounce {
     const bounce: Bounce = { id: this.bounces.length ? Math.max(...this.bounces.map((q) => q.id)) + 1 : 0, ...b };
     this.bounces.push(bounce); this.boById.set(bounce.id, bounce);

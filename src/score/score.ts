@@ -83,7 +83,7 @@ export const SCORE = {
 export type PopupKind = 'near' | 'bank' | 'bail' | 'bonus';
 export interface Popup { text: string; pts: number; kind: PopupKind }
 export type Cue = 'near' | 'rank' | 'orb' | 'bank';
-const TRICK_KINDS = ['flip', 'double', 'grab', 'grind', 'line', 'wall', 'wash', 'swing', 'flight', 'bounce', 'skim', 'pot', 'pillar', 'near'] as const;
+const TRICK_KINDS = ['flip', 'double', 'grab', 'grind', 'line', 'wall', 'wash', 'flight', 'bounce', 'skim', 'pot', 'pillar', 'near'] as const;
 export type TrickKind = typeof TRICK_KINDS[number];
 export interface BailInfo { mult: number; chain: number; points: number }
 
@@ -253,7 +253,6 @@ export class ScoreKeeper {
           this.addLink(rail?.wash ? 'wash' : 'grind', rail?.wash ? SCORE.wash : SCORE.grind);
           break;
         }
-        case 'swing-start': this.endFlight(); if (fresh) this.addLink('swing', SCORE.swing); break;
         case 'flight-start': if (fresh) this.addLink('flight', SCORE.flight); break;
         case 'bounce': if (fresh) this.addLink('bounce', SCORE.bounce); break;
         case 'skim-start': this.endFlight(); if (fresh) this.addLink('skim', SCORE.skim); break;
@@ -310,7 +309,7 @@ export class ScoreKeeper {
     } else this.endFlight();
     // sustained contact points
     const wash = st.mode === 'grinding' && course.rails.some((q) => q.id === st.railId && q.wash);
-    const rate = wash ? SCORE.washPerSec : st.mode === 'grinding' ? SCORE.grindPerSec : st.mode === 'wallRiding' ? SCORE.wallPerSec : st.mode === 'heelSkim' ? SCORE.skimPerSec : st.mode === 'swinging' ? SCORE.swingPerSec : st.mode === 'flying' ? SCORE.flightPerSec : 0;
+    const rate = wash ? SCORE.washPerSec : st.mode === 'grinding' ? SCORE.grindPerSec : st.mode === 'wallRiding' ? SCORE.wallPerSec : st.mode === 'heelSkim' ? SCORE.skimPerSec : st.mode === 'flying' ? SCORE.flightPerSec : st.mode === 'gusting' ? 0 : 0;
     if (rate && this.chain > 0 && fresh) { this.comboPoints += rate * dt; this.idle = 0; }
     // banking: plain rolling for a while ends the combo
     if (st.mode === 'grounded') {

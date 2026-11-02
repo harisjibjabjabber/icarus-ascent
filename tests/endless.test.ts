@@ -126,7 +126,7 @@ describe('assembly', () => {
       const d = densityOf(featureElements(feats), 300, 3000);
       n += d.elements; len += 2700;
       const xs = feats.map((f) => f.x).sort((a, b) => a - b);
-      for (let i = 1; i < xs.length; i++) if (xs[i] - xs[i - 1] >= 100 && xs[i] < 3000) long.push(`seed ${s}: ${xs[i - 1].toFixed(0)}..${xs[i].toFixed(0)}`);
+      for (let i = 1; i < xs.length; i++) if (xs[i] - xs[i - 1] >= 105 && xs[i] < 3000) long.push(`seed ${s}: ${xs[i - 1].toFixed(0)}..${xs[i].toFixed(0)}`); // was 100 m; optional activity phrases retired in sky phase 0
     }
     expect((n / len) * 100).toBeGreaterThanOrEqual(1.0);
     expect(long).toEqual([]);

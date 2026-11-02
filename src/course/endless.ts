@@ -1,4 +1,4 @@
-import { Course, type Bounce, type Chunk, type Feature, type Gap, type Obstacle, type OrbPlacement, type Rail, type RideHook, type Surface, type Swing, type Updraft, type Vec2, type Wall } from './course';
+import { Course, type Bounce, type Chunk, type Feature, type Gap, type Obstacle, type OrbPlacement, type Rail, type RideHook, type Surface, type Updraft, type Vec2, type Wall } from './course';
 import type { Orb } from './orbs';
 import { addOrb } from './orbs';
 import { stampOrbTrails } from './orbTrails';
@@ -64,7 +64,6 @@ export class PhraseBuilder {
   readonly chains: { points: Vec2[]; material: Surface['material'] }[] = [];
   readonly rails: Omit<Rail, 'id'>[] = [];
   readonly walls: Omit<Wall, 'id'>[] = [];
-  readonly swings: Omit<Swing, 'id'>[] = [];
   readonly bounces: Omit<Bounce, 'id'>[] = [];
   readonly updrafts: Omit<Updraft, 'id'>[] = [];
   readonly obstacles: { kind: Obstacle['kind']; x: number }[] = [];
@@ -189,17 +188,6 @@ export class PhraseBuilder {
     if (len >= 12) this.features.push({ x: x0 + len - 1, kind: 'rail-optional', required: false });
     return this;
   }
-  swingAt(ax: number, ay: number, length: number, lateral: number, anchor: Swing['anchor']): this {
-    this.swings.push({ ax, ay, length, lateral, anchor });
-    this.features.push({ x: ax, kind: 'swing', required: false });
-    return this;
-  }
-  column(u: Omit<Updraft, 'id'>): this {
-    this.updrafts.push(u);
-    this.features.push({ x: u.x0, kind: 'updraft', required: false });
-    this.features.push({ x: u.corridorX1 - 1, kind: 'updraft', required: false });
-    return this;
-  }
   bouncePad(b: Omit<Bounce, 'id'>): this {
     this.bounces.push(b);
     this.features.push({ x: b.x, kind: 'bounce', required: false });
@@ -261,25 +249,17 @@ export function kickerJumpReach(speed: number, rise: number, len: number, drop: 
 
 /** Optional activities that fill a plain roll. One per chunk; the same one stays rare. */
 function isPlay(id: string): boolean {
-  return id === 'wash-line' || id === 'swing-hook' || id === 'updraft' || id === 'bounce' || id === 'awning';
+  return id === 'bounce';
 }
 
 /** Ideal path and the purple point for each activity. The other placer may follow `path`; the purple is spawned here. */
-function activityRides(rails: Rail[], swings: Swing[], updrafts: Updraft[], bounces: Bounce[]): RideHook[] {
+function activityRides(rails: Rail[], updrafts: Updraft[], bounces: Bounce[]): RideHook[] {
   const out: RideHook[] = [];
   for (const r of rails) if (r.wash) {
     const a = r.points[0], z = r.points[r.points.length - 1];
     const path = r.points.map((p) => ({ x: p.x, y: p.y, lateral: r.lateral }));
     const t = 0.85;
     out.push({ activity: 'wash', path, hardest: { x: a.x + (z.x - a.x) * t, y: a.y + (z.y - a.y) * t, lateral: r.lateral, pickup: 'grind' } });
-  }
-  for (const s of swings) {
-    const path = Array.from({ length: 7 }, (_, i) => {
-      const phi = -0.15 + (1.15 * i) / 6;
-      return { x: s.ax + s.length * Math.sin(phi), y: s.ay - s.length * Math.cos(phi), lateral: s.lateral };
-    });
-    const phi = 0.95;
-    out.push({ activity: 'swing', path, hardest: { x: s.ax + s.length * Math.sin(phi), y: s.ay - s.length * Math.cos(phi), lateral: s.lateral, pickup: 'air' } });
   }
   for (const u of updrafts) {
     const path = [0, 0.25, 0.5, 0.75, 1].map((t) => ({
@@ -471,36 +451,6 @@ export const PHRASES: PhraseSpec[] = [
   },
   // ------------------------------------------------------------------ activities (optional: the street under each one still carries a lazy rider)
   {
-    id: 'wash-line', title: 'Washing line', tier: 2, style: false, required: false, entry: [8, HC], exit: [8, HC], airtime: 0.7, receiving: 'flat', cpSpeed: 12,
-    build: (b) => {
-      b.flat(14).kicker(10, 1.6);
-      const lip = b.cur();
-      b.slope(16, -1.6, easeOut).flat(22);
-      b.washLine(lip.x + 1.2, 16, lip.y + 2.05);
-      b.flat(12);
-    },
-  },
-  {
-    id: 'swing-hook', title: 'Rope swing', tier: 2, style: false, required: false, entry: [8, HC], exit: [8, HC], airtime: 0.6, receiving: 'flat', cpSpeed: 12,
-    build: (b) => {
-      b.flat(16);
-      const y = b.cur().y, ax = b.cur().x + 16;
-      b.flat(42);
-      b.swingAt(ax, y + 4.35, 3.0, 1.75, 'lamp');
-      b.flat(12);
-    },
-  },
-  {
-    id: 'updraft', title: 'Updraft', tier: 2, style: false, required: false, entry: [8, HC], exit: [8, HC], airtime: 0.9, receiving: 'flat', cpSpeed: 12,
-    build: (b) => {
-      b.flat(22);
-      const x = b.cur().x, y = b.cur().y;
-      b.kicker(8, 0.75).flat(42);
-      b.column({ x0: x + 6, x1: x + 16, y0: y + 1.6, y1: y + 10, lift: TUNING.tricks.updraftLift, corridorX1: x + 42, source: 'chimney', lateral: 3.6 });
-      b.flat(12);
-    },
-  },
-  {
     id: 'bounce', title: 'Bounce', tier: 2, style: false, required: false, entry: [8, HC], exit: [8, HC], airtime: 0.55, receiving: 'flat', cpSpeed: 12,
     build: (b) => {
       b.flat(16);
@@ -508,18 +458,6 @@ export const PHRASES: PhraseSpec[] = [
       b.flat(40);
       for (let i = 0; i < 4; i++) b.bouncePad({ x: x + i * 4.4, y: y + 1.05, half: 0.7, lateral: 2.25, kind: 'balloon' });
       b.flat(14);
-    },
-  },
-  {
-    id: 'awning', title: 'Awning hop', tier: 2, style: false, required: false, entry: [8, HC], exit: [8, HC], airtime: 0.7, receiving: 'flat', cpSpeed: 12,
-    build: (b) => {
-      b.flat(12).kicker(9, 1.5);
-      const lip = b.cur();
-      b.slope(12, -1.2, easeOut).flat(26);
-      // Pads sit where a jump off this lip is coming back down, and still clear 2.6 m over the street.
-      // Four in a row: the first stays 5.4 m past the lip so the autopilot's lead still meets it.
-      for (let i = 0; i < 4; i++) b.bouncePad({ x: lip.x + 5.4 + i * 4.0, y: lip.y + 2.05, half: 1.35, lateral: 0.35, kind: 'awning' });
-      b.flat(12);
     },
   },
   // ------------------------------------------------------------------ compulsory actions
@@ -1153,7 +1091,7 @@ export const STREAM = {
  */
 export class EndlessCourse extends Course {
   private asm: Assembler;
-  private ids = { s: 0, r: 0, w: 0, o: 0, c: 0, h: 0, sw: 0, bo: 0, up: 0 };
+  private ids = { s: 0, r: 0, w: 0, o: 0, c: 0, h: 0, bo: 0, up: 0 };
   private endX = -10;
   private endY = 0;
   private lastSurface: Surface | null = null;
@@ -1207,20 +1145,9 @@ export class EndlessCourse extends Course {
       for (const s of surfaces) if (x >= Course.x0(s) && x <= Course.x1(s)) return Course.sample(s, x).y;
       throw new Error(`no ground at ${x} in ${plan.spec.id}`);
     };
-    const swings: Swing[] = b.swings.map((q) => {
-      const s: Swing = { id: this.ids.sw++, ...q };
-      if (plan.zone === 'harbour') {
-        const street = ground(s.ax);
-        s.anchor = 'crane';
-        s.ay = street + 6.5;
-        s.length = s.ay - (street + 1.35);
-        s.lateral = 1.9;
-      } else if ((Math.round(s.ax) & 1) === 0) s.anchor = 'sign';
-      return s;
-    });
     const bounces: Bounce[] = b.bounces.map((q) => {
       const pad: Bounce = { id: this.ids.bo++, ...q };
-      if (plan.zone === 'harbour' && pad.kind === 'balloon') {
+      if (plan.zone === 'harbour' && pad.kind === 'balloon' && !pad.sky) {
         pad.kind = 'boat';
         pad.y = ground(pad.x) + 0.42;
         pad.half = 1.05;
@@ -1262,7 +1189,7 @@ export class EndlessCourse extends Course {
       rhythm: this.rhythm,
       nextRareX: this.nextRareX,
     });
-    const rides = activityRides(rails, swings, updrafts, bounces);
+    const rides = activityRides(rails, updrafts, bounces);
     for (const h of rides) addOrb(trailPlacements, 'rare', h.hardest.x, h.hardest.y, h.hardest.lateral, h.hardest.pickup);
     if (isDeath(plan.spec.id)) {
       const rareX = dressDeathOrbs(trailPlacements, rails, walls, plan.spec.id);
@@ -1274,22 +1201,22 @@ export class EndlessCourse extends Course {
       difficulty: plan.d, connector: plan.connector, zone: plan.zone, gate: plan.gate, setPiece: plan.setPiece, wave: this.waveLabel(this.endX), cpX: this.endX + 2, cpSpeed: plan.spec.cpSpeed, features: b.features,
       surfaces: surfaces.map((q) => q.id), rails: rails.map((q) => q.id), walls: walls.map((q) => q.id), obstacles: obstacles.map((q) => q.id), markers: [],
       orbs: orbs.map((q) => q.id),
-      swings: swings.map((q) => q.id), bounces: bounces.map((q) => q.id), updrafts: updrafts.map((q) => q.id), rides,
+      bounces: bounces.map((q) => q.id), updrafts: updrafts.map((q) => q.id), rides,
     };
-    this.addChunk(chunk, surfaces, rails, walls, obstacles, gaps, orbs, { swings, bounces, updrafts });
+    this.addChunk(chunk, surfaces, rails, walls, obstacles, gaps, orbs, { bounces, updrafts });
     this.lastSurface = last;
     this.material = last.material;
     this.endX = end.x; this.endY = end.y;
     this.built++;
   }
 
-  override stream(x: number, active?: { surfaceId: number; railId: number; wallId: number; swingId?: number }): void {
+  override stream(x: number, active?: { surfaceId: number; railId: number; wallId: number }): void {
     this.generateTo(x + STREAM.ahead);
     // recycle phrases safely behind the rider with no active contact
     while (this.chunks.length > 1) {
       const c = this.chunks[0];
       if (c.x1 > x - STREAM.behind) break;
-      if (active && (c.surfaces.includes(active.surfaceId) || c.rails.includes(active.railId) || c.walls.includes(active.wallId) || (active.swingId !== undefined && (c.swings ?? []).includes(active.swingId)))) break;
+      if (active && (c.surfaces.includes(active.surfaceId) || c.rails.includes(active.railId) || c.walls.includes(active.wallId))) break;
       this.removeChunk(c);
       this.recycled++;
     }

@@ -5,7 +5,7 @@ import type { Course, Feature } from './course';
  * Busy intervals: gaps (lip to receiver), rails and walls (their span), pots/pillars (±2 m). An empty stretch is
  * the distance between consecutive busy intervals (and from `from` to the first one, and to `to`).
  */
-export interface Element { kind: 'gap' | 'rail' | 'wall' | 'pot' | 'pillar' | 'swing' | 'updraft' | 'bounce'; x0: number; x1: number; required: boolean }
+export interface Element { kind: 'gap' | 'rail' | 'wall' | 'pot' | 'pillar' | 'updraft' | 'bounce'; x0: number; x1: number; required: boolean }
 
 export function courseElements(c: Course, from = -Infinity, to = Infinity): Element[] {
   const e: Element[] = [];
@@ -13,7 +13,6 @@ export function courseElements(c: Course, from = -Infinity, to = Infinity): Elem
   for (const r of c.rails) e.push({ kind: 'rail', x0: r.points[0].x, x1: r.points[r.points.length - 1].x, required: !!r.required });
   for (const w of c.walls) e.push({ kind: 'wall', x0: w.x0, x1: w.x1, required: !!w.required });
   for (const o of c.obstacles) e.push({ kind: o.kind, x0: o.x - 2, x1: o.x + 2, required: true });
-  for (const s of c.swings) e.push({ kind: 'swing', x0: s.ax - 2, x1: s.ax + s.length, required: false });
   for (const u of c.updrafts) e.push({ kind: 'updraft', x0: u.x0, x1: u.corridorX1, required: false });
   for (const b of c.bounces) e.push({ kind: 'bounce', x0: b.x - b.half, x1: b.x + b.half, required: false });
   return e.filter((q) => q.x1 >= from && q.x0 <= to).sort((a, b) => a.x0 - b.x0);
