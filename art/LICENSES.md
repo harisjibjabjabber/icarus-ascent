@@ -91,7 +91,7 @@ No new accounts or purchases. Poly Pizza and kenney.nl direct downloads were blo
 
 Bake: `node art/orb/process-assets.mjs` (requires `sharp` for atlas; `ffmpeg` for audio).
 
-The risky high line is no longer a lone fence panel. It is a facade-anchored washing line, balcony rail, gutter or bunting (see the next section). `rail` remains in `props.bin` unused by that mesh.
+Street bunting is a catenary of cloth pennants hooked to both facades (the old straight bar of flat boxes is gone). A high line dressed as bunting uses the same string, with a hook on each facade; the grind itself stays on its rail. `rail` is the risky grind's fence panel.
 
 ## Wall rides and dressed lines (2026-11-01)
 

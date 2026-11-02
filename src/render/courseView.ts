@@ -7,6 +7,8 @@ import { loadProps, type PropSet } from './props';
 import { townMaterial } from './town/kit';
 import type { Vector3 } from 'three';
 import { setPieceRamp, toon } from './materials';
+import { buildBuntingSpan } from './bunting';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { GeoBuilder, blob } from './geo';
 import { SET_ASSET, poseSoft, type SoftProp } from './setSlots';
 import type { PropPiece } from './props';
@@ -148,6 +150,8 @@ export class CourseView {
   private propsGen = 0;
   /** Shared with every high line. */
   private iron = townMaterial();
+  /** Pennants on a bunting string. Tips carry a sway weight; the cord and hooks do not. */
+  private buntingCloth = toon('#ffffff', { vertexColors: true, sway: true, side: THREE.DoubleSide, rim: 0.85 });
   private beaconGlow = toon('#fff6d4', { vertexColors: true, emissive: '#ff8a2a', emissiveIntensity: 1.15, side: THREE.DoubleSide });
   /** Toon steam sheets. One material per puff; the maps are shared. */
   private steamTex: THREE.Texture[] = [];
@@ -500,7 +504,12 @@ export class CourseView {
   }
 
   private railMesh(r: Rail): THREE.Group {
-    if (r.risky && this.props?.piece('rail')) return this.highLineMesh(r);
+    if (r.risky && this.props?.piece('rail')) {
+      const g = this.highLineMesh(r);
+      // The fence is the grind. A bunting dress is a separate string, hooked to both facades.
+      if (r.dress === 'bunting') this.addBunting(g, r);
+      return g;
+    }
     // A wash line with no sourced garments is the ordinary rail. No fake clothes, no stand-in rope.
     if (r.dress && (r.dress !== 'wash' || this.laundryPieces().length)) return this.dressedLineMesh(r);
     const { points, lateral, required } = r;
@@ -620,8 +629,8 @@ export class CourseView {
         const b = Math.min(x1, x + step);
         this.rope(gb, x, yAt(x), r.lateral, b, yAt(b), r.lateral, sag, '#7a5340', 0.02);
       }
-    } else {
-      const rope = dress === 'gutter' ? '#8a8078' : dress === 'balcony' ? '#e0b15a' : '#e6d3b8';
+    } else if (dress !== 'bunting') {
+      const rope = dress === 'gutter' ? '#8a8078' : '#e0b15a';
       for (let x = x0; x < x1 - 0.05; x += 1.15) {
         const b = Math.min(x1, x + 1.15);
         const y = (yAt(x) + yAt(b)) / 2;
@@ -629,15 +638,11 @@ export class CourseView {
         gb.add(new THREE.BoxGeometry(b - x, dress === 'gutter' ? 0.1 : 0.055, 0.06), this.L(mid, y, r.lateral), rope, { rot, top: '#fff6e4' });
         if (dress === 'gutter') gb.add(new THREE.BoxGeometry(b - x, 0.08, 0.18), this.L(mid, y - 0.08, r.lateral + 0.08), '#6a6058', { rot });
         if (dress === 'balcony') gb.add(new THREE.BoxGeometry(b - x, 0.07, Math.max(0.4, facade - r.lateral - 0.45)), this.L(mid, y - 0.82, (r.lateral + 0.4 + facade) / 2), '#e7d7c4', { rot, top: '#f6ecdf' });
-        if (dress === 'bunting') {
-          const hue = (Math.round(x) % 3 === 0) ? '#c4543a' : (Math.round(x) % 3 === 1) ? '#e2b15a' : '#3d6f8a';
-          gb.add(new THREE.ConeGeometry(0.16, 0.32, 4), this.L(mid, y - 0.2, r.lateral), hue, { rot: [Math.PI, ROUTE_YAW, 0] });
-        }
       }
     }
     const ironParts: THREE.BufferGeometry[] = [];
     const bracket = this.props?.piece('bracket');
-    for (let x = x0; x <= x1 + 0.01; x += (dress === 'wash' ? 4 : 8)) {
+    if (dress !== 'bunting') for (let x = x0; x <= x1 + 0.01; x += (dress === 'wash' ? 4 : 8)) {
       const y = yAt(Math.min(x, x1));
       const arm = facade - r.lateral;
       if (bracket) ironParts.push(this.stamp(bracket.body, (u, v, w) => ({ x: x + w, y: y + v * 0.85, lat: facade - u * (arm / 0.95) })));
@@ -646,18 +651,51 @@ export class CourseView {
         gb.add(new THREE.BoxGeometry(0.14, 0.4, 0.12), this.L(x, y - 0.12, facade - 0.05), '#4a3c34', { rot });
       }
     }
-    if (dress !== 'wash') {
+    if (dress !== 'wash' && dress !== 'bunting') {
       for (let s = 0; s < 6; s++) {
         const yy = yAt(x0) - 1.05 + s * 0.18;
         gb.add(new THREE.BoxGeometry(1.35, 0.14, 1.05), this.L(x0 - 9 + s * 1.45, yy, 3.9), '#cbb89a', { rot, top: '#f3e6d4' });
       }
     }
     if (dress === 'wash') this.hangSpans(g, gb, x0, x1, yAt);
+    if (dress === 'bunting') this.addBunting(g, r);
     const built = gb.build();
     if (built) { const mesh = new THREE.Mesh(built, vc(1.05)); mesh.castShadow = true; g.add(mesh); }
     const im = mergeAttrs(ironParts);
     if (im) { const mesh = new THREE.Mesh(im, this.iron); mesh.castShadow = true; g.add(mesh); }
     return g;
+  }
+
+  /**
+   * Cross-street bunting for a dressed grind. Each string is its own catenary, and both ends
+   * are hooks on the facade faces. The grind spline is not moved.
+   */
+  private addBunting(parent: THREE.Group, r: Rail): void {
+    const pts = r.points;
+    const x0 = pts[0].x, x1 = pts[pts.length - 1].x;
+    const len = Math.max(1, x1 - x0);
+    const yAt = (x: number) => Course.railSample(r, Math.min(Math.max(x, x0), x1)).y;
+    const facade = 4.65;
+    const rigid: THREE.BufferGeometry[] = [];
+    const cloth: THREE.BufferGeometry[] = [];
+    const n = Math.max(2, Math.round(len / 8));
+    for (let i = 0; i < n; i++) {
+      const x = x0 + ((i + 0.5) * len) / n;
+      const street = this.streetY(x, yAt(x) - 1.2);
+      const span = buildBuntingSpan((rx, ry, lat) => this.L(rx, ry, lat), x, street + 5.7, -facade, facade, 0.78);
+      if (span.rigid) rigid.push(span.rigid);
+      if (span.cloth) cloth.push(span.cloth);
+    }
+    const join = (parts: THREE.BufferGeometry[]) => {
+      if (!parts.length) return null;
+      if (parts.length === 1) return parts[0];
+      const m = mergeGeometries(parts, false);
+      for (const p of parts) p.dispose();
+      return m;
+    };
+    const rm = join(rigid), cm = join(cloth);
+    if (rm) { const mesh = new THREE.Mesh(rm, vc(1.05)); mesh.castShadow = true; parent.add(mesh); }
+    if (cm) { const mesh = new THREE.Mesh(cm, this.buntingCloth); mesh.castShadow = true; parent.add(mesh); }
   }
 
   /** Sourced garments only. An empty slot hangs nothing. */

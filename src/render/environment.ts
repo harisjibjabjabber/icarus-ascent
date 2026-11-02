@@ -142,7 +142,11 @@ function seaPlane(): THREE.Mesh {
   return m;
 }
 
-interface TownView { group: THREE.Group; near: THREE.Mesh | null; far: THREE.Mesh | null; nearMat: TownMaterial; farMat: TownMaterial; x0: number; tris: [number, number]; born: number; gen: number }
+interface TownView {
+  group: THREE.Group; near: THREE.Mesh | null; far: THREE.Mesh | null; nearMat: TownMaterial; farMat: TownMaterial;
+  flags: THREE.Mesh | null;
+  x0: number; tris: [number, number]; born: number; gen: number;
+}
 
 /**
  * Town LOD/streaming distances (route metres, measured from the rider to a chunk's centre) and fade times.
@@ -207,6 +211,8 @@ export class Environment {
   private readonly puffS = new THREE.Vector3();
   private readonly puffP = new THREE.Vector3();
   private sceneryMat = toon('#ffffff', { vertexColors: true, sway: true, rim: 0.6 });
+  /** Shared by every street-bunting string. Pennant tips carry a sway attribute. */
+  private flagMat = toon('#ffffff', { vertexColors: true, sway: true, side: THREE.DoubleSide, rim: 0.85 });
   static readonly SEG = 200;
   /** Town streaming window: see TOWN_LOD. */
   static readonly TOWN = TOWN_LOD;
@@ -318,7 +324,7 @@ export class Environment {
       this.sun.shadow.normalBias = 0.04 * ((2 * R) / Math.max(1, q.shadowMap)) / (56 / 1024);
     }
     this.townShadows = q.townShadows && q.shadowMap > 0;
-    for (const v of this.town.values()) { if (v.near) v.near.castShadow = this.townShadows; if (v.far) v.far.castShadow = this.townShadows; }
+    for (const v of this.town.values()) { if (v.near) v.near.castShadow = this.townShadows; if (v.far) v.far.castShadow = this.townShadows; if (v.flags) v.flags.castShadow = this.townShadows; }
     this.puffs.count = Math.min(24, q.puffs);
     TOWN_TEX.enabled = q.textures > 0;
     TOWN_TEX.nrm.value = q.textures > 1 ? 1 : 0;
@@ -512,14 +518,25 @@ export class Environment {
     const nearMat = townMaterial(), farMat = townMaterial();
     const mk = (g: THREE.BufferGeometry | null, mat: TownMaterial) => { if (!g) return null; const m = new THREE.Mesh(g, mat); m.receiveShadow = true; m.castShadow = this.townShadows; m.visible = false; group.add(m); return m; };
     const near = mk(c.near, nearMat), far = mk(c.far, farMat);
+    let flags: THREE.Mesh | null = null;
+    if (c.flags) {
+      flags = new THREE.Mesh(c.flags, this.flagMat);
+      flags.castShadow = this.townShadows;
+      flags.visible = false;
+      group.add(flags);
+    }
     group.position.copy(toScene(k * TOWN.chunk, c.y0));
     // chunk origin in origin-free scene space, wrapped: world-projected textures continue seamlessly across chunks
     const o = toSceneRaw(k * TOWN.chunk, c.y0), wrapOf = (v: number) => ((v % TEX_WRAP) + TEX_WRAP) % TEX_WRAP;
     nearMat.wrap.set(wrapOf(o.x), wrapOf(o.y), wrapOf(o.z)); farMat.wrap.copy(nearMat.wrap);
     this.group.add(group);
-    return { group, near, far, nearMat, farMat, x0: k * TOWN.chunk, tris: [c.trisNear, c.trisFar], born: ART_UNIFORMS.uTime.value, gen: this.roofGen };
+    return { group, near, far, nearMat, farMat, flags, x0: k * TOWN.chunk, tris: [c.trisNear, c.trisFar], born: ART_UNIFORMS.uTime.value, gen: this.roofGen };
   }
-  private dropTown(v: TownView): void { this.group.remove(v.group); v.near?.geometry.dispose(); v.far?.geometry.dispose(); v.nearMat.dispose(); v.farMat.dispose(); }
+  private dropTown(v: TownView): void {
+    this.group.remove(v.group);
+    v.near?.geometry.dispose(); v.far?.geometry.dispose(); v.flags?.geometry.dispose();
+    v.nearMat.dispose(); v.farMat.dispose();
+  }
 
   /** Open sea on the right inside a harbour span (no hill blocks standing in the water). Opening starts 30 m early. */
   private seaRight(x: number): boolean {
@@ -603,6 +620,7 @@ export class Environment {
       v.nearMat.fade.set(f.near[0], f.near[1]); v.farMat.fade.set(f.far[0], f.far[1]);
       if (v.near) v.near.visible = f.near[1] - f.near[0] > 0.002;
       if (v.far) v.far.visible = f.far[1] - f.far[0] > 0.002;
+      if (v.flags) v.flags.visible = !!v.near?.visible;
     }
     // painted detail on the plaster eases in once its texture is on the GPU (never snaps)
     const tex = TOWN_DETAIL.tex, loaded = !!(tex && (tex.image as { width?: number } | undefined)?.width);

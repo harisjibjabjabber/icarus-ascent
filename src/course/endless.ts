@@ -146,7 +146,8 @@ export class PhraseBuilder {
   }
   /**
    * A safe elevated line (no void) dressed as part of the street: laundry, a balcony rail, a gutter
-   * or bunting, hung off the facade. Catchable from a normal jump. Orb trails are stamped later.
+   * or bunting. Bunting is a catenary hooked to both facades, not a row of cones on the grind.
+   * Catchable from a normal jump. Orb trails are stamped later.
    */
   lineDress(x0: number, len: number, h: number, dress: NonNullable<Rail['dress']>): this {
     const n = Math.max(2, Math.ceil(len / 3) + 1);
