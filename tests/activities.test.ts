@@ -5,7 +5,7 @@ import { Autopilot, type AutopilotOptions } from '../src/diag/autopilot';
 import { TUNING } from '../src/tuning';
 import type { SimEvent } from '../src/sim/types';
 
-const ENGAGED: AutopilotOptions = { minSpeed: 12, bounce: true };
+const ENGAGED: AutopilotOptions = { minSpeed: 14 };
 
 function ride(id: string, opts: AutopilotOptions, zones: string[] = ['town'], speed = 14) {
   const course = new EndlessCourse(1, { script: [id], d: 0.4, zones });
@@ -23,21 +23,19 @@ function ride(id: string, opts: AutopilotOptions, zones: string[] = ['town'], sp
 }
 
 describe('activity set pieces', () => {
-  it('balloon bounce pads trigger once each when engaged', () => {
-    const lazy = ride('bounce', { minSpeed: 12 });
+  it('sky balloon clusters trigger once each when the rider takes the lines', () => {
+    const lazy = ride('sky-intro', { minSpeed: 14, sky: false });
     expect(lazy.events.filter((e) => e.type === 'bounce').length).toBe(0);
-    const go = ride('bounce', ENGAGED);
+    const go = ride('sky-intro', ENGAGED);
     const hits = go.events.filter((e) => e.type === 'bounce');
     expect(go.sim.state.mode, go.sim.state.fail?.message).not.toBe('failed');
-    expect(hits.length).toBeGreaterThanOrEqual(2);
+    expect(hits.length).toBe(go.course.bounces.length);
     expect(new Set(hits.map((e) => (e as Extract<SimEvent, { type: 'bounce' }>).bounceId)).size).toBe(hits.length);
-    expect(go.course.bounces.every((b) => b.kind === 'balloon')).toBe(true);
-    const hook = go.chunk.rides?.find((h) => h.activity === 'bounce');
-    expect(hook?.path.length).toBe(go.course.bounces.length);
+    expect(go.course.bounces.every((b) => b.kind === 'balloon' && b.sky && Math.abs(b.lateral) <= 0.3)).toBe(true);
   });
 
-  it('a lazy rider still finishes bounce, and a chunk carries at most one activity', () => {
-    const { sim, chunk } = ride('bounce', { minSpeed: 10 });
+  it('a passive rider still finishes the sky intro, and a chunk carries at most one activity', () => {
+    const { sim, chunk } = ride('sky-intro', { minSpeed: 14, sky: false });
     expect(sim.state.mode, sim.state.fail?.message).not.toBe('failed');
     expect(sim.state.x).toBeGreaterThanOrEqual(chunk.x1);
     const course = new EndlessCourse(7, { zones: ['town', 'harbour'] });

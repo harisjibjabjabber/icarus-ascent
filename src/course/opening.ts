@@ -1,6 +1,7 @@
 import { Course, type Lesson, type Marker, type Rail, type Surface, type Vec2, type Wall } from './course';
 import { extend, kicker, smooth, easeOut, linear, crestPop } from './shapes';
 import { TUNING } from '../tuning';
+import { bindSky, layoutSky } from './sky';
 
 /**
  * The authored opening (brief §10 / §12 "Third"). Ten lessons, one idea each, in order.
@@ -27,7 +28,8 @@ import { TUNING } from '../tuning';
  *  9 Wall ride     descent with handrail -> kicker -> wall bridging a long gap -> broad receiver
  * 10 Harbour run   garden wall -> pot -> canal crossed by wall run -> pillar -> handrail -> pots
  *  finish run-in   optional harbour wall
- *  finish          long calm run-out on the quay
+ * 11 Ride the gust grate, then the short sky hop on a continuous street (not required)
+ *  finish          after the sky landing
  */
 export function buildOpeningCourse(): Course {
   const surfaces: Surface[] = [];
@@ -178,8 +180,30 @@ export function buildOpeningCourse(): Course {
   slope(26, -2.5);
   // optional harbour wall on the last descent: one more ride before the finish line
   walls.push({ id: walls.length, x0: aF + 2, x1: aF + 24, yBottom: cur().y - 1.5, yTop: cur().y + 4.6, side: 'right', lateral: 2.4, required: false });
-  const finishX = cur().x + 6;
-  flat(90);
+  // Settle onto flat quay, then the gust lesson. The 45 m before the grate is the telegraph.
+  flat(8);
+  const ySky = cur().y;
+  const sky = layoutSky('sky-hop', cur().x + 45, ySky, true);
+  flat(sky.x1 - cur().x);
+  flat(40);
+  const skyRailIds: number[] = [];
+  for (const line of sky.lines) {
+    const id = rails.length;
+    rails.push({ id, points: line.points, lateral: 0, required: false, sky: true });
+    skyRailIds.push(id);
+  }
+  lesson({
+    title: 'Ride the gust',
+    cpX: sky.x0,
+    cpSpeed: 12,
+    prompt: 'Grate ahead — ride the gust, then hop the lines down the street',
+    keys: '↓ on the line',
+    promptX0: sky.x0,
+    promptX1: sky.gx,
+    featureX: sky.gx,
+    required: false,
+  });
+  const finishX = sky.x1;
   surfaces.push({ id: surfaces.length, kind: 'ground', points: pts, material, thickness: material === 'stone' ? 5 : 4 });
   markers.push({ x: finishX, label: 'FINISH' });
 
@@ -191,5 +215,12 @@ export function buildOpeningCourse(): Course {
   const O = TUNING.obstacles;
   for (const x of pots) course.addObstacle('pot', x, O.potHalfWidth, O.potHeight);
   for (const x of pillars) course.addObstacle('pillar', x, O.pillarHalfWidth, O.pillarHeight);
+  const S = TUNING.tricks.sky;
+  const bounceIds = sky.clusters.map((c) => course.addBounce({
+    kind: 'balloon', x: c.x, y: c.y, half: S.clusterHalf, lateral: 0, sky: true, rad: S.clusterRad,
+  }).id);
+  const bound = bindSky(sky, 0, 0, skyRailIds, bounceIds);
+  course.tufts.push(bound.tuft);
+  course.sky.push(bound.segment);
   return course;
 }

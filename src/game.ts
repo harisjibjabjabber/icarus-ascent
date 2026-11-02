@@ -1,6 +1,7 @@
 import { TUNING } from './tuning';
 import { GAME_TITLE } from './meta';
 import { buildLabCourse } from './course/lab';
+import { buildSkyLab } from './course/skyLab';
 import { buildOpeningCourse } from './course/opening';
 import { EndlessCourse } from './course/endless';
 import { BUILD_VERSION, VersionWatcher } from './version';
@@ -262,7 +263,8 @@ export class Game {
   private loadCourse(zones?: string[]): void {
     if (this.sim) { this.saveBest(); this.commitLiveBest(); }
     this.zones = this.mode === 'endless' ? [...(zones ?? zonesFromSearch(location.search))] : [];
-    this.course = this.mode === 'lab' ? buildLabCourse(this.seed) : this.mode === 'endless' ? new EndlessCourse(this.seed, { zones: this.zones }) : buildOpeningCourse();
+    const labKind = new URLSearchParams(location.search).get('lab');
+    this.course = this.mode === 'lab' ? (labKind === 'sky' ? buildSkyLab() : buildLabCourse(this.seed)) : this.mode === 'endless' ? new EndlessCourse(this.seed, { zones: this.zones }) : buildOpeningCourse();
     this.resetEndlessRun();
     this.cpIndex = 0;
     this.endlessCp = null;

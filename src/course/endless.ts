@@ -1,7 +1,7 @@
 import { Course, type Bounce, type Chunk, type Feature, type Gap, type Obstacle, type OrbPlacement, type Rail, type RideHook, type Surface, type Updraft, type Vec2, type Wall } from './course';
 import type { Orb } from './orbs';
 import { addOrb } from './orbs';
-import { stampOrbTrails } from './orbTrails';
+import { stampOrbTrails, stampSkyTrails } from './orbTrails';
 import { extend, kicker, smooth, easeOut, linear, crestPop, rollingHills, type Ease } from './shapes';
 import { TUNING } from '../tuning';
 import { mulberry32 } from '../rng';
@@ -9,6 +9,8 @@ import { SET_PIECES, type SetPieceSpec } from './setpieces';
 import { WAVE, waveAt, type WaveInfo } from './waves';
 import { ZoneSequence } from '../zones/sequence';
 import type { Zone } from '../zones/zone';
+import { bindSky, isSkyId, layoutSky, paintSkyStreet, type SkyLayout } from './sky';
+import type { SkyVariant } from './skyTypes';
 
 /**
  * Endless assembly (brief §10, §12 "Fourth").
@@ -71,6 +73,8 @@ export class PhraseBuilder {
   readonly features: Feature[] = [];
   /** Where the run-in for the next compulsory feature begins. */
   approachX: number;
+  /** Set when this phrase is a sky segment. Append turns it into Course.sky. */
+  skyLayout: SkyLayout | null = null;
 
   constructor(readonly x0: number, readonly y0: number, material: Surface['material']) {
     this.pts = [{ x: x0, y: y0 }];
@@ -132,7 +136,7 @@ export class PhraseBuilder {
    * The street stays continuous. The void is where an airborne miss falls through; it ends before the rail
    * so a clean grind pops onto the street. Height sits inside the rail catch band of a normal jump.
    */
-  highLine(x0: number, len: number, h0 = 1.12, h1 = 0.96, dress: NonNullable<Rail['dress']> = 'wash'): this {
+  highLine(x0: number, len: number, h0 = 1.12, h1 = 0.96, dress: NonNullable<Rail['dress']> = 'balcony'): this {
     const n = Math.max(2, Math.ceil(len / 3) + 1);
     const points = Array.from({ length: n }, (_, i) => {
       const t = i / (n - 1);
@@ -247,9 +251,9 @@ export function kickerJumpReach(speed: number, rise: number, len: number, drop: 
   return vx * t;
 }
 
-/** Optional activities that fill a plain roll. One per chunk; the same one stays rare. */
-function isPlay(id: string): boolean {
-  return id === 'bounce';
+/** Street bounce pads are retired. Sky clusters are the only balloons, and they are not a filler draw. */
+function isPlay(_id: string): boolean {
+  return false;
 }
 
 /** Ideal path and the purple point for each activity. The other placer may follow `path`; the purple is spawned here. */
@@ -270,9 +274,10 @@ function activityRides(rails: Rail[], updrafts: Updraft[], bounces: Bounce[]): R
     const last = path[path.length - 1];
     out.push({ activity: 'flight', path, hardest: { x: last.x, y: last.y, lateral: 0, pickup: 'air' } });
   }
-  if (bounces.length) {
-    const path = bounces.map((b) => ({ x: b.x, y: b.y + 1.15, lateral: b.lateral * 0.75 }));
-    const last = bounces[bounces.length - 1];
+  const pads = bounces.filter((b) => !b.sky);
+  if (pads.length) {
+    const path = pads.map((b) => ({ x: b.x, y: b.y + 1.15, lateral: b.lateral * 0.75 }));
+    const last = pads[pads.length - 1];
     out.push({ activity: 'bounce', path, hardest: { x: last.x, y: last.y + 1.15, lateral: last.lateral * 0.75, pickup: 'air' } });
   }
   return out;
@@ -399,7 +404,7 @@ export const PHRASES: PhraseSpec[] = [
     id: 'high-line', title: 'High line', tier: 2, style: true, required: false, entry: [8, HC], exit: [8, HC], airtime: 0.55, receiving: 'flat', cpSpeed: 12,
     build: (b, _d, r) => {
       // a street ramp feeds the line, then the street returns to flat under it (gentle enough not to crest-pop)
-      const dresses = ['wash', 'balcony', 'gutter', 'bunting'] as const;
+      const dresses = ['balcony', 'gutter', 'bunting'] as const;
       b.flat(14).kicker(16, 1).slope(12, -1, easeOut);
       const x0 = b.cur().x, len = 22;
       b.flat(len + 6).highLine(x0, len, 1.12, 0.96, dresses[Math.floor(r() * dresses.length)]).flat(8).crest(1.6, 9, 1.6, 14).flat(14);
@@ -445,21 +450,11 @@ export const PHRASES: PhraseSpec[] = [
       const x = b.cur().x, y = b.cur().y;
       b.flat(48);
       b.wall({ x0: x + 4, x1: x + 16, yBottom: y - 0.4, yTop: y + 3.6, side: 'right', lateral: 2.4, required: false, trailY: y + 1.5 });
-      b.lineDress(x + 15, 16, 1.05, 'wash');
+      b.lineDress(x + 15, 16, 1.05, 'balcony');
       b.flat(12);
     },
   },
-  // ------------------------------------------------------------------ activities (optional: the street under each one still carries a lazy rider)
-  {
-    id: 'bounce', title: 'Bounce', tier: 2, style: false, required: false, entry: [8, HC], exit: [8, HC], airtime: 0.55, receiving: 'flat', cpSpeed: 12,
-    build: (b) => {
-      b.flat(16);
-      const y = b.cur().y, x = b.cur().x + 8;
-      b.flat(40);
-      for (let i = 0; i < 4; i++) b.bouncePad({ x: x + i * 4.4, y: y + 1.05, half: 0.7, lateral: 2.25, kind: 'balloon' });
-      b.flat(14);
-    },
-  },
+  // Street bounce pads are retired (Bounce.sky clusters live on the sky templates).
   // ------------------------------------------------------------------ compulsory actions
   {
     id: 'hop', title: 'Hop the gap', tier: 1, style: false, required: true, entry: [8, HC], exit: [10, HC], airtime: 0.5, receiving: 'broad', cpSpeed: 12,
@@ -591,6 +586,70 @@ function runwaySpec(len: number): PhraseSpec {
     },
   };
 }
+/** Flat lead with no rollers, so a sky grate's 45 m run-in stays empty. Same id and speeds as a runway. */
+function flatLead(len: number): PhraseSpec {
+  return {
+    id: 'runway', title: 'Run-up', tier: 0, style: false, required: false, entry: [6, HC], exit: [8, HC], airtime: 0, receiving: 'flat', cpSpeed: 13,
+    build: (b) => { b.flat(len); },
+  };
+}
+
+/** Paint one sky template onto a phrase. The street rail across a hole is required; the lines are not. */
+function applySky(b: PhraseBuilder, variant: SkyVariant): void {
+  const L = layoutSky(variant, b.x0 + 45, b.y0, false);
+  const pen = {
+    get x() { return b.cur().x; },
+    get y() { return b.cur().y; },
+    flat: (n: number) => { b.flat(n); },
+    slope: (n: number, dy: number) => { b.slope(n, dy, linear); },
+    runIn: () => { b.runIn(); },
+    gap: (n: number, dy: number) => b.gap(n, dy, 'rail'),
+    rail: (x: number, len: number, y0: number, y1: number, lateral: number, required: boolean, mid?: number) => {
+      b.rail(x, len, y0, y1, lateral, required, mid);
+    },
+  };
+  paintSkyStreet(pen, L);
+  const S = TUNING.tricks.sky;
+  for (const line of L.lines) {
+    b.rails.push({ points: line.points, lateral: 0, required: false, sky: true });
+    const a0 = line.anchors[0], a1 = line.anchors[line.anchors.length - 1];
+    b.features.push({ x: a0.x, kind: 'rail-optional', required: false });
+    if (a1.x - a0.x >= 12) b.features.push({ x: a1.x, kind: 'rail-optional', required: false });
+  }
+  for (const c of L.clusters) {
+    b.bounces.push({ x: c.x, y: c.y, half: S.clusterHalf, lateral: 0, kind: 'balloon', sky: true, rad: S.clusterRad });
+    b.features.push({ x: c.x, kind: 'bounce', required: false });
+  }
+  b.features.push({ x: L.gx, kind: 'tuft', required: false });
+  // A short optional wall beside line 1. The lines are 6 m above it, so the sky ride is
+  // unchanged, and the town's wall cadence does not open a 500 m gap across the segment.
+  {
+    const x0 = L.gx + 12;
+    b.wall({ x0, x1: x0 + 10, yBottom: b.y0 - 0.4, yTop: b.y0 + 3.6, side: 'right', lateral: 2.4, required: false });
+  }
+  b.skyLayout = L;
+}
+
+function skyPhrase(id: string, title: string, variant: SkyVariant, tier: Tier, required: boolean): PhraseSpec {
+  return {
+    id, title, tier, style: false, required, entry: [8, HC], exit: [8, HC], airtime: 0.8, receiving: 'flat', cpSpeed: 14,
+    build: (b) => { applySky(b, variant); },
+  };
+}
+
+const SKY_INTRO = skyPhrase('sky-intro', 'Sky intro', 'sky-intro', 1, false);
+const SKY_HOP = skyPhrase('sky-hop', 'Sky hop', 'sky-hop', 1, false);
+const SKY_GAP: SetPieceSpec = {
+  ...skyPhrase('sp-sky-gap', 'Sky gap', 'sky-gap', 2, true),
+  minWave: 1,
+  blurb: 'Lines over a telegraphed street hole',
+};
+const SKY_GAUNTLET: SetPieceSpec = {
+  ...skyPhrase('sp-sky-gauntlet', 'Sky gauntlet', 'sky-gauntlet', 2, true),
+  minWave: 3,
+  blurb: 'The long line over a telegraphed street hole',
+};
+
 /** Shortest run-up the assembler inserts (m). */
 const MIN_RUNWAY = 4;
 /** A connector with `extra` m of calm run-up (as a runway) in front: same id, entry and exit, just longer. */
@@ -599,7 +658,7 @@ function paddedSpec(spec: PhraseSpec, extra: number): PhraseSpec {
   return { ...spec, build: (b, d, r) => { lead.build(b, d, r); spec.build(b, d, r); } };
 }
 
-export const SPEC = Object.fromEntries([...PHRASES, runwaySpec(40), ...SET_PIECES].map((p) => [p.id, p])) as Record<string, PhraseSpec>;
+export const SPEC = Object.fromEntries([...PHRASES, runwaySpec(40), ...SET_PIECES, SKY_INTRO, SKY_HOP, SKY_GAP, SKY_GAUNTLET].map((p) => [p.id, p])) as Record<string, PhraseSpec>;
 const CONNECTORS = new Set(['start', 'boost', 'bleed', 'recovery', 'climb', 'gate', 'runway']);
 
 /** Length of a phrase built at difficulty d (m). Phrases ignore their RNG for geometry, so this is exact. */
@@ -686,6 +745,8 @@ export class Assembler {
   private lastGauntletX = -1e9;
   /** Id of the last death phrase, so the next hole can be a different one (no recovery between them). */
   private lastDeathId = '';
+  /** The one sky-hop filler after the wave-0 set piece has been queued. */
+  private skyHopQueued = false;
   constructor(readonly seed: number, private script?: { ids: string[]; d: number }, readonly zones: ZoneSequence = new ZoneSequence(['town'])) {}
 
   private rng(i: number): () => number { return mulberry32((this.seed ^ Math.imul(i + 1, 0x9e3779b1)) >>> 0); }
@@ -770,6 +831,15 @@ export class Assembler {
     this.queue.push({ spec: plan.sp, d: plan.d, connector: false, zone: zone.id, wave, setPiece: true });
     this.spPlan = null;
     this.lastSetPiece = plan.sp.id;
+    // One sky hop after the opening set piece, still ending before wave 1's hole leaves the early band.
+    if (wave.index === 0 && !this.skyHopQueued && zone.phrases.includes('sky-hop')) {
+      const hop = SPEC['sky-hop'];
+      const end = x + L + phraseLength(plan.sp, plan.d) + phraseLength(hop, plan.d);
+      if (end < 1160) {
+        this.queue.push({ spec: hop, d: plan.d, connector: false, zone: zone.id, wave });
+        this.skyHopQueued = true;
+      }
+    }
     return true;
   }
 
@@ -869,7 +939,16 @@ export class Assembler {
       const id = this.script.ids[i] ?? 'recovery';
       return this.commit({ spec: SPEC[id], d: this.script.d, connector: CONNECTORS.has(id), zone: zone.id, wave, setPiece: id.startsWith('sp-') });
     }
-    if (i === 0) return this.commit({ spec: SPEC.start, d: 0, connector: true, zone: zone.id, wave });
+    if (i === 0) {
+      if (zone.phrases.includes('sky-intro')) {
+        // 65 m of flat street, then the intro. The grate sits at route 110. Pretend a wall just
+        // happened so the hole at 300 stays the tier-1 rail instead of a wall-over.
+        this.queue.push({ spec: SPEC['sky-intro'], d: 0, connector: false, zone: zone.id, wave });
+        this.lastWallX = 250;
+        return this.commit({ spec: flatLead(65), d: 0, connector: true, zone: zone.id, wave });
+      }
+      return this.commit({ spec: SPEC.start, d: 0, connector: true, zone: zone.id, wave });
+    }
     const d = wave.d;
     const r = this.rng(i);
     // zone change: a gate chunk first (zones change at the end of a wave, in the breather)
@@ -886,8 +965,15 @@ export class Assembler {
       this.spWave = wave.index;
       const pd = Math.max(d, waveAt(wave.peakAt).d); // a set piece is built at the wave's peak difficulty
       const room = wave.breatherAt - wave.peakAt - MIN_RUNWAY;
-      const sps = zone.setPieces.map((id) => SPEC[id] as SetPieceSpec)
-        .filter((p) => p && p.minWave <= wave.index && p.tier <= maxTier(waveAt(wave.peakAt).d) && p.id !== this.lastSetPiece && phraseLength(p, pd) <= room);
+      const forcedId = (wave.index === 1 || wave.index === 2) && zone.setPieces.includes('sp-sky-gap') ? 'sp-sky-gap'
+        : wave.index === 3 && zone.setPieces.includes('sp-sky-gauntlet') ? 'sp-sky-gauntlet'
+        : null;
+      const forced = forcedId ? SPEC[forcedId] as SetPieceSpec : undefined;
+      if (forced && phraseLength(forced, pd) <= room) {
+        this.spPlan = { wave: wave.index, sp: forced, d: pd };
+      }
+      const sps = this.spPlan ? [] : zone.setPieces.map((id) => SPEC[id] as SetPieceSpec)
+        .filter((p) => p && !isSkyId(p.id) && p.minWave <= wave.index && p.tier <= maxTier(waveAt(wave.peakAt).d) && p.id !== this.lastSetPiece && phraseLength(p, pd) <= room);
       if (sps.length) {
         const w = sps.map((p) => this.weightOf(zone, p.id) * (p.minWave === wave.index ? 1.5 : 1) * (y < y0 - 100 && netDrop(p) < -12 ? 0.4 : 1)); // deep: fewer big drops
         let pick = r() * w.reduce((a, b) => a + b, 0), sp = sps[sps.length - 1];
@@ -896,6 +982,13 @@ export class Assembler {
       }
     }
     const plan = live ? this.spPlan : null;
+    if (!this.skyHopQueued && zone.phrases.includes('sky-hop') && wave.index === 0 && wave.phase === 'peak' && !plan && x >= 800) {
+      const hop = SPEC['sky-hop'];
+      if (x + phraseLength(hop, d) < 1160) {
+        this.skyHopQueued = true;
+        return this.commit({ spec: hop, d, connector: false, zone: zone.id, wave });
+      }
+    }
     if (plan && wave.phase === 'peak') { // already at the peak (a long phrase carried the route here): now or never
       if (this.scheduleSetPiece(plan, x, y, y0, wave, zone)) return this.commit(this.queue.shift()!);
       this.spPlan = null;
@@ -904,7 +997,7 @@ export class Assembler {
     const recent = this.history.slice(-3).map((p) => p.id);
     const tier = maxTier(d);
     const breather = wave.phase === 'breather' || wave.phase === 'warmup';
-    const pool = zone.phrases.map((id) => SPEC[id]).filter((p) => p && !CONNECTORS.has(p.id));
+    const pool = zone.phrases.map((id) => SPEC[id]).filter((p) => p && !CONNECTORS.has(p.id) && !isSkyId(p.id));
     const allowed = (p: PhraseSpec) => p.tier <= tier && (!breather || (!p.required && p.tier <= 2));
     // room: compulsory phrases end before the breather; build phrases leave room for the set piece before the peak
     const fits = (p: PhraseSpec, peakRoom: boolean): boolean => {
@@ -1048,6 +1141,9 @@ export class Assembler {
   /** Remember when a wall ride or a death gap actually starts (not the connector in front of it). */
   private notePhrase(id: string, x: number): void {
     if (isWallRide(id)) this.lastWallX = x;
+    // The intro's wall is real, but the hole at 300 m must stay a tier-1 rail, so lastWallX
+    // stays where the intro commit put it. Later sky segments count as a wall just taken.
+    if (id !== 'sky-intro' && isSkyId(id)) this.lastWallX = x + 57;
     if (isDeath(id)) {
       this.lastDeathX = x;
       const w = waveAt(x).index;
@@ -1091,7 +1187,7 @@ export const STREAM = {
  */
 export class EndlessCourse extends Course {
   private asm: Assembler;
-  private ids = { s: 0, r: 0, w: 0, o: 0, c: 0, h: 0, bo: 0, up: 0 };
+  private ids = { s: 0, r: 0, w: 0, o: 0, c: 0, h: 0, bo: 0, up: 0, tf: 0, sk: 1 };
   private endX = -10;
   private endY = 0;
   private lastSurface: Surface | null = null;
@@ -1160,6 +1256,7 @@ export class EndlessCourse extends Course {
     const last = surfaces[surfaces.length - 1];
     const end = last.points[last.points.length - 1];
     const trailPlacements: OrbPlacement[] = [];
+    if (b.skyLayout) this.rhythm.quietUntil = Math.max(this.rhythm.quietUntil, end.x);
     stampOrbTrails(trailPlacements, {
       phraseId: plan.spec.id,
       chunkX0: this.endX,
@@ -1180,6 +1277,13 @@ export class EndlessCourse extends Course {
       rhythm: this.rhythm,
       nextRareX: this.nextRareX,
     });
+    if (b.skyLayout) {
+      if (plan.zone === 'harbour') {
+        for (const line of b.skyLayout.lines) for (const a of line.anchors) a.kind = 'ship-mast';
+        for (const c of b.skyLayout.clusters) c.tether.kind = 'ship-mast';
+      }
+      stampSkyTrails(trailPlacements, b.skyLayout, () => this.nextTrailId++);
+    }
     const rides = activityRides(rails, updrafts, bounces);
     for (const h of rides) addOrb(trailPlacements, 'rare', h.hardest.x, h.hardest.y, h.hardest.lateral, h.hardest.pickup);
     if (isDeath(plan.spec.id)) {
@@ -1187,14 +1291,21 @@ export class EndlessCourse extends Course {
       if (rareX !== null) this.nextRareX.at = Math.max(this.nextRareX.at, rareX + 170);
     }
     const orbs: Orb[] = trailPlacements.map((q) => ({ id: this.ids.h++, ...q }));
+    const skyLineRails = rails.filter((r) => r.sky);
+    const skyBounces = bounces.filter((bn) => bn.sky);
+    const bound = b.skyLayout
+      ? bindSky(b.skyLayout, this.ids.sk++, this.ids.tf++, skyLineRails.map((r) => r.id), skyBounces.map((bn) => bn.id))
+      : null;
     const chunk: Chunk = {
       id: this.ids.c++, x0: this.endX, x1: end.x, y0: this.endY, y1: end.y, title: plan.spec.title, spec: plan.spec.id, tier: plan.spec.tier,
       difficulty: plan.d, connector: plan.connector, zone: plan.zone, gate: plan.gate, setPiece: plan.setPiece, wave: this.waveLabel(this.endX), cpX: this.endX + 2, cpSpeed: plan.spec.cpSpeed, features: b.features,
       surfaces: surfaces.map((q) => q.id), rails: rails.map((q) => q.id), walls: walls.map((q) => q.id), obstacles: obstacles.map((q) => q.id), markers: [],
       orbs: orbs.map((q) => q.id),
       bounces: bounces.map((q) => q.id), updrafts: updrafts.map((q) => q.id), rides,
+      tufts: bound ? [bound.tuft.id] : undefined,
+      sky: bound ? bound.segment.id : undefined,
     };
-    this.addChunk(chunk, surfaces, rails, walls, obstacles, gaps, orbs, { bounces, updrafts });
+    this.addChunk(chunk, surfaces, rails, walls, obstacles, gaps, orbs, { bounces, updrafts, tufts: bound ? [bound.tuft] : undefined, sky: bound ? [bound.segment] : undefined });
     this.lastSurface = last;
     this.material = last.material;
     this.endX = end.x; this.endY = end.y;

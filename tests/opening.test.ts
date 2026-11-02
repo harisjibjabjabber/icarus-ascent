@@ -39,7 +39,7 @@ const L = (t: string) => course.lessons.find((l) => l.title === t)!;
 describe('authored opening', () => {
   it('teaches the brief §10 sequence, one idea per lesson, each with a checkpoint and a short prompt', () => {
     expect(course.kind).toBe('opening');
-    expect(course.lessons.map((l) => l.title)).toEqual(['Push', 'Descent', 'Jump', 'Pot', 'Heel skim', 'Optional rail', 'Rail', 'Big jump', 'Wall ride', 'Put it together']);
+    expect(course.lessons.map((l) => l.title)).toEqual(['Push', 'Descent', 'Jump', 'Pot', 'Heel skim', 'Optional rail', 'Rail', 'Big jump', 'Wall ride', 'Put it together', 'Ride the gust']);
     for (const l of course.lessons) {
       expect(l.prompt.length).toBeLessThan(95);
       expect(l.promptX0).toBeLessThanOrEqual(l.cpX + 2);
@@ -106,13 +106,16 @@ describe('authored opening', () => {
     // tutorial (push, descent, first jump) may breathe; from the Pot lesson on, the next element (gap, rail, wall,
     // pot, pillar) is never more than ~3 s away at normal riding speed
     const from = L('Pot').cpX;
-    const d = density(course, from, course.finishX);
+    // The gust lesson's 45 m grate run-in is the telegraph for the lift. It sits outside the
+    // "something every 3.5 s" window, which still covers the taught street up to that lesson.
+    const gustAt = L('Ride the gust').cpX;
+    const d = density(course, from, gustAt);
     expect(d.longestEmpty, `empty stretch from ${d.longestEmptyAt.toFixed(0)}`).toBeLessThanOrEqual(48);
-    expect(density(course, 0, course.finishX).per100m).toBeGreaterThanOrEqual(2.5);
+    expect(density(course, 0, gustAt).per100m).toBeGreaterThanOrEqual(2.5);
     const { timeAt, sim } = ride({ minSpeed: 13 });
     expect(sim.state.mode).toBe('finished');
     let x = from;
-    for (const q of courseElements(course, from, course.finishX)) { if (q.x0 > x) expect(timeAt(q.x0) - timeAt(x), `empty ${x.toFixed(0)}..${q.x0.toFixed(0)}`).toBeLessThanOrEqual(3.5); x = Math.max(x, q.x1); }
+    for (const q of courseElements(course, from, gustAt)) { if (q.x0 > x) expect(timeAt(q.x0) - timeAt(x), `empty ${x.toFixed(0)}..${q.x0.toFixed(0)}`).toBeLessThanOrEqual(3.5); x = Math.max(x, q.x1); }
     // the tutorial stays gentle (first compulsory feature no sooner than ~10 s) and the harbour arrives quickly
     expect(timeAt(L('Jump').featureX)).toBeGreaterThanOrEqual(9);
     expect(timeAt(course.harbourX!)).toBeLessThanOrEqual(30);
