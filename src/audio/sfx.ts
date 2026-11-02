@@ -17,6 +17,8 @@ export class Sfx {
   private beds: Record<'wind' | 'grind' | 'wall' | 'skim', { gain: GainNode; filter: BiquadFilterNode }> | null = null;
   private grindTone: { osc: OscillatorNode; gain: GainNode } | null = null;
   muted: boolean;
+  /** CC0 deflate one-shot. Unset until a whumpf sample is registered. */
+  private deflateClip: AudioBuffer | null = null;
 
   constructor() {
     let m = false;
@@ -115,12 +117,30 @@ export class Sfx {
         }
         break;
       case 'bounce':
-        this.noiseHit(t, 0.07, 'highpass', 1600, 4200, 0.32);
-        this.tone(t, 0.1, 'sine', 640, 150, 0.18);
+        this.deflate();
         break;
       case 'fail': this.tone(t, 0.3, 'triangle', 320, 150, 0.12); break;
       default: break;
     }
+  }
+
+  /**
+   * Register a CC0 'whumpf' for the hot-air deflate. Nothing plays until one is set.
+   * No CC0 deflate sample is in the repo, so the bounce stays silent rather than a latex pop.
+   */
+  setDeflateClip(buffer: AudioBuffer | null): void { this.deflateClip = buffer; }
+
+  /** Soft deflate. Hook only: plays `setDeflateClip` when a sample exists. */
+  deflate(): void {
+    if (!this.ctx || this.muted || !this.deflateClip) return;
+    const t = this.ctx.currentTime;
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.deflateClip;
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.45, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.6);
+    src.connect(gain).connect(this.master);
+    src.start(t);
   }
 
   /** Score moments that aren't sim events: a close call, a multiplier step, a lantern, a goal, a banked combo. */

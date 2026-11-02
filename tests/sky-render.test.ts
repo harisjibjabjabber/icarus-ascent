@@ -25,26 +25,37 @@ function buntingRail(id: number, x0: number, x1: number): Rail {
 }
 
 describe('sky layer art', () => {
-  it('draws fixture clusters, ropes on the authored laterals and a tuft, and keeps bunting out of the zone', () => {
+  it('draws fixture clusters, ropes on the authored laterals and a tuft, and keeps bunting out of the zone', async () => {
     const ground = { id: 0, kind: 'ground' as const, points: [{ x: -10, y: 0 }, { x: 600, y: 0 }], material: 'stone' as const, thickness: 4 };
     const course = new Course(1, [ground], [buntingRail(11, 140, 160), buntingRail(12, 400, 420)], [], [], 0, 700);
     course.sky.push(SKY_FIXTURE_INTRO);
     const view = new CourseView(course);
+    await view.balloonsReady;
     const root = view.group;
 
     const balloons = named(root, 'sky-balloon');
     expect(balloons.length).toBe(SKY_FIXTURE_INTRO.clusters.length);
     for (const b of balloons) {
-      expect(b.userData.height).toBeGreaterThanOrEqual(1.6);
-      expect(b.userData.height).toBeLessThanOrEqual(2);
-      const strings = b.children.find((ch) => ch.name === 'sky-strings');
-      expect(strings?.children.length).toBe(1);
+      expect(b.userData.diameter).toBeGreaterThanOrEqual(5);
+      expect(b.userData.diameter).toBeLessThanOrEqual(6);
+      expect(b.userData.lateral).toBe(0);
+      const env = b.getObjectByName('sky-balloon-envelope') as THREE.Object3D;
+      expect(env).toBeTruthy();
+      const gores = env.children.filter((c) => (c as THREE.Mesh).isMesh);
+      expect(gores.length).toBeGreaterThanOrEqual(5);
+      const mats = new Set(gores.map((c) => (c as THREE.Mesh).material));
+      expect(mats.size).toBe(gores.length);
     }
+    const first = balloons[0];
+    const env = first.getObjectByName('sky-balloon-envelope')!;
     view.squashPad(SKY_FIXTURE_INTRO.clusters[0].bounceId);
-    view.animate(0.45);
-    expect(named(root, 'sky-balloon-shred').length).toBeGreaterThan(4);
-    expect(named(root, 'sky-balloon-confetti').length).toBeGreaterThan(4);
-    expect(balloons[0].userData.popped).toBe(true);
+    view.animate(0.04);
+    expect(env.scale.y).toBeLessThan(0.9);
+    expect(env.scale.x).toBeGreaterThan(1);
+    view.animate(0.55);
+    expect(env.scale.y).toBeLessThan(0.7);
+    expect(first.userData.popped).toBe(true);
+    expect(first.userData.spent).toBe(true);
 
     const ropes = named(root, 'sky-rope');
     expect(ropes.length).toBe(SKY_FIXTURE_INTRO.lines.length);

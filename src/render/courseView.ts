@@ -12,7 +12,7 @@ import { setSkyDressingZones, TOWN } from './town/town';
 import { SKY_FIXTURE_INTRO } from '../course/skyFixture';
 import { overlapsSkyBand } from '../course/sky';
 import type { SkySegment, Tuft } from '../course/skyTypes';
-import { mountBalloon, placeholderBalloonGeometry, type BalloonMount } from './sky/balloons';
+import { loadHotAirBalloon, mountBalloon, type BalloonMount } from './sky/balloons';
 import { TuftFx } from './sky/tuftFx';
 import { buildSkyLine } from './sky/skyLines';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
@@ -169,6 +169,9 @@ export class CourseView {
   private clothMats = new Map<string, THREE.MeshToonMaterial>();
   /** Balloon shells with the floating weight removed. Shares the prop's vertex buffers. */
   private balloonShells = new WeakMap<THREE.BufferGeometry, THREE.BufferGeometry>();
+  private balloonSrc: THREE.Object3D | null = null;
+  /** Resolves once the hot-air envelope can be hung. */
+  readonly balloonsReady: Promise<void>;
   private glints: THREE.Sprite[] = [];
   private now = 0;
   private readonly orbView: OrbView;
@@ -207,6 +210,12 @@ export class CourseView {
       (window as unknown as { __props?: boolean }).__props = true;
     });
     this.loadSteam();
+    this.balloonsReady = loadHotAirBalloon().then((src) => {
+      this.balloonSrc = src;
+      for (const v of [...this.views.values()]) this.drop(v);
+      this.signature = '';
+      this.sync();
+    });
     this.sync();
   }
 
@@ -273,19 +282,24 @@ export class CourseView {
     for (const v of this.views.values()) {
       for (const p of v.soft) poseSoft(p, time);
       for (const t of v.skyTufts) t.update(time);
-      for (const cl of v.skyBalloons) cl.update(time);
+      for (const cl of v.skyBalloons) cl.update(time, cam);
     }
     const glint = 0.15 + 0.035 * Math.sin(time * 3.2);
     for (const s of this.glints) s.scale.set(glint, glint, 1);
   }
 
-  /** A pad gives under her. A sky balloon pops. Presentation only; the sim already bounced. */
+  /**
+   * A bounce pad gives under her. A sky balloon pops. Presentation only; the sim already bounced.
+   * Shop awnings share the soft list and their ids collide with bounce ids, so they are not pads.
+   */
   squashPad(id: number): void {
     for (const v of this.views.values()) {
-      const p = v.soft.find((s) => s.id === id);
-      if (p) { p.hit = this.now; return; }
       const cl = v.skyBalloons.find((s) => s.bounceId === id);
       if (cl) { cl.pop(this.now); return; }
+    }
+    for (const v of this.views.values()) {
+      const p = v.soft.find((s) => s.id === id && s.group.name === SET_ASSET.balloon);
+      if (p) { p.hit = this.now; return; }
     }
   }
 
@@ -905,10 +919,12 @@ export class CourseView {
         clusterX.push(cluster.tether.x);
         const street = this.streetY(cluster.tether.x, seg.yBase);
         const y = cluster.tether.y - seg.yBase + street;
-        const fx = mountBalloon(placeholderBalloonGeometry(), {
+        if (!this.balloonSrc) continue;
+        const fx = mountBalloon(this.balloonSrc, {
           place, x: cluster.tether.x, y, seed: cluster.seed,
           bounceId: cluster.bounceId, tether: cluster.tether, streetY: street,
           quay: c.zone === 'harbour',
+          steam: () => this.steamTex,
         });
         g.add(fx.group);
         v.skyBalloons.push(fx);
@@ -919,10 +935,12 @@ export class CourseView {
       if (!b?.sky || drawn.has(b.id) || !this.ownsX(b.x)) continue;
       if (clusterX.some((x) => Math.abs(x - b.x) < 0.75)) continue;
       const street = this.streetY(b.x, b.y - 2);
-      const fx = mountBalloon(placeholderBalloonGeometry(), {
+      if (!this.balloonSrc) continue;
+      const fx = mountBalloon(this.balloonSrc, {
         place, x: b.x, y: b.y, seed: b.id * 17 + 3,
-        bounceId: b.id, tether: { x: b.x, y: b.y, lateral: b.lateral, kind: b.lateral >= 0 ? 'bracket-right' : 'bracket-left' },
+        bounceId: b.id, tether: { x: b.x, y: b.y, lateral: 0, kind: 'bracket-right' },
         streetY: street, quay: c.zone === 'harbour',
+        steam: () => this.steamTex,
       });
       g.add(fx.group);
       v.skyBalloons.push(fx);
