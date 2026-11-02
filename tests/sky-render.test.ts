@@ -32,27 +32,55 @@ describe('sky layer art', () => {
     const view = new CourseView(course);
     const root = view.group;
 
-    const clusters = named(root, 'sky-cluster');
-    expect(clusters.map((c) => c.userData.count)).toEqual([5, 4, 6]);
-    for (const c of clusters) {
-      const balloons = c.children.filter((ch) => ch.name === 'sky-balloon');
-      const strings = c.children.find((ch) => ch.name === 'sky-strings');
-      expect(balloons.length).toBe(c.userData.count);
-      expect(strings?.children.length).toBeGreaterThanOrEqual(c.userData.count as number);
-      const lengths = c.userData.lengths as number[];
-      expect(lengths.length).toBe(c.userData.count);
-      for (const len of lengths) expect(len).toBeGreaterThanOrEqual(1.35);
-      for (const len of lengths) expect(len).toBeLessThanOrEqual(2.25);
+    const balloons = named(root, 'sky-balloon');
+    expect(balloons.length).toBe(SKY_FIXTURE_INTRO.clusters.length);
+    for (const b of balloons) {
+      expect(b.userData.height).toBeGreaterThanOrEqual(1.6);
+      expect(b.userData.height).toBeLessThanOrEqual(2);
+      const strings = b.children.find((ch) => ch.name === 'sky-strings');
+      expect(strings?.children.length).toBe(1);
     }
+    view.squashPad(SKY_FIXTURE_INTRO.clusters[0].bounceId);
+    view.animate(0.45);
+    expect(named(root, 'sky-balloon-shred').length).toBeGreaterThan(4);
+    expect(named(root, 'sky-balloon-confetti').length).toBeGreaterThan(4);
+    expect(balloons[0].userData.popped).toBe(true);
 
     const ropes = named(root, 'sky-rope');
     expect(ropes.length).toBe(SKY_FIXTURE_INTRO.lines.length);
     SKY_FIXTURE_INTRO.lines.forEach((line, i) => {
       expect(ropes[i].userData.laterals).toEqual(line.anchors.map((a) => a.lateral));
     });
-    expect(named(root, 'sky-anchor').length).toBeGreaterThanOrEqual(SKY_FIXTURE_INTRO.lines.reduce((n, l) => n + l.anchors.length, 0));
+    const lines = named(root, 'sky-line');
+    expect(lines.length).toBe(SKY_FIXTURE_INTRO.lines.length);
+    for (const line of lines) {
+      const xs = line.children.filter((c) => c.name === 'sky-anchor').map((c) => c.userData.x as number).sort((a, b) => a - b);
+      expect(xs.length).toBeGreaterThanOrEqual(2);
+      for (let i = 1; i < xs.length; i++) {
+        expect(xs[i] - xs[i - 1]).toBeGreaterThanOrEqual(11);
+        expect(xs[i] - xs[i - 1]).toBeLessThanOrEqual(21);
+      }
+    }
+    const ribbons = named(root, 'sky-tuft-ribbon') as THREE.Mesh[];
+    expect(ribbons.length).toBeGreaterThanOrEqual(5);
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (const ribbon of ribbons) {
+      const p = ribbon.geometry.getAttribute('position');
+      for (let i = 0; i < p.count; i++) {
+        minY = Math.min(minY, p.getY(i));
+        maxY = Math.max(maxY, p.getY(i));
+      }
+    }
+    expect(maxY - minY).toBeGreaterThan(8);
     expect(named(root, 'sky-tuft').length).toBe(1);
-    expect(named(root, 'sky-laundry').length).toBeGreaterThan(0);
+    const laundry = named(root, 'sky-laundry') as THREE.Mesh[];
+    expect(laundry.length).toBeGreaterThan(0);
+    for (const cloth of laundry) {
+      cloth.geometry.computeBoundingBox();
+      const bb = cloth.geometry.boundingBox!;
+      expect(bb.max.y - bb.min.y).toBeGreaterThan(0.45);
+    }
     expect(named(root, 'cross-laundry').length).toBe(0);
     expect(named(root, 'hang-span').length).toBe(0);
 

@@ -133,9 +133,9 @@ No CC0 balloon with a tied neck and knot was a better fit than building one: the
 
 | Asset | Where | Licence | Evidence | Ships? |
 |---|---|---|---|---|
-| Balloon clusters (lathe teardrop, knot, string, inverted-hull outline) | `src/render/sky/balloons.ts` | project code, self-made | — | yes |
-| Tuft grate, spiral ribbons, leaves, petals, dust, lure stars | `src/render/sky/tuftFx.ts` | project code, self-made | — | yes |
-| Sky rope (follows each anchor's lateral), facade brackets, poles, pegs, procedural laundry fallback | `src/render/sky/skyLines.ts` | project code, self-made | — | yes. When `props.bin` has loaded, the hanging cloth is the existing self-made laundry set instead of the fallback |
+| Balloon stand-in (one per bounce, lathe teardrop passed into `mountBalloon`) | `src/render/sky/balloons.ts` | project code, self-made | — | temporary. `mountBalloon` takes the body mesh so a sourced model replaces this without a second renderer. Not the Grab3D `set-balloon` |
+| Tuft grate, wind ribbons, leaves, petals, dust, lure stars | `src/render/sky/tuftFx.ts` | project code, self-made | — | yes |
+| Sky washing line (rope on each anchor's lateral, facade ties, quay cranes, stylised laundry) | `src/render/sky/skyLines.ts` | project code, self-made | — | yes. Hanging cloth is procedural (sheets, shirts, dresses, socks, striped towel), including when `props.bin` has loaded |
 | Gust pose | `src/render/heroine/clips.ts` (`gust`) | project code, self-made | — | yes |
 
 ## Vision presets (time of day + hills biome mock, ported from `spike/vision`, 2026-11-01)

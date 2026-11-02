@@ -114,6 +114,10 @@ export class Sfx {
           this.noiseHit(t + 0.05, 0.3, 'bandpass', 900, 400, 0.2, 2);
         }
         break;
+      case 'bounce':
+        this.noiseHit(t, 0.07, 'highpass', 1600, 4200, 0.32);
+        this.tone(t, 0.1, 'sine', 640, 150, 0.18);
+        break;
       case 'fail': this.tone(t, 0.3, 'triangle', 320, 150, 0.12); break;
       default: break;
     }

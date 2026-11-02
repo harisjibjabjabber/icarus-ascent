@@ -6,56 +6,48 @@ import { GeoBuilder } from '../geo';
 import { toon } from '../materials';
 
 /**
- * Sky-layer balloon clusters. Each balloon is a lathe teardrop (latex body, neck, knot)
- * with a thin string to one shared knot. The knot is tied to a facade bracket or a pole,
- * so the bunch never floats. Toon latex: 3-band lavender shadow, stepped specular, rim.
+ * One sky balloon per bounce. The body is whatever mesh the caller passes
+ * (a sourced model, when it arrives). This file only hangs it, ties the
+ * string, and pops it. `placeholderBalloonGeometry` is a temporary stand-in,
+ * not the balloon we ship.
+ *
+ * The body is fitted so it stands about 1.8 m tall, origin at the centre,
+ * which is the bounce point. `pop()` is what the sim's bounce event calls.
  */
 
-export const BALLOON_COLORS = ['#c96a42', '#3f8f8a', '#d9a441', '#e8899a', '#f7ecd4', '#a99ad0', '#7fb7d9'] as const;
+export const BALLOON_HEIGHT = 1.8;
+const DYES = ['#c96a42', '#3f8f8a', '#d9a441', '#e8899a', '#f7ecd4', '#a99ad0', '#7fb7d9'];
+const CONFETTI = ['#fff8ee', '#c96a42', '#3f8f8a', '#d9a441', '#a99ad0', '#e8899a', '#f2b8c6'];
 const OUTLINE = '#2a1a14';
 const STRING = '#5c4638';
-const IRON = '#3b3440';
-const IRON_LIT = '#6e6578';
-
+const WOOD = '#a8743c';
+const WOOD_LIT = '#e7c48a';
 const Y_UP = new THREE.Vector3(0, 1, 0);
-const anchorMat = toon('#ffffff', { vertexColors: true, rim: 0.7 });
 
 function hash(n: number): number {
   const s = Math.sin(n * 127.1 + 311.7) * 43758.5453;
   return s - Math.floor(s);
 }
 
-/** Body 0.55 × 0.68 (ratio 1.24), neck Ø 0.05, knot Ø 0.06. 32×24 lathe. */
-function balloonGeometry(): THREE.BufferGeometry {
+/** Temporary teardrop. Swap the argument of `mountBalloon` when the CC0 mesh lands. */
+export function placeholderBalloonGeometry(): THREE.BufferGeometry {
   const pts: THREE.Vector2[] = [];
   const knot: [number, number][] = [
-    [0.004, 0],
-    [0.02, 0.012],
-    [0.031, 0.026],
-    [0.02, 0.04],
-    [0.011, 0.05],
-    [0.025, 0.068],
+    [0.004, 0], [0.02, 0.012], [0.031, 0.026], [0.02, 0.04], [0.011, 0.05], [0.025, 0.068],
   ];
   for (const [r, y] of knot) pts.push(new THREE.Vector2(r, y));
   const bodyH = 0.68;
   const bodyR = 0.275;
-  const n = 18;
-  for (let i = 1; i <= n; i++) {
-    const u = i / n;
+  for (let i = 1; i <= 18; i++) {
+    const u = i / 18;
     const y = 0.068 + u * bodyH;
     const bell = Math.sin(Math.PI * Math.pow(u, 0.62));
     const r = 0.025 + (bodyR - 0.025) * bell * (1 - 0.15 * u);
     pts.push(new THREE.Vector2(Math.max(0.006, r), y));
   }
-  const g = new THREE.LatheGeometry(pts, 32);
+  const g = new THREE.LatheGeometry(pts, 28);
   g.computeVertexNormals();
   return g;
-}
-
-let sharedBody: THREE.BufferGeometry | null = null;
-function bodyGeo(): THREE.BufferGeometry {
-  if (!sharedBody) sharedBody = balloonGeometry();
-  return sharedBody;
 }
 
 function hull(src: THREE.BufferGeometry, meters: number): THREE.BufferGeometry {
@@ -126,193 +118,210 @@ function stringMaterial(): THREE.MeshToonMaterial {
   return stringMat;
 }
 
-export interface BalloonSpot {
-  /** Route offset from the common knot: along-route, up, lateral. */
-  fx: number; y: number; lat: number;
-  color: string;
-  phase: number;
-  hz: number;
+const tieMat = toon('#ffffff', { vertexColors: true, rim: 0.65 });
+
+export interface BalloonMount {
+  readonly group: THREE.Group;
+  readonly bounceId: number;
+  /** Sim bounce handler. Squash, then shreds and confetti. Once only. */
+  pop(time: number): void;
+  update(time: number): void;
+  dispose(): void;
 }
 
-/** Loose phyllotaxis dome, 2.0–2.4 m across. Strings from these knots land in 1.4–2.2 m. */
-export function layoutCluster(count: number, seed: number): BalloonSpot[] {
-  const golden = Math.PI * (3 - Math.sqrt(5));
-  const across = 2.05 + hash(seed) * 0.3;
-  const R = across * 0.5;
-  const spots: BalloonSpot[] = [];
-  for (let i = 0; i < count; i++) {
-    const t = (i + 0.5) / count;
-    const ang = i * golden + hash(seed + 3) * Math.PI * 2;
-    const rad = R * (0.28 + 0.72 * Math.sqrt(t));
-    const y = 1.48 + (1 - t) * 0.42 + hash(seed + i * 9) * 0.08;
-    spots.push({
-      fx: Math.cos(ang) * rad * 0.82,
-      y,
-      lat: Math.sin(ang) * rad * 0.62,
-      color: BALLOON_COLORS[(seed + i) % BALLOON_COLORS.length],
-      phase: hash(seed + i * 13) * Math.PI * 2,
-      hz: 0.5 + hash(seed + i * 17) * 0.2,
-    });
-  }
-  return spots;
+interface Bit {
+  mesh: THREE.Mesh;
+  vel: THREE.Vector3;
+  spin: THREE.Vector3;
 }
 
-export function stringLength(s: BalloonSpot): number {
-  return Math.hypot(s.fx, s.y, s.lat);
+function fitGeometry(src: THREE.BufferGeometry): THREE.BufferGeometry {
+  const g = src.clone();
+  g.computeBoundingBox();
+  const bb = g.boundingBox!;
+  const h = Math.max(1e-4, bb.max.y - bb.min.y);
+  const s = BALLOON_HEIGHT / h;
+  g.translate(-(bb.min.x + bb.max.x) / 2, -(bb.min.y + bb.max.y) / 2, -(bb.min.z + bb.max.z) / 2);
+  g.scale(s, s, s);
+  return g;
 }
 
-interface BalloonNode {
-  obj: THREE.Group;
-  phase: number;
-  hz: number;
-  base: THREE.Vector3;
-  string: THREE.Mesh;
+function fitObject(obj: THREE.Object3D): void {
+  const box = new THREE.Box3().setFromObject(obj);
+  const h = Math.max(1e-4, box.max.y - box.min.y);
+  const s = BALLOON_HEIGHT / h;
+  obj.scale.multiplyScalar(s);
+  box.setFromObject(obj);
+  const c = box.getCenter(new THREE.Vector3());
+  obj.position.sub(c);
 }
 
 /**
- * One cluster. `place` maps route metres into the parent chunk. The common knot sits
- * on the bracket tip; balloons rise above it.
+ * Hang one balloon. `source` is the body: a geometry (shaded here) or a
+ * loaded object (kept as authored). Either is scaled to {@link BALLOON_HEIGHT}.
  */
-export class BalloonCluster {
-  readonly group = new THREE.Group();
-  readonly bounceId: number;
-  readonly count: number;
-  /** Scene-space common knot. Strings and the bracket meet here. */
-  readonly knot: THREE.Vector3;
-  hit = -1;
-  private balloons: BalloonNode[] = [];
-  private owned: THREE.BufferGeometry[] = [];
+export function mountBalloon(source: THREE.Object3D | THREE.BufferGeometry, opts: {
+  place: (x: number, y: number, lat: number) => THREE.Vector3;
+  x: number;
+  /** Bounce height. The balloon is centred here. */
+  y: number;
+  seed: number;
+  bounceId: number;
+  tether: SkyAnchor;
+  streetY: number;
+  quay?: boolean;
+}): BalloonMount {
+  const color = DYES[Math.abs(opts.seed) % DYES.length];
+  const owned: THREE.BufferGeometry[] = [];
+  const group = new THREE.Group();
+  group.name = 'sky-balloon';
+  group.userData = { bounceId: opts.bounceId, height: BALLOON_HEIGHT, popped: false };
+  const center = opts.place(opts.x, opts.y, opts.tether.lateral);
+  group.position.copy(center);
 
-  constructor(opts: {
-    place: (x: number, y: number, lat: number) => THREE.Vector3;
-    x: number;
-    knotY: number;
-    seed: number;
-    count: number;
-    bounceId: number;
-    tether: SkyAnchor;
-    streetY: number;
-  }) {
-    this.bounceId = opts.bounceId;
-    this.count = opts.count;
-    this.group.name = 'sky-cluster';
-    const spots = layoutCluster(opts.count, opts.seed);
-    const ropeLat = opts.tether.lateral;
-    this.knot = opts.place(opts.x, opts.knotY, ropeLat);
-    this.group.userData = { count: opts.count, stringCount: spots.length, bounceId: opts.bounceId, lengths: spots.map(stringLength) };
-
-    const strings = new THREE.Group();
-    strings.name = 'sky-strings';
-    const src = bodyGeo();
-    for (const s of spots) {
-      const at = opts.place(opts.x + s.fx, opts.knotY + s.y, ropeLat + s.lat);
-      const obj = new THREE.Group();
-      obj.name = 'sky-balloon';
-      obj.position.copy(at);
-      const shell = src.clone();
-      const ink = hull(src, 0.012);
-      this.owned.push(shell, ink);
-      const mesh = new THREE.Mesh(shell, latex(s.color));
-      mesh.castShadow = true;
-      const line = new THREE.Mesh(ink, outlineMaterial());
-      obj.add(line, mesh);
-      const str = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 1, 5), stringMaterial());
-      str.castShadow = true;
-      str.userData.length = stringLength(s);
-      strings.add(str);
-      this.group.add(obj);
-      this.balloons.push({ obj, phase: s.phase, hz: s.hz, base: at.clone(), string: str });
-      this.tieString(str, this.knot, at);
-    }
-    this.group.add(strings);
-
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.055, 0.012, 6, 12), latex('#f7ecd4'));
-    ring.position.copy(this.knot);
-    ring.rotation.x = Math.PI / 2;
-    this.group.add(ring);
-
-    this.anchor(opts);
-    this.update(0);
+  const body = new THREE.Group();
+  body.name = 'sky-balloon-body';
+  if (source instanceof THREE.BufferGeometry) {
+    const fitted = fitGeometry(source);
+    const ink = hull(fitted, 0.012);
+    owned.push(fitted, ink);
+    const shell = new THREE.Mesh(fitted, latex(color));
+    shell.castShadow = true;
+    body.add(new THREE.Mesh(ink, outlineMaterial()), shell);
+  } else {
+    const obj = source.clone(true);
+    fitObject(obj);
+    body.add(obj);
   }
+  group.add(body);
 
-  private tieString(str: THREE.Mesh, knot: THREE.Vector3, at: THREE.Vector3): void {
-    const dir = at.clone().sub(knot);
+  const quay = opts.quay || opts.tether.kind === 'ship-mast';
+  const cleatLat = quay ? (TOWN.streetEdge + TOWN.front) * 0.5 : opts.tether.lateral;
+  const cleatY = opts.y - BALLOON_HEIGHT / 2 - 1.05;
+  const cleat = opts.place(opts.x, cleatY, cleatLat).sub(center);
+  const bottom = new THREE.Vector3(0, -BALLOON_HEIGHT / 2, 0);
+
+  const strings = new THREE.Group();
+  strings.name = 'sky-strings';
+  const str = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 1, 5), stringMaterial());
+  str.castShadow = true;
+  strings.add(str);
+  group.add(strings);
+
+  const tie = new THREE.Group();
+  tie.name = 'sky-anchor';
+  tie.userData.kind = quay ? 'ship-mast' : opts.tether.kind;
+  const gb = new GeoBuilder();
+  const rot: [number, number, number] = [0, ROUTE_YAW, 0];
+  if (quay) {
+    const foot = cleatLat;
+    const top = cleatY;
+    const h = Math.max(0.8, top - opts.streetY);
+    gb.add(new THREE.BoxGeometry(0.7, 0.16, 0.7), opts.place(opts.x, opts.streetY + 0.08, foot), '#b9a796', { rot, top: '#e6d7c6' });
+    gb.add(new THREE.CylinderGeometry(0.05, 0.08, h, 7), opts.place(opts.x, opts.streetY + h / 2, foot), WOOD, { top: WOOD_LIT });
+  } else {
+    for (const facade of [-TOWN.front, TOWN.front]) {
+      const side = Math.sign(facade) || 1;
+      gb.add(new THREE.BoxGeometry(0.16, 0.36, 0.07), opts.place(opts.x, cleatY, facade - side * 0.05), WOOD, { rot, top: WOOD_LIT });
+      const A = opts.place(opts.x, cleatY, facade - side * 0.08);
+      const B = opts.place(opts.x, cleatY, opts.tether.lateral);
+      const dir = B.clone().sub(A);
+      const len = Math.max(0.05, dir.length());
+      const q = new THREE.Quaternion().setFromUnitVectors(Y_UP, dir.clone().multiplyScalar(1 / len));
+      const e = new THREE.Euler().setFromQuaternion(q);
+      gb.add(new THREE.CylinderGeometry(0.012, 0.012, len, 5), A.clone().add(B).multiplyScalar(0.5), '#e7c98a', { rot: [e.x, e.y, e.z], top: '#fff3d2' });
+    }
+  }
+  gb.add(new THREE.SphereGeometry(0.06, 8, 6), opts.place(opts.x, cleatY, cleatLat), WOOD, { top: WOOD_LIT });
+  const built = gb.build();
+  if (built) {
+    const mesh = new THREE.Mesh(built, tieMat);
+    mesh.castShadow = true;
+    tie.add(mesh);
+  }
+  group.add(tie);
+
+  const bits: Bit[] = [];
+  let poppedAt = -1;
+  const scratch = new THREE.Vector3();
+
+  const tieString = (from: THREE.Vector3, to: THREE.Vector3) => {
+    const dir = to.clone().sub(from);
     const len = Math.max(0.05, dir.length());
     const q = new THREE.Quaternion().setFromUnitVectors(Y_UP, dir.multiplyScalar(1 / len));
-    str.position.copy(knot).add(at).multiplyScalar(0.5);
+    str.position.copy(from).add(to).multiplyScalar(0.5);
     str.quaternion.copy(q);
     str.scale.set(1, len, 1);
-  }
+  };
+  tieString(bottom, cleat);
 
-  /** Bracket from the facade, or a pole with a crossbar, ending on the knot. */
-  private anchor(opts: { place: (x: number, y: number, lat: number) => THREE.Vector3; x: number; knotY: number; tether: SkyAnchor; streetY: number }): void {
-    const gb = new GeoBuilder();
-    const rot: [number, number, number] = [0, ROUTE_YAW, 0];
-    const kind = opts.tether.kind;
-    const g = new THREE.Group();
-    g.name = 'sky-anchor';
-    g.userData.kind = kind;
-    const ropeLat = opts.tether.lateral;
-    if (kind === 'mast' || kind === 'ship-mast') {
-      const h = kind === 'ship-mast' ? Math.max(6.2, opts.knotY - opts.streetY + 1.2) : Math.max(4.4, opts.knotY - opts.streetY + 0.4);
-      const base = opts.streetY;
-      gb.add(new THREE.CylinderGeometry(0.09, 0.12, h, 8), opts.place(opts.x, base + h / 2, ropeLat), '#8a623c', { top: '#c4a46a' });
-      gb.add(new THREE.SphereGeometry(0.1, 8, 6), opts.place(opts.x, base + h, ropeLat), '#6e4a2e');
-    } else {
-      const facade = kind === 'bracket-right' ? TOWN.front : -TOWN.front;
-      const side = Math.sign(facade) || 1;
-      const span = facade - ropeLat;
-      gb.add(new THREE.BoxGeometry(0.22, 0.46, 0.08), opts.place(opts.x, opts.knotY, facade - side * 0.02), IRON, { rot, top: IRON_LIT });
-      if (Math.abs(span) > 0.05) {
-        gb.add(new THREE.BoxGeometry(0.06, 0.05, Math.abs(span)), opts.place(opts.x, opts.knotY, (facade + ropeLat) / 2), IRON, { rot, top: IRON_LIT });
-        const stay = this.stay(opts.place, opts.x, opts.knotY - 0.85, facade - side * 0.04, opts.knotY - 0.04, facade + (ropeLat - facade) * 0.45);
-        if (stay) gb.add(stay.geo, stay.at, IRON, { rot: stay.rot, top: IRON_LIT });
-      }
-    }
-    const built = gb.build();
-    if (built) {
-      const mesh = new THREE.Mesh(built, anchorMat);
+  const spawn = (name: string, w: number, h: number, n: number, speed: number, dye: (i: number) => string) => {
+    const geo = new THREE.PlaneGeometry(w, h);
+    owned.push(geo);
+    for (let i = 0; i < n; i++) {
+      const mat = new THREE.MeshToonMaterial({ color: dye(i), side: THREE.DoubleSide, transparent: true });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.name = name;
+      mesh.visible = false;
       mesh.castShadow = true;
-      g.add(mesh);
+      const dir = new THREE.Vector3(hash(opts.seed + i * 3) - 0.5, 0.35 + hash(opts.seed + i * 5) * 0.9, hash(opts.seed + i * 7) - 0.5);
+      if (dir.lengthSq() < 1e-4) dir.set(0, 1, 0);
+      dir.normalize().multiplyScalar(speed * (0.65 + hash(opts.seed + i * 11) * 0.7));
+      group.add(mesh);
+      bits.push({
+        mesh,
+        vel: dir,
+        spin: new THREE.Vector3(hash(i + 1) * 8, hash(i + 2) * 6, hash(i + 3) * 8),
+      });
     }
-    this.group.add(g);
-  }
+  };
 
-  private stay(place: (x: number, y: number, lat: number) => THREE.Vector3, x: number, y1: number, lat1: number, y2: number, lat2: number): { geo: THREE.BufferGeometry; at: THREE.Vector3; rot: [number, number, number] } | null {
-    const a = place(x, y1, lat1);
-    const b = place(x, y2, lat2);
-    const dir = b.clone().sub(a);
-    const len = dir.length();
-    if (len < 0.05) return null;
-    const q = new THREE.Quaternion().setFromUnitVectors(Y_UP, dir.multiplyScalar(1 / len));
-    const e = new THREE.Euler().setFromQuaternion(q);
-    return { geo: new THREE.CylinderGeometry(0.02, 0.02, len, 5), at: a.clone().add(b).multiplyScalar(0.5), rot: [e.x, e.y, e.z] };
-  }
-
-  update(time: number): void {
-    const age = this.hit < 0 ? 10 : time - this.hit;
-    let k = 0;
-    if (this.hit >= 0) {
-      if (age < 0.08) k = age / 0.08;
-      else k = Math.exp(-(age - 0.08) / 0.09) * Math.cos((age - 0.08) * 12);
-    }
-    for (const b of this.balloons) {
-      const bob = Math.sin(time * b.hz * Math.PI * 2 + b.phase) * 0.05;
-      const sway = Math.sin(time * b.hz * Math.PI * 2 * 0.85 + b.phase) * (4 * Math.PI / 180);
-      b.obj.position.copy(b.base);
-      b.obj.position.y += bob * (1 - Math.min(1, Math.abs(k)));
-      b.obj.rotation.set(sway * 0.65, sway * 0.2, sway);
-      const sy = THREE.MathUtils.clamp(1 - 0.25 * k, 0.72, 1.12);
-      const sx = THREE.MathUtils.clamp(1 + 0.12 * k, 0.9, 1.16);
-      b.obj.scale.set(sx, sy, sx);
-      const tug = b.obj.position.clone();
-      if (k > 0.2) tug.y -= 0.04 * k;
-      this.tieString(b.string, this.knot, tug);
-    }
-  }
-
-  dispose(): void {
-    for (const g of this.owned) g.dispose();
-    this.owned = [];
-  }
+  const mount: BalloonMount = {
+    group,
+    bounceId: opts.bounceId,
+    pop(time: number) {
+      if (poppedAt >= 0) return;
+      poppedAt = time;
+      group.userData.popped = true;
+      if (!bits.length) {
+        spawn('sky-balloon-shred', 0.22, 0.34, 12, 3.4, () => color);
+        spawn('sky-balloon-confetti', 0.08, 0.12, 16, 4.2, (i) => CONFETTI[i % CONFETTI.length]);
+      }
+    },
+    update(time: number) {
+      const age = poppedAt < 0 ? -1 : time - poppedAt;
+      if (age < 0) {
+        const bob = Math.sin(time * 0.6 * Math.PI * 2 + opts.seed) * 0.05;
+        body.position.y = bob;
+        body.rotation.z = Math.sin(time * 0.5 * Math.PI * 2 + opts.seed) * (4 * Math.PI / 180);
+        tieString(bottom.clone().setY(bottom.y + bob), cleat);
+        return;
+      }
+      if (age < 0.08) {
+        const k = age / 0.08;
+        body.scale.set(1 + 0.22 * k, 1 - 0.42 * k, 1 + 0.22 * k);
+        return;
+      }
+      body.visible = false;
+      strings.visible = false;
+      const t = age - 0.08;
+      const fade = t < 0.35 ? 1 : Math.max(0, 1 - (t - 0.35) / 0.45);
+      for (const bit of bits) {
+        bit.mesh.visible = fade > 0.02;
+        scratch.copy(bit.vel).multiplyScalar(t);
+        scratch.y += -6.5 * t * t;
+        bit.mesh.position.copy(scratch);
+        bit.mesh.rotation.set(bit.spin.x * t, bit.spin.y * t, bit.spin.z * t);
+        const mat = bit.mesh.material as THREE.MeshToonMaterial;
+        mat.opacity = fade;
+      }
+    },
+    dispose() {
+      for (const g of owned) g.dispose();
+      owned.length = 0;
+      for (const bit of bits) (bit.mesh.material as THREE.Material).dispose();
+    },
+  };
+  mount.update(0);
+  return mount;
 }

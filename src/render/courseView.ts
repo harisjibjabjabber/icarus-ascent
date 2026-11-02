@@ -12,9 +12,9 @@ import { setSkyDressingZones, TOWN } from './town/town';
 import { SKY_FIXTURE_INTRO } from '../course/skyFixture';
 import { overlapsSkyBand } from '../course/sky';
 import type { SkySegment, Tuft } from '../course/skyTypes';
-import { BalloonCluster } from './sky/balloons';
+import { mountBalloon, placeholderBalloonGeometry, type BalloonMount } from './sky/balloons';
 import { TuftFx } from './sky/tuftFx';
-import { buildSkyLine, type SkyPeg } from './sky/skyLines';
+import { buildSkyLine } from './sky/skyLines';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { GeoBuilder, blob } from './geo';
 import { SET_ASSET, poseSoft, type SoftProp } from './setSlots';
@@ -124,7 +124,7 @@ function lineMat(color: string): THREE.LineBasicMaterial {
   return m as THREE.LineBasicMaterial;
 }
 
-interface ChunkView { chunk: Chunk; group: THREE.Group; pooled: { kind: 'pot' | 'pillar'; obj: THREE.Group }[]; wisps: Wisp[]; glints: THREE.Sprite[]; soft: SoftProp[]; skyTufts: TuftFx[]; skyClusters: BalloonCluster[] }
+interface ChunkView { chunk: Chunk; group: THREE.Group; pooled: { kind: 'pot' | 'pillar'; obj: THREE.Group }[]; wisps: Wisp[]; glints: THREE.Sprite[]; soft: SoftProp[]; skyTufts: TuftFx[]; skyBalloons: BalloonMount[] }
 
 /** One rising puff. Route metres, parented to its chunk so a rebase carries it. */
 interface Wisp {
@@ -273,19 +273,19 @@ export class CourseView {
     for (const v of this.views.values()) {
       for (const p of v.soft) poseSoft(p, time);
       for (const t of v.skyTufts) t.update(time);
-      for (const cl of v.skyClusters) cl.update(time);
+      for (const cl of v.skyBalloons) cl.update(time);
     }
     const glint = 0.15 + 0.035 * Math.sin(time * 3.2);
     for (const s of this.glints) s.scale.set(glint, glint, 1);
   }
 
-  /** The canvas, balloon or hull gives under her and springs back. Presentation only. */
+  /** A pad gives under her. A sky balloon pops. Presentation only; the sim already bounced. */
   squashPad(id: number): void {
     for (const v of this.views.values()) {
       const p = v.soft.find((s) => s.id === id);
       if (p) { p.hit = this.now; return; }
-      const cl = v.skyClusters.find((s) => s.bounceId === id);
-      if (cl) { cl.hit = this.now; return; }
+      const cl = v.skyBalloons.find((s) => s.bounceId === id);
+      if (cl) { cl.pop(this.now); return; }
     }
   }
 
@@ -303,7 +303,7 @@ export class CourseView {
     const g = new THREE.Group();
     this.bx = c.x0; this.by = c.y0;
     this.building = c;
-    const v: ChunkView = { chunk: c, group: g, pooled: [], wisps: [], glints: [], soft: [], skyTufts: [], skyClusters: [] };
+    const v: ChunkView = { chunk: c, group: g, pooled: [], wisps: [], glints: [], soft: [], skyTufts: [], skyBalloons: [] };
     const surfaces = c.surfaces.map((id) => this.course.findSurface(id)).filter((q): q is Surface => !!q);
     const lip: THREE.Vector3[] = [], edge: THREE.Vector3[] = [];
     for (const s of surfaces) { g.add(this.surfaceMesh(s)); this.lipLine(s, lip, edge); }
@@ -333,7 +333,7 @@ export class CourseView {
 
   private drop(v: ChunkView): void {
     for (const t of v.skyTufts) t.dispose();
-    for (const cl of v.skyClusters) cl.dispose();
+    for (const cl of v.skyBalloons) cl.dispose();
     for (const w of v.wisps) {
       w.mesh.removeFromParent();
       w.mat.dispose();
@@ -879,14 +879,14 @@ export class CourseView {
         const mid = (line.anchors[0].x + line.anchors[line.anchors.length - 1].x) / 2;
         if (!this.ownsX(mid)) continue;
         const rail = this.course.rails.find((r) => r.id === line.railId && r.sky);
-        const pieces = line.laundry ? this.laundryPieces() : [];
         const built = buildSkyLine({
           place,
           anchors: line.anchors,
           streetY: (x) => this.streetY(x, seg.yBase),
-          sag: !rail,
+          sag: true,
+          quay: c.zone === 'harbour',
           laundry: line.laundry,
-          proceduralLaundry: line.laundry && pieces.length === 0,
+          proceduralLaundry: line.laundry,
           yOf: (authored, x) => {
             if (rail) {
               const a = rail.points[0].x;
@@ -898,20 +898,20 @@ export class CourseView {
         });
         if (!built) continue;
         g.add(built.group);
-        if (line.laundry && pieces.length) this.hangSkyLaundry(g, built.pegs, pieces);
       }
       for (const cluster of seg.clusters) {
         if (!this.ownsX(cluster.tether.x)) continue;
         drawn.add(cluster.bounceId);
         clusterX.push(cluster.tether.x);
         const street = this.streetY(cluster.tether.x, seg.yBase);
-        const knotY = cluster.tether.y - seg.yBase + street - 1.55;
-        const fx = new BalloonCluster({
-          place, x: cluster.tether.x, knotY, seed: cluster.seed, count: cluster.count,
+        const y = cluster.tether.y - seg.yBase + street;
+        const fx = mountBalloon(placeholderBalloonGeometry(), {
+          place, x: cluster.tether.x, y, seed: cluster.seed,
           bounceId: cluster.bounceId, tether: cluster.tether, streetY: street,
+          quay: c.zone === 'harbour',
         });
         g.add(fx.group);
-        v.skyClusters.push(fx);
+        v.skyBalloons.push(fx);
       }
     }
     for (const id of c.bounces ?? []) {
@@ -919,13 +919,13 @@ export class CourseView {
       if (!b?.sky || drawn.has(b.id) || !this.ownsX(b.x)) continue;
       if (clusterX.some((x) => Math.abs(x - b.x) < 0.75)) continue;
       const street = this.streetY(b.x, b.y - 2);
-      const count = 3 + (Math.abs(b.id) % 5);
-      const fx = new BalloonCluster({
-        place, x: b.x, knotY: b.y - 1.55, seed: b.id * 17 + 3, count,
-        bounceId: b.id, tether: { x: b.x, y: b.y, lateral: b.lateral, kind: b.lateral >= 0 ? 'bracket-right' : 'bracket-left' }, streetY: street,
+      const fx = mountBalloon(placeholderBalloonGeometry(), {
+        place, x: b.x, y: b.y, seed: b.id * 17 + 3,
+        bounceId: b.id, tether: { x: b.x, y: b.y, lateral: b.lateral, kind: b.lateral >= 0 ? 'bracket-right' : 'bracket-left' },
+        streetY: street, quay: c.zone === 'harbour',
       });
       g.add(fx.group);
-      v.skyClusters.push(fx);
+      v.skyBalloons.push(fx);
     }
   }
 
@@ -937,52 +937,6 @@ export class CourseView {
       id: seg.tuftId, x0: seg.gx, x1: seg.gx + 3, yBase: seg.yBase, catchH: 2.5,
       exitX: seg.gx + 9, exitY: seg.yBase + 7, lateral: 0, source: 'grate', segmentId: seg.id,
     }];
-  }
-
-  /** Sourced garments instanced under the rope. The peg is the top of the cloth. */
-  private hangSkyLaundry(parent: THREE.Group, pegs: SkyPeg[], pieces: PropPiece[]): void {
-    if (!pegs.length || !pieces.length) return;
-    const up = new THREE.Vector3(0, 1, 0);
-    const rot = new THREE.Matrix4().makeBasis(ROUTE_RIGHT, up, ROUTE_DIR.clone().negate());
-    for (let p = 0; p < pieces.length; p++) {
-      const piece = pieces[p];
-      const mine = pegs.filter((_, i) => i % pieces.length === p);
-      if (!mine.length) continue;
-      const src = piece.body;
-      const P = src.getAttribute('position');
-      let yMin = Infinity, yMax = -Infinity, xMin = Infinity, xMax = -Infinity, zMin = Infinity, zMax = -Infinity;
-      for (let i = 0; i < P.count; i++) {
-        yMin = Math.min(yMin, P.getY(i)); yMax = Math.max(yMax, P.getY(i));
-        xMin = Math.min(xMin, P.getX(i)); xMax = Math.max(xMax, P.getX(i));
-        zMin = Math.min(zMin, P.getZ(i)); zMax = Math.max(zMax, P.getZ(i));
-      }
-      const drop = Math.max(0.05, yMax - yMin);
-      const wide = Math.max(0.05, xMax - xMin, zMax - zMin);
-      const sy = Math.min(1, 0.9 / drop);
-      const s = Math.min(sy, 0.85 / wide);
-      const geo = src.clone();
-      geo.translate(-(xMin + xMax) / 2, -yMax, -(zMin + zMax) / 2);
-      geo.scale(s, sy, s);
-      const tuv = geo.getAttribute('tuv');
-      if (piece.map && tuv) geo.setAttribute('uv', tuv.clone());
-      const sway = new Float32Array(geo.getAttribute('position').count);
-      const Q = geo.getAttribute('position');
-      for (let i = 0; i < sway.length; i++) sway[i] = Math.max(0, -Q.getY(i) / 0.9);
-      geo.setAttribute('sway', new THREE.BufferAttribute(sway, 1));
-      const mat = piece.map ? this.clothMaterial(piece.map, true, 0.85) : this.iron;
-      const mesh = new THREE.InstancedMesh(geo, mat, mine.length);
-      mesh.name = 'sky-laundry';
-      mesh.castShadow = true;
-      mesh.frustumCulled = false;
-      const m = new THREE.Matrix4();
-      mine.forEach((peg, i) => {
-        m.copy(rot);
-        m.setPosition(this.L(peg.x, peg.y, peg.lat));
-        mesh.setMatrixAt(i, m);
-      });
-      mesh.instanceMatrix.needsUpdate = true;
-      parent.add(mesh);
-    }
   }
 
   /** Hanging rope in route metres. Sag is the dip at mid-span. */
