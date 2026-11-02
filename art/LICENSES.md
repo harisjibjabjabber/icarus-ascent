@@ -117,7 +117,7 @@ CC0 1.0. Grab3D models are the GLB on each model page (no login). Restyle drops 
 |---|---|---|---|---|
 | `art/props/grab3d/awning.glb` | CC0 1.0, Grab3D, https://grab3d.com/models/buildings/awning/ | **CC0 1.0** | model page (CC0, no login) | yes — `set-awning`, `set-awning-teal`, `set-awning-ochre` |
 | `art/props/grab3d/market-stall.glb` | CC0 1.0, Grab3D, https://grab3d.com/models/buildings/market-stall/ | **CC0 1.0** | model page | baked as `set-stall`, **not placed** — at real size it reads as a bare table over the water |
-| `art/props/grab3d/hot-air-balloon.glb` | CC0 1.0, Grab3D, https://grab3d.com/models/vehicles/hot-air-balloon/ | **CC0 1.0** | model page | **no** — restyled, not packed. A 21 m envelope at 3k tris facets in game |
+| `art/props/grab3d/hot-air-balloon.glb` | CC0 1.0, Grab3D, https://grab3d.com/models/vehicles/hot-air-balloon/ | **CC0 1.0** | model page | source copy. The shipped file is the 3k-tri LOD below |
 | `art/props/grab3d/balloon.glb` | CC0 1.0, Grab3D, https://grab3d.com/models/props/balloon/ | **CC0 1.0** | model page | yes — `set-balloon` |
 | `art/props/grab3d/rowboat.glb` | CC0 1.0, Grab3D, https://grab3d.com/models/vehicles/rowboat/ | **CC0 1.0** | model page | yes — `set-boat` (oars dropped) |
 | `art/props/grab3d/chimney.glb` | CC0 1.0, Grab3D, https://grab3d.com/models/buildings/chimney/ | **CC0 1.0** | model page | yes — replaces the `chimney` piece |
@@ -126,6 +126,17 @@ CC0 1.0. Grab3D models are the GLB on each model page (no login). Restyle drops 
 | `art/props/smoke/smoke_04.png`, `smoke_07.png` | CC0 1.0, Kenney, https://opengameart.org/content/particle-pack-80-sprites | **CC0 1.0** | same pack as the orb atlas | yes — `public/props/steam/smoke_04.webp`, `smoke_07.webp` |
 | `art/props/fabric/Fabric019_Color.jpg` | CC0 1.0, ambientCG, https://ambientcg.com/view?id=Fabric019 | **CC0 1.0** | ambientCG lists CC0 1.0 | weave baked into cloth atlases, not shipped as its own file |
 | Laundry garments | no sourced mesh; cloth sim in `art/pipeline/laundry_sim.py` | project | — | yes — `set-sheet`, `set-shirt`, `set-towel`, `set-dress`, `set-sock`, `set-sock-b` |
+
+## Sky layer (workstream B, 2026-11-02)
+
+Each sky rung is one hot-air balloon. The Pixor hot-air piece (`balloon` in the prop bin) and the lathe cluster are not drawn. Gore colours are repainted in game (terracotta or deep teal alternating with cream); the cream crown stays the landing target.
+
+| Asset | Where | Licence | Evidence | Ships? |
+|---|---|---|---|---|
+| Hot Air Balloon by Grab3D, CC0 1.0, https://grab3d.com/models/vehicles/hot-air-balloon/ | `public/models/hot-air-balloon.glb` (3k-tri LOD) | **CC0 1.0** | Grab3D model page, CC0, no login | yes — one per sky rung, hung by `mountBalloon` |
+| Tuft grate, wind ribbons, leaves, petals, dust, lure stars | `src/render/sky/tuftFx.ts` | project code, self-made | — | yes |
+| Sky washing line (rope on each anchor's lateral, facade ties, quay cranes, stylised laundry) | `src/render/sky/skyLines.ts` | project code, self-made | — | yes. Hanging cloth is procedural (sheets, shirts, dresses, socks, striped towel), including when `props.bin` has loaded |
+| Gust pose | `src/render/heroine/clips.ts` (`gust`) | project code, self-made | — | yes |
 
 ## Vision presets (time of day + hills biome mock, ported from `spike/vision`, 2026-11-01)
 

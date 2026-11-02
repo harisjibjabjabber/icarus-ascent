@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GeoBuilder, blob } from '../geo';
 import { toSceneRaw, ROUTE_RIGHT, ROUTE_YAW } from '../space';
 import { Kit, MergeBuffer, TEX, type Tints } from './kit';
+import { inSkyFrontage, skyFrontRowFloors } from '../../course/sky';
 
 /**
  * Witch-town layout (Kiki-style Mediterranean seaside town). Places premade kit pieces along the route in 40 m
@@ -36,11 +37,31 @@ export interface ChunkOpts {
   finish?: number;
   clockTowers?: number[];
   endless?: boolean;
+  /** Sky segments. Front-row houses overlapping a zone (padded 10 m) are dressed for the upper layer. */
+  skyZones?: { x0: number; x1: number }[];
+}
+export interface HousePlan {
+  x0: number; x1: number; side: 1 | -1; row: number; floors: number; thirdWindows: number; flowerBoxes: number;
 }
 export interface TownChunk {
   near: THREE.BufferGeometry | null; far: THREE.BufferGeometry | null; y0: number; trisNear: number; trisFar: number;
   /** Swaying pennants for the street bunting. Null when this chunk has no string. */
   flags: THREE.BufferGeometry | null;
+  /** Houses placed in this chunk, for the sky-layer floor check. */
+  plans: HousePlan[];
+  /** Cross-street laundry strings. Retired; stays 0. */
+  crossStreetLaundry: number;
+  /** Bunting strings in this chunk. Retired inside sky zones; the town no longer builds any. */
+  buntingStrings: number;
+}
+
+/** Zones published by the course view before the town builds. Tests pass `opts.skyZones` instead. */
+let notedSkyZones: { x0: number; x1: number }[] = [];
+export function setSkyDressingZones(zones: { x0: number; x1: number }[]): void {
+  notedSkyZones = zones.map((z) => ({ x0: z.x0, x1: z.x1 }));
+}
+function skySpans(opts: ChunkOpts): { x0: number; x1: number }[] {
+  return opts.skyZones !== undefined ? opts.skyZones : notedSkyZones;
 }
 
 const lin = (h: string) => new THREE.Color(h);
@@ -74,11 +95,12 @@ function box(mb: MergeBuffer, base: THREE.Matrix4, w: number, h: number, d: numb
 /** Presentation knobs (perf vs looks). */
 export const TOWN_LOD = { fullRoofs: false };
 
-interface HouseSpec { w: 4 | 6; floors: number; plaster: THREE.Color; shutter: THREE.Color; roof: number; chimney: boolean; balcony: boolean; sign: number; door: number; flowers: boolean }
+interface HouseSpec { w: 4 | 6; floors: number; plaster: THREE.Color; shutter: THREE.Color; roof: number; chimney: boolean; balcony: boolean; sign: number; door: number; flowers: boolean; skyFront?: boolean }
 
-function house(kit: Kit, near: MergeBuffer, far: MergeBuffer, base: THREE.Matrix4, h: HouseSpec, rng: () => number, nearDetail: boolean): void {
+function house(kit: Kit, near: MergeBuffer, far: MergeBuffer, base: THREE.Matrix4, h: HouseSpec, rng: () => number, nearDetail: boolean): { thirdWindows: number; flowerBoxes: number } {
   const T = TOWN, n = h.w / 2, H = h.floors * T.storey, half = h.w / 2;
   const tints: Tints = { plaster: h.plaster, shutter: h.shutter, roof: h.roof };
+  let thirdWindows = 0, flowerBoxes = 0;
   const roof = h.w === 4 ? 'roof44' : 'roof46';
   const roofRot = h.w === 4 ? 0 : Math.PI / 2;
   for (const [mb, full] of [[near, nearDetail], [far, false]] as const) {
@@ -104,7 +126,14 @@ function house(kit: Kit, near: MergeBuffer, far: MergeBuffer, base: THREE.Matrix
         db.add(new THREE.BoxGeometry(0.08, 0.08, 0.06), [px + 0.36, y + 1.05, 1.91], T.gold);
         mb.geometry(db.build()!, base, TEX.PLANKS);
       }
-      if (full && f > 0 && h.flowers && piece === 'wallWin') flowerBox(mb, base, px, y + 1.02, 2.28, rng);
+      const windowPiece = piece === 'wallWin' || piece === 'wallWinThin';
+      const skyBox = !!h.skyFront && f === 2 && windowPiece && i % 2 === 0;
+      const normalBox = f > 0 && h.flowers && piece === 'wallWin' && !skyBox;
+      if (full && (skyBox || normalBox)) {
+        flowerBox(mb, base, px, y + 1.02, 2.28, rng);
+        if (f === 2) flowerBoxes++;
+      }
+      if (full && f === 2 && windowPiece) thirdWindows++;
       if (full && f === 1 && h.balcony && i === 0) mb.piece(kit, 'balcony', local(base, px, y, 2 - 0.09 - 0.9), tints);
     }
     if (full) {
@@ -115,6 +144,7 @@ function house(kit: Kit, near: MergeBuffer, far: MergeBuffer, base: THREE.Matrix
     mb.piece(kit, roof + (TOWN_LOD.fullRoofs ? '' : 'lite'), local(base, 0, H, 0, roofRot), tints);
     if (full && h.chimney) mb.piece(kit, 'chimney', local(base, half - 1, H + 0.6, -0.8, 0, [0.8, 0.8, 0.8]), tints);
   }
+  return { thirdWindows, flowerBoxes };
 }
 
 /**
@@ -207,6 +237,8 @@ export function buildTownChunk(kit: Kit, k: number, seed: number, ground: Ground
 function* townChunkSteps(kit: Kit, k: number, seed: number, ground: GroundFn, opts: ChunkOpts = {}): Generator<void, TownChunk> {
   const T = TOWN, L = T.chunk, x0 = k * L, x1 = x0 + L;
   const rng = mulberry((seed ^ Math.imul(k + 7919, 0x9e3779b1)) >>> 0);
+  const spans = skySpans(opts);
+  const plans: HousePlan[] = [];
   const y0 = level(ground, x0);
   const P = new Placer(x0, y0);
   const near = new MergeBuffer(), far = new MergeBuffer();
@@ -269,19 +301,23 @@ function* townChunkSteps(kit: Kit, k: number, seed: number, ground: GroundFn, op
         const base = P.at(cx, gy, lat, side > 0 ? TO_LEFT : TO_RIGHT);
         const tower = opts.clockTowers?.some((tx) => row === 1 && side < 0 && tx >= x && tx < x + w);
         if (tower) { clockTower(kit, near, far, base); x += w; yield; continue; }
-        const floors = row ? 2 + Math.floor(rng() * 3) : 2 + (rng() < 0.45 ? 1 : 0);
+        const floorRoll = rng();
+        const rolled = row ? 2 + Math.floor(floorRoll * 3) : 2 + (floorRoll < 0.45 ? 1 : 0);
+        const skyFront = row === 0 && inSkyFrontage(spans, x + w / 2);
+        const floors = skyFrontRowFloors(skyFront, rolled);
         const spec: HouseSpec = {
           w, floors, plaster: lin(pick(T.plaster)), shutter: lin(pick(T.shutter)), roof: 0.85 + rng() * 0.25,
           chimney: rng() < 0.45, balcony: rng() < 0.18, sign: row === 0 && rng() < 0.3 ? Math.floor(rng() * T.sign.length) : -1,
-          door: Math.floor(rng() * (w / 2)), flowers: rng() < 0.6,
+          door: Math.floor(rng() * (w / 2)), flowers: rng() < 0.6, skyFront,
         };
-        house(kit, near, far, base, spec, rng, row === 0);
+        const stats = house(kit, near, far, base, spec, rng, row === 0);
+        plans.push({ x0: x, x1: x + w, side, row, floors, thirdWindows: stats.thirdWindows, flowerBoxes: stats.flowerBoxes });
         x += w;
         yield;
       }
     }
   }
-  // street furniture (near LOD only): lamps on alternating sides, laundry across the street, market bits
+  // street furniture (near LOD only): lamps on alternating sides, crates, a stall. No cross-street laundry.
   for (let x = x0 + 4 + rng() * 6; x < x1; x += 13 + rng() * 6) {
     const s = rng() < 0.5 ? 1 : -1;
     if (s === 1 && harbour) continue;
@@ -297,7 +333,7 @@ function* townChunkSteps(kit: Kit, k: number, seed: number, ground: GroundFn, op
   if (harbour) yield* harbourChunk(kit, near, far, P, x0, x1, ground);
   const gn = yield* near.buildSteps();
   const gf = yield* far.buildSteps();
-  return { near: gn, far: gf, y0, trisNear: near.triangles, trisFar: far.triangles, flags: flags[0] ?? null };
+  return { near: gn, far: gf, y0, trisNear: near.triangles, trisFar: far.triangles, flags: flags[0] ?? null, plans, crossStreetLaundry: 0, buntingStrings: 0 };
 }
 
 /**

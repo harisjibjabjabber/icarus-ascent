@@ -160,7 +160,10 @@ export const TUNING = {
       gustCatchH: 2.5, gustDuration: 0.75, gustExitDx: 9, gustExitDy: 7.0,
       gustExitVx: 12, gustExitVy: 4,
       lineY: 6.4, speed: 14, speedTau: 0.4,
-      clusterHalf: 1.2, clusterRad: 0.7, rungRise: 1.0, landingClear: 25,
+      // Horizontal half covers the crown of the teardrop (about 4.5 m across)
+      // inside the vertical window. Vertical rad stays 0.7 because the rungs
+      // are only 1 m apart.
+      clusterHalf: 1.85, clusterRad: 0.7, rungRise: 1.0, landingClear: 25,
       camGustLag: 0.12, camSkyLag: 0.45, camSkyLift: 0.8,
     },
 

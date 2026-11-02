@@ -328,7 +328,22 @@ const fidgetLook: ClipDef = { name: 'fidgetLook', base: STANCE, dur: 2.6, keys: 
   { t: 2.6, pose: STANCE, ctl: { look: 1 } },
 ] };
 
-export const CLIPS: ClipDef[] = [idle, cruise, tuck, push, pop, airUp, airDown, float, grabL, grabR, flip, prep, grind, wall, skim,
+/** Gust catch: chest open, head up, arms swept back. The broom itself pitches 20° in the rider view. */
+const gust: ClipDef = { name: 'gust', base: STANCE, loop: true, dur: 0.8, keys: [
+  { t: 0, hips: [0.02, -0.04, -0.02], ikL: IKL, ikR: IKR, pose: m(
+    { hips: E(0.02, 0.16, -0.04), spine: E(-0.06, 0.08, 0.02), chest: E(-0.1, 0.06, 0), upperChest: E(-0.05, 0.04, 0), neck: E(-0.1, 0.14, 0), head: E(-0.16, 0.26, -0.08) },
+    arm('L', [0.18, 0.22, -0.82], 0.38, 0.15, [0, 0, 0.08]),
+    arm('R', [-0.22, 0.08, -0.78], 0.42, 0.12, [0, 0, 0.08]),
+    hand('L', OPEN), hand('R', RELAX),
+  ) },
+  { t: 0.4, hips: [0.03, -0.02, -0.03], pose: m(
+    { chest: E(-0.12, 0.08, 0.03), head: E(-0.2, 0.3, -0.12) },
+    arm('L', [0.28, 0.32, -0.68], 0.48, 0.25),
+    arm('R', [-0.12, 0.16, -0.88], 0.32, 0.1),
+  ) },
+] };
+
+export const CLIPS: ClipDef[] = [idle, cruise, tuck, push, pop, airUp, airDown, float, grabL, grabR, flip, prep, grind, wall, skim, gust,
   landClean, landBig, landFlip, landSketchy, flinch, crash, crashSit, respawn, finish, finishIdle, fidgetHip, fidgetHair, fidgetStretch, fidgetLook];
 export const FIDGETS = ['fidgetHip', 'fidgetHair', 'fidgetStretch', 'fidgetLook'];
 
@@ -339,7 +354,7 @@ export const FIDGETS = ['fidgetHip', 'fidgetHair', 'fidgetStretch', 'fidgetLook'
  */
 const AMP: Record<string, number> = {
   idle: 0.55, fidgetHip: 0.55, fidgetHair: 0.65, fidgetStretch: 0.6, fidgetLook: 0.55, cruise: 0.7, tuck: 0.8, push: 0.85,
-  pop: 0.65, airUp: 0.6, airDown: 0.6, float: 0.6, grabL: 0.8, grabR: 0.8, flip: 0.9, prep: 0.6, grind: 0.55, wall: 0.65, skim: 0.6,
+  pop: 0.65, airUp: 0.6, airDown: 0.6, float: 0.6, grabL: 0.8, grabR: 0.8, flip: 0.9, prep: 0.6, grind: 0.55, wall: 0.65, skim: 0.6, gust: 0.85,
   landClean: 0.6, landBig: 0.65, landFlip: 0.7, landSketchy: 0.6, flinch: 0.5, crash: 0.8, crashSit: 0.85, respawn: 0.6,
   finish: 0.65, finishIdle: 0.6,
 };

@@ -85,6 +85,8 @@ export interface SoftOpts {
   rim?: number;
   /** Geometry carries a `sway` attribute (foliage). */
   sway?: boolean;
+  /** Drop the surface when the camera is within about 4 m, so a passing garment never fills the frame. */
+  nearFade?: boolean;
   emissive?: THREE.ColorRepresentation;
   emissiveIntensity?: number;
   transparent?: boolean;
@@ -95,8 +97,9 @@ export function toon(color: THREE.ColorRepresentation, opts: SoftOpts = {}): THR
   const m = new THREE.MeshToonMaterial({
     color, gradientMap: toonRamp(), vertexColors: opts.vertexColors ?? false, side: opts.side ?? THREE.FrontSide,
     emissive: opts.emissive ?? 0x000000, emissiveIntensity: opts.emissiveIntensity ?? 1,
-    transparent: opts.transparent ?? false, opacity: opts.opacity ?? 1,
+    transparent: opts.transparent ?? !!opts.nearFade, opacity: opts.opacity ?? 1,
   });
+  if (opts.nearFade) m.depthWrite = false;
   const rim = ART.rim * (opts.rim ?? 1);
   m.onBeforeCompile = (sh) => {
     sh.uniforms.uRimColor = { value: ART.rimColor };
@@ -121,10 +124,14 @@ export function toon(color: THREE.ColorRepresentation, opts: SoftOpts = {}): THR
           vec3 vdir = normalize(vViewPosition);
           float rimF = pow(1.0 - clamp(dot(normal, vdir), 0.0, 1.0), 2.6);
           outgoingLight += uRimColor * rimF * uRim * (0.55 + 0.45 * diffuseColor.rgb);
+          ${opts.nearFade ? `float distCam = length(vViewPosition);
+          float nearF = smoothstep(4.8, 6.6, distCam);
+          if (nearF < 0.04) discard;
+          diffuseColor.a *= nearF;` : ''}
         }
         #include <opaque_fragment>`);
   };
   // programs are shared across materials; rim strength is a per-material uniform
-  m.customProgramCacheKey = () => `soft|${opts.sway ? 1 : 0}`;
+  m.customProgramCacheKey = () => `soft|${opts.sway ? 1 : 0}|${opts.nearFade ? 1 : 0}`;
   return m;
 }

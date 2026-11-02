@@ -8,7 +8,13 @@ import { townMaterial } from './town/kit';
 import type { Vector3 } from 'three';
 import { awningRamp, setPieceRamp, toon } from './materials';
 import { buildBuntingSpan } from './bunting';
-import { TOWN } from './town/town';
+import { setSkyDressingZones, TOWN } from './town/town';
+import { SKY_FIXTURE_INTRO } from '../course/skyFixture';
+import { overlapsSkyBand } from '../course/sky';
+import type { SkySegment, Tuft } from '../course/skyTypes';
+import { loadHotAirBalloon, mountBalloon, type BalloonMount } from './sky/balloons';
+import { TuftFx } from './sky/tuftFx';
+import { buildSkyLine } from './sky/skyLines';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { GeoBuilder, blob } from './geo';
 import { SET_ASSET, poseSoft, type SoftProp } from './setSlots';
@@ -118,7 +124,7 @@ function lineMat(color: string): THREE.LineBasicMaterial {
   return m as THREE.LineBasicMaterial;
 }
 
-interface ChunkView { chunk: Chunk; group: THREE.Group; pooled: { kind: 'pot' | 'pillar'; obj: THREE.Group }[]; wisps: Wisp[]; glints: THREE.Sprite[]; soft: SoftProp[] }
+interface ChunkView { chunk: Chunk; group: THREE.Group; pooled: { kind: 'pot' | 'pillar'; obj: THREE.Group }[]; wisps: Wisp[]; glints: THREE.Sprite[]; soft: SoftProp[]; skyTufts: TuftFx[]; skyBalloons: BalloonMount[] }
 
 /** One rising puff. Route metres, parented to its chunk so a rebase carries it. */
 interface Wisp {
@@ -163,12 +169,17 @@ export class CourseView {
   private clothMats = new Map<string, THREE.MeshToonMaterial>();
   /** Balloon shells with the floating weight removed. Shares the prop's vertex buffers. */
   private balloonShells = new WeakMap<THREE.BufferGeometry, THREE.BufferGeometry>();
+  private balloonSrc: THREE.Object3D | null = null;
+  /** Resolves once the hot-air envelope can be hung. */
+  readonly balloonsReady: Promise<void>;
   private glints: THREE.Sprite[] = [];
   private now = 0;
   private readonly orbView: OrbView;
   private pool: Record<'pot' | 'pillar', THREE.Group[]> = { pot: [], pillar: [] };
   private bx = 0;
   private by = 0;
+  /** Chunk currently being built, so sky art is owned by exactly one chunk. */
+  private building: Chunk | null = null;
   private signature = '';
   /** Diagnostics for memory tests: chunks built / disposed, pool sizes. */
   readonly stats = { built: 0, disposed: 0, pooledCreated: 0 };
@@ -199,6 +210,12 @@ export class CourseView {
       (window as unknown as { __props?: boolean }).__props = true;
     });
     this.loadSteam();
+    this.balloonsReady = loadHotAirBalloon().then((src) => {
+      this.balloonSrc = src;
+      for (const v of [...this.views.values()]) this.drop(v);
+      this.signature = '';
+      this.sync();
+    });
     this.sync();
   }
 
@@ -229,6 +246,7 @@ export class CourseView {
 
   /** Add meshes for new chunks and recycle those the course dropped. Cheap when nothing changed. */
   sync(): void {
+    this.publishSky();
     const cs = this.course.chunks;
     const sig = cs.length ? `${cs[0].id}:${cs[cs.length - 1].id}:${cs.length}:${this.propsGen}` : '';
     if (sig === this.signature) return;
@@ -261,15 +279,26 @@ export class CourseView {
       w.mat.uniforms.opacity.value = fade;
       w.mat.uniforms.sunDir.value.copy(this.sunView);
     }
-    for (const v of this.views.values()) for (const p of v.soft) poseSoft(p, time);
+    for (const v of this.views.values()) {
+      for (const p of v.soft) poseSoft(p, time);
+      for (const t of v.skyTufts) t.update(time);
+      for (const cl of v.skyBalloons) cl.update(time, cam);
+    }
     const glint = 0.15 + 0.035 * Math.sin(time * 3.2);
     for (const s of this.glints) s.scale.set(glint, glint, 1);
   }
 
-  /** The canvas, balloon or hull gives under her and springs back. Presentation only. */
+  /**
+   * A bounce pad gives under her. A sky balloon pops. Presentation only; the sim already bounced.
+   * Shop awnings share the soft list and their ids collide with bounce ids, so they are not pads.
+   */
   squashPad(id: number): void {
     for (const v of this.views.values()) {
-      const p = v.soft.find((s) => s.id === id);
+      const cl = v.skyBalloons.find((s) => s.bounceId === id);
+      if (cl) { cl.pop(this.now); return; }
+    }
+    for (const v of this.views.values()) {
+      const p = v.soft.find((s) => s.id === id && s.group.name === SET_ASSET.balloon);
       if (p) { p.hit = this.now; return; }
     }
   }
@@ -287,7 +316,8 @@ export class CourseView {
   private build(c: Chunk): void {
     const g = new THREE.Group();
     this.bx = c.x0; this.by = c.y0;
-    const v: ChunkView = { chunk: c, group: g, pooled: [], wisps: [], glints: [], soft: [] };
+    this.building = c;
+    const v: ChunkView = { chunk: c, group: g, pooled: [], wisps: [], glints: [], soft: [], skyTufts: [], skyBalloons: [] };
     const surfaces = c.surfaces.map((id) => this.course.findSurface(id)).filter((q): q is Surface => !!q);
     const lip: THREE.Vector3[] = [], edge: THREE.Vector3[] = [];
     for (const s of surfaces) { g.add(this.surfaceMesh(s)); this.lipLine(s, lip, edge); }
@@ -296,6 +326,7 @@ export class CourseView {
     for (const id of c.rails) g.add(this.railMesh(this.course.rail(id)));
     for (const id of c.walls) g.add(this.wallMesh(this.course.wall(id)));
     this.dressActivities(c, g, v);
+    this.dressSky(c, g, v);
     this.dressShopAwnings(c, g, v);
     if (typeof document !== 'undefined') for (const m of c.markers) g.add(this.marker(m.x, m.label));
     for (const id of c.obstacles) {
@@ -315,6 +346,8 @@ export class CourseView {
   }
 
   private drop(v: ChunkView): void {
+    for (const t of v.skyTufts) t.dispose();
+    for (const cl of v.skyBalloons) cl.dispose();
     for (const w of v.wisps) {
       w.mesh.removeFromParent();
       w.mat.dispose();
@@ -720,6 +753,7 @@ export class CourseView {
   private addBunting(parent: THREE.Group, r: Rail): void {
     const pts = r.points;
     const x0 = pts[0].x, x1 = pts[pts.length - 1].x;
+    if (overlapsSkyBand(this.skySegments(), x0, x1)) return;
     const len = Math.max(1, x1 - x0);
     const yAt = (x: number) => Course.railSample(r, Math.min(Math.max(x, x0), x1)).y;
     const facade = 4.65;
@@ -741,8 +775,8 @@ export class CourseView {
       return m;
     };
     const rm = join(rigid), cm = join(cloth);
-    if (rm) { const mesh = new THREE.Mesh(rm, vc(1.05)); mesh.castShadow = true; parent.add(mesh); }
-    if (cm) { const mesh = new THREE.Mesh(cm, this.buntingCloth); mesh.castShadow = true; parent.add(mesh); }
+    if (rm) { const mesh = new THREE.Mesh(rm, vc(1.05)); mesh.name = 'street-bunting'; mesh.userData.x0 = x0; mesh.userData.x1 = x1; mesh.castShadow = true; parent.add(mesh); }
+    if (cm) { const mesh = new THREE.Mesh(cm, this.buntingCloth); mesh.name = 'street-bunting'; mesh.userData.x0 = x0; mesh.userData.x1 = x1; mesh.castShadow = true; parent.add(mesh); }
   }
 
   /** Sourced garments only. An empty slot hangs nothing. */
@@ -799,7 +833,7 @@ export class CourseView {
     const iron: THREE.BufferGeometry[] = [];
     const glow: THREE.BufferGeometry[] = [];
     const pads = (c.bounces ?? []).map((id) => this.course.bounce(id)).filter((b): b is Bounce => !!b);
-    for (const b of pads) this.balloonDress(b, g, v);
+    for (const b of pads) if (!b.sky) this.balloonDress(b, g, v);
     for (const id of c.updrafts ?? []) { const u = this.course.updraft(id); if (u) this.updraftDress(u, g, v, iron); }
     const built = gb.build();
     if (built) { const mesh = new THREE.Mesh(built, vc(1.05)); mesh.castShadow = true; g.add(mesh); }
@@ -810,6 +844,117 @@ export class CourseView {
 
   private streetY(x: number, fallback: number): number {
     return this.course.groundBelow(x, 1e6)?.sample.y ?? fallback;
+  }
+
+  /** Segments to draw. Endless with nothing authored yet previews the T1 fixture. */
+  private skySegments(): SkySegment[] {
+    if (this.course.sky.length) return this.course.sky;
+    if (this.course.kind === 'endless') return [SKY_FIXTURE_INTRO];
+    return [];
+  }
+
+  private publishSky(): void {
+    setSkyDressingZones(this.skySegments().map((s) => ({ x0: s.x0, x1: s.x1 })));
+  }
+
+  /** True when x falls in this chunk and no smaller chunk also covers it. */
+  private ownsX(x: number): boolean {
+    const here = this.building;
+    if (!here || x < here.x0 - 1e-4 || x > here.x1 + 1e-4) return false;
+    let best = here;
+    let bestSpan = here.x1 - here.x0;
+    for (const c of this.course.chunks) {
+      if (c.id === here.id) continue;
+      if (x < c.x0 - 1e-4 || x > c.x1 + 1e-4) continue;
+      const span = c.x1 - c.x0;
+      if (span < bestSpan - 1e-4 || (Math.abs(span - bestSpan) <= 1e-4 && c.id < best.id)) {
+        best = c;
+        bestSpan = span;
+      }
+    }
+    return best.id === here.id;
+  }
+
+  private dressSky(c: Chunk, g: THREE.Group, v: ChunkView): void {
+    const place = (x: number, y: number, lat: number) => this.L(x, y, lat);
+    const segments = this.skySegments().filter((s) => s.x1 >= c.x0 - 1 && s.x0 <= c.x1 + 1);
+    const drawn = new Set<number>();
+    const clusterX: number[] = [];
+    for (const seg of segments) {
+      for (const tuft of this.tuftsFor(seg)) {
+        const cx = (tuft.x0 + tuft.x1) / 2;
+        if (!this.ownsX(cx)) continue;
+        const fx = new TuftFx({ place, x: cx, streetY: this.streetY(cx, tuft.yBase), seed: tuft.id + 17, lat: tuft.lateral });
+        g.add(fx.group);
+        v.skyTufts.push(fx);
+      }
+      for (const line of seg.lines) {
+        if (line.anchors.length < 2) continue;
+        const mid = (line.anchors[0].x + line.anchors[line.anchors.length - 1].x) / 2;
+        if (!this.ownsX(mid)) continue;
+        const rail = this.course.rails.find((r) => r.id === line.railId && r.sky);
+        const built = buildSkyLine({
+          place,
+          anchors: line.anchors,
+          streetY: (x) => this.streetY(x, seg.yBase),
+          sag: true,
+          quay: c.zone === 'harbour',
+          laundry: line.laundry,
+          proceduralLaundry: line.laundry,
+          yOf: (authored, x) => {
+            if (rail) {
+              const a = rail.points[0].x;
+              const b = rail.points[rail.points.length - 1].x;
+              return Course.railSample(rail, Math.min(Math.max(x, a), b)).y;
+            }
+            return authored - seg.yBase + this.streetY(x, seg.yBase);
+          },
+        });
+        if (!built) continue;
+        g.add(built.group);
+      }
+      for (const cluster of seg.clusters) {
+        if (!this.ownsX(cluster.tether.x)) continue;
+        drawn.add(cluster.bounceId);
+        clusterX.push(cluster.tether.x);
+        const street = this.streetY(cluster.tether.x, seg.yBase);
+        const y = cluster.tether.y - seg.yBase + street;
+        if (!this.balloonSrc) continue;
+        const fx = mountBalloon(this.balloonSrc, {
+          place, x: cluster.tether.x, y, seed: cluster.seed,
+          bounceId: cluster.bounceId, tether: cluster.tether, streetY: street,
+          quay: c.zone === 'harbour',
+          steam: () => this.steamTex,
+        });
+        g.add(fx.group);
+        v.skyBalloons.push(fx);
+      }
+    }
+    for (const id of c.bounces ?? []) {
+      const b = this.course.bounce(id);
+      if (!b?.sky || drawn.has(b.id) || !this.ownsX(b.x)) continue;
+      if (clusterX.some((x) => Math.abs(x - b.x) < 0.75)) continue;
+      const street = this.streetY(b.x, b.y - 2);
+      if (!this.balloonSrc) continue;
+      const fx = mountBalloon(this.balloonSrc, {
+        place, x: b.x, y: b.y, seed: b.id * 17 + 3,
+        bounceId: b.id, tether: { x: b.x, y: b.y, lateral: 0, kind: 'bracket-right' },
+        streetY: street, quay: c.zone === 'harbour',
+        steam: () => this.steamTex,
+      });
+      g.add(fx.group);
+      v.skyBalloons.push(fx);
+    }
+  }
+
+  private tuftsFor(seg: SkySegment): Tuft[] {
+    const found = this.course.tufts.filter((t) => t.segmentId === seg.id || t.id === seg.tuftId);
+    if (found.length) return found;
+    if (this.course.tufts.length) return [];
+    return [{
+      id: seg.tuftId, x0: seg.gx, x1: seg.gx + 3, yBase: seg.yBase, catchH: 2.5,
+      exitX: seg.gx + 9, exitY: seg.yBase + 7, lateral: 0, source: 'grate', segmentId: seg.id,
+    }];
   }
 
   /** Hanging rope in route metres. Sag is the dip at mid-span. */

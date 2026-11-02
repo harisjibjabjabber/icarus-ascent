@@ -113,9 +113,11 @@ export class RiderView {
     this.lateral += (targetLateral - this.lateral) * ease(targetLateral !== 0 ? 14 : 4);
     toScene(x, y, this.lateral, this.root.position);
 
-    const airborne = s.mode === 'airborne' || s.mode === 'flying' || s.mode === 'gusting';
-    // board pitch: follow the contact on the ground/rail, ease toward a gentle flight attitude in the air
-    const target = airborne ? Math.max(-0.6, Math.min(0.6, Math.atan2(s.vy, Math.max(4, s.speed)) * 0.6)) : angle;
+    const gusting = s.mode === 'gusting';
+    const airborne = s.mode === 'airborne' || s.mode === 'flying' || gusting;
+    // board pitch: follow the contact on the ground/rail, ease toward a gentle flight attitude in the air.
+    // A gust lifts the nose 20° so the column reads as a catch, not a jump.
+    const target = gusting ? (20 * Math.PI) / 180 : airborne ? Math.max(-0.6, Math.min(0.6, Math.atan2(s.vy, Math.max(4, s.speed)) * 0.6)) : angle;
     this.boardAngle += (target - this.boardAngle) * ease(airborne ? 6 : 25);
     // heel skim: nose lifts, rider leans back
     // (the return is softer than the lift so the skim exit eases back to the cruise instead of snapping)
@@ -201,8 +203,9 @@ export class RiderView {
     for (let i = 0; i < 2; i++) {
       const sz = i === 0 ? -1 : 1;
       const base = 0.45 + air * 0.7 + (s.mode === 'grinding' ? 0.5 : 0);
-      this.arms[i].rotation.x = -sz * (base * (1 - reach) + 0.15 * reach) + Math.sin(this.t * 3 + i) * 0.05;
-      this.arms[i].rotation.z = reach * 0.9; // reach down toward the board
+      const gust = s.mode === 'gusting' ? 1 : 0;
+      this.arms[i].rotation.x = -sz * (base * (1 - reach) + 0.15 * reach) * (1 - gust) + gust * (-0.35) + Math.sin(this.t * 3 + i) * 0.05;
+      this.arms[i].rotation.z = reach * 0.9 + gust * sz * 0.9; // reach down toward the board; swept back in a gust
     }
   }
 
