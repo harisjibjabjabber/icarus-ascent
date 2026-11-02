@@ -12,14 +12,17 @@ import { toon } from '../materials';
  * balloon once. It does not come back.
  */
 
-/** Envelope width. The crown is the top of this sphere. */
-export const ENVELOPE_DIAMETER = 5.5;
+/** Envelope width. The crown is the top of the teardrop, about 1.2× this tall. */
+export const ENVELOPE_DIAMETER = 4.5;
+const ENVELOPE_ASPECT = 1.2;
 
 const TERRACOTTA = '#c96a42';
-const DEEP_TEAL = '#1a645e';
+const DEEP_TEAL = '#3d8c8a';
+const MUSTARD = '#c6a04a';
+const COLOURWAYS = [TERRACOTTA, DEEP_TEAL, MUSTARD];
 const CREAM = '#f6efe2';
 const INSIDE = '#2a242c';
-const WICKER = '#a8743c';
+const WICKER = '#6e4224';
 const INK = '#2a1a14';
 
 const SQUASH_S = 0.08;
@@ -84,8 +87,101 @@ function inflate(geo: THREE.BufferGeometry, meters: number): THREE.BufferGeometr
   return g;
 }
 
+/**
+ * Radius of a classic envelope, 0 at the mouth and 1 at the crown.
+ * Round dome on top, full through the upper half, then a long throat
+ * that is already narrower than the basket for the bottom metre.
+ */
+function envelopeProfile(t: number): number {
+  const u = Math.min(1, Math.max(0, t));
+  const mouth = 0.09;
+  const shoulder = 0.52;
+  if (u >= 0.78) {
+    const s = (u - 0.78) / 0.22;
+    return Math.sqrt(Math.max(0, 1 - s * s));
+  }
+  if (u >= shoulder) return 1;
+  const s = u / shoulder;
+  return mouth + (1 - mouth) * Math.pow(s, 1.75);
+}
+
+interface EnvelopeShape {
+  mouthY: number;
+  mouthR: number;
+  crownY: number;
+}
+
+/** Pull the Grab3D ball into a teardrop. Geometries are cloned so the template stays put. */
+function shapeEnvelope(envelope: THREE.Object3D, owned: THREE.BufferGeometry[]): EnvelopeShape {
+  const meshes: THREE.Mesh[] = [];
+  envelope.traverse((o) => { if ((o as THREE.Mesh).isMesh) meshes.push(o as THREE.Mesh); });
+  let minY = Infinity;
+  let maxY = -Infinity;
+  let maxR = 0;
+  for (const mesh of meshes) {
+    const g = mesh.geometry.clone();
+    mesh.geometry = g;
+    owned.push(g);
+    const p = g.getAttribute('position');
+    for (let i = 0; i < p.count; i++) {
+      const y = p.getY(i);
+      const r = Math.hypot(p.getX(i), p.getZ(i));
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+      if (r > maxR) maxR = r;
+    }
+  }
+  const height0 = Math.max(1e-4, maxY - minY);
+  let shapedMaxR = 0;
+  for (const mesh of meshes) {
+    const p = mesh.geometry.getAttribute('position');
+    for (let i = 0; i < p.count; i++) {
+      const y = p.getY(i);
+      const x = p.getX(i);
+      const z = p.getZ(i);
+      const r = Math.hypot(x, z);
+      if (r < 1e-3) continue;
+      const t = (y - minY) / height0;
+      const want = envelopeProfile(t) * maxR;
+      const k = want / r;
+      p.setXYZ(i, x * k, y, z * k);
+      if (want > shapedMaxR) shapedMaxR = want;
+    }
+    p.needsUpdate = true;
+  }
+  const width = Math.max(1e-4, shapedMaxR * 2);
+  let yMin = Infinity;
+  let yMax = -Infinity;
+  for (const mesh of meshes) {
+    const p = mesh.geometry.getAttribute('position');
+    for (let i = 0; i < p.count; i++) {
+      yMin = Math.min(yMin, p.getY(i));
+      yMax = Math.max(yMax, p.getY(i));
+    }
+  }
+  const yMul = (ENVELOPE_ASPECT * width) / Math.max(1e-4, yMax - yMin);
+  const crown = yMax;
+  const mouthY = crown - (crown - yMin) * yMul;
+  const band = (crown - mouthY) * 0.04;
+  let mouthR = 0;
+  for (const mesh of meshes) {
+    const p = mesh.geometry.getAttribute('position');
+    for (let i = 0; i < p.count; i++) {
+      const y = crown - (crown - p.getY(i)) * yMul;
+      p.setY(i, y);
+      const r = Math.hypot(p.getX(i), p.getZ(i));
+      if (y < mouthY + band && r > mouthR) mouthR = r;
+    }
+    p.needsUpdate = true;
+    mesh.geometry.computeVertexNormals();
+    mesh.geometry.computeBoundingBox();
+    mesh.geometry.computeBoundingSphere();
+  }
+  return { mouthY, mouthR: Math.max(0.45, mouthR), crownY: crown };
+}
+
 function paint(root: THREE.Object3D, seed: number, inkMeters: number): { envelope: THREE.Object3D; mats: THREE.Material[]; owned: THREE.BufferGeometry[] } {
-  const accent = hash(seed) < 0.5 ? TERRACOTTA : DEEP_TEAL;
+  const accent = COLOURWAYS[Math.min(COLOURWAYS.length - 1, Math.floor(hash(seed) * COLOURWAYS.length))];
   const envelope = root.getObjectByName('hot-air-balloon_envelope');
   const body = root.getObjectByName('hot-air-balloon_body');
   if (!envelope || !body) throw new Error('hot-air balloon is missing its envelope');
@@ -169,39 +265,53 @@ function steamMaterial(map: THREE.Texture): THREE.ShaderMaterial {
 const HEMP = '#e7c98a';
 
 /**
- * The 3k envelope is taller than the low rungs, so the stock basket sits under
- * the street. Seat it just beneath the bulge, clear of the ground, on the
- * camera side of the throat, and tie it back on with hemp ropes. The LOD
- * dropped the cords.
+ * The stock basket sits under the street once the envelope is scaled.
+ * Scale the wicker up to about 1.2 m, hang the rim just under the mouth,
+ * and ease it toward the chase camera so the basket and ropes read below
+ * the pinch instead of inside the throat.
  */
-function hangBasket(body: THREE.Object3D, root: THREE.Object3D, crownLocal: number, scale: number, streetRel: number, mats: THREE.Material[], owned: THREE.BufferGeometry[]): void {
-  const bulge = (8.1 - crownLocal) * scale;
-  const bottom = Math.max(streetRel + 0.42, bulge - 1.05);
-  body.position.y += bottom / scale + crownLocal;
-  // Far enough toward the chase camera that the wicker clears the envelope's silhouette.
-  body.position.z += 1.65 / scale;
+function hangBasket(body: THREE.Object3D, root: THREE.Object3D, shape: EnvelopeShape, scale: number, streetRel: number, mats: THREE.Material[], owned: THREE.BufferGeometry[]): void {
+  // Grab3D body: wicker is y 0–1.19 (about 1.47 wide), burner sits above 2.6.
+  const wickerTop = 1.19;
+  const localW = 1.47;
+  // Wide and shallow, so the hamper sits under the pinch instead of up inside it.
+  const sx = 1.2 / (localW * scale);
+  let sy = 0.58 / (wickerTop * scale);
+  const rimY = shape.mouthY - 0.02 / scale;
+  const streetBottom = (streetRel + 0.14) / scale + shape.crownY;
+  if (rimY - wickerTop * sy < streetBottom) {
+    sy = Math.max(0.34 / (wickerTop * scale), (rimY - streetBottom) / wickerTop);
+  }
+  body.scale.set(sx, sy, sx);
+  // Rim stays at the mouth. +Z is toward the chase camera (the route runs −Z).
+  body.position.y += rimY - wickerTop * sy;
+  body.position.z += 0.45 / scale;
   const hemp = toon(HEMP, { rim: 0.35, emissive: '#f3ddb0', emissiveIntensity: 0.72 });
   hemp.transparent = true;
   hemp.name = 'hot-air-rope';
   mats.push(hemp);
   const inkMat = mats[0];
+  const half = (localW * 0.5) * sx * 0.78;
+  const lip = body.position.y + wickerTop * sy;
+  const z0 = body.position.z;
   const rim = [
-    [-0.62, 1.05, -0.42],
-    [0.62, 1.05, -0.42],
-    [0.58, 1.05, 0.5],
-    [-0.58, 1.05, 0.5],
+    [-half, lip, z0 - half * 0.72],
+    [half, lip, z0 - half * 0.72],
+    [half * 0.86, lip, z0 + half * 0.78],
+    [-half * 0.86, lip, z0 + half * 0.78],
   ];
   const up = new THREE.Vector3(0, 1, 0);
+  const throat = Math.max(0.35, shape.mouthR * 0.82);
   for (const r of rim) {
-    const a = new THREE.Vector3(r[0], r[1], r[2]).add(body.position);
-    const dir = new THREE.Vector3(r[0], 0, r[2] + body.position.z);
+    const a = new THREE.Vector3(r[0], r[1], r[2]);
+    const dir = new THREE.Vector3(r[0], 0, r[2] - z0);
     if (dir.lengthSq() < 1e-4) dir.set(0, 0, 1);
-    dir.normalize().multiplyScalar(4.6);
-    const b = new THREE.Vector3(dir.x, 7.5, dir.z);
+    dir.normalize().multiplyScalar(throat);
+    const b = new THREE.Vector3(dir.x, shape.mouthY + 0.08, dir.z);
     const span = b.clone().sub(a);
     const len = Math.max(0.2, span.length());
     const mid = a.clone().add(b).multiplyScalar(0.5);
-    const q = new THREE.Quaternion().setFromUnitVectors(up, span.multiplyScalar(1 / len));
+    const q = new THREE.Quaternion().setFromUnitVectors(up, span.clone().multiplyScalar(1 / len));
     const geo = new THREE.CylinderGeometry(0.02 / scale, 0.02 / scale, len, 5);
     const rope = new THREE.Mesh(geo, hemp);
     rope.name = 'sky-balloon-rope';
@@ -238,21 +348,27 @@ export function mountBalloon(source: THREE.Object3D, opts: {
   steam?: () => THREE.Texture[];
 }): BalloonMount {
   const root = source.clone(true);
-  root.updateMatrixWorld(true);
+  const owned: THREE.BufferGeometry[] = [];
   const envNode = root.getObjectByName('hot-air-balloon_envelope');
   if (!envNode) throw new Error('hot-air balloon is missing its envelope');
+  const shaped = shapeEnvelope(envNode, owned);
+  root.updateMatrixWorld(true);
   const box = new THREE.Box3().setFromObject(envNode);
   const size = box.getSize(new THREE.Vector3());
   const diameter = Math.max(size.x, size.z);
   const scale = ENVELOPE_DIAMETER / Math.max(1e-4, diameter);
-  const { envelope, mats, owned } = paint(root, opts.seed, 0.012 / scale);
+  const painted = paint(root, opts.seed, 0.012 / scale);
+  const { envelope, mats } = painted;
+  owned.push(...painted.owned);
   root.scale.setScalar(scale);
   root.position.y = -box.max.y * scale;
   const bodyNode = root.getObjectByName('sky-balloon-body');
-  if (bodyNode) hangBasket(bodyNode, root, box.max.y, scale, opts.streetY - opts.y, mats, owned);
+  if (bodyNode) hangBasket(bodyNode, root, shaped, scale, opts.streetY - opts.y, mats, owned);
 
   const rig = new THREE.Group();
   rig.name = 'sky-balloon-rig';
+  rig.rotation.x = (hash(opts.seed + 4) - 0.5) * 0.16;
+  rig.rotation.z = (hash(opts.seed + 9) - 0.5) * 0.14;
   rig.add(root);
 
   const group = new THREE.Group();
@@ -260,7 +376,7 @@ export function mountBalloon(source: THREE.Object3D, opts: {
   group.userData = {
     bounceId: opts.bounceId,
     diameter: ENVELOPE_DIAMETER,
-    height: (box.max.y - box.min.y) * scale,
+    height: size.y * scale,
     lateral: 0,
     popped: false,
     spent: false,

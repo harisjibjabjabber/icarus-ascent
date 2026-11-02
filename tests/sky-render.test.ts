@@ -36,8 +36,8 @@ describe('sky layer art', () => {
     const balloons = named(root, 'sky-balloon');
     expect(balloons.length).toBe(SKY_FIXTURE_INTRO.clusters.length);
     for (const b of balloons) {
-      expect(b.userData.diameter).toBeGreaterThanOrEqual(5);
-      expect(b.userData.diameter).toBeLessThanOrEqual(6);
+      expect(b.userData.diameter).toBeGreaterThanOrEqual(4.3);
+      expect(b.userData.diameter).toBeLessThanOrEqual(4.7);
       expect(b.userData.lateral).toBe(0);
       const env = b.getObjectByName('sky-balloon-envelope') as THREE.Object3D;
       expect(env).toBeTruthy();

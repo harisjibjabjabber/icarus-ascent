@@ -18,7 +18,6 @@ const IRON = '#3b3440';
 const IRON_LIT = '#6e6578';
 
 const ironMat = toon('#ffffff', { vertexColors: true, rim: 0.55 });
-const starMat = toon('#d9a441', { emissive: '#a86a18', emissiveIntensity: 0.45 });
 const leafMat = toon('#ffffff', { side: THREE.DoubleSide, rim: 0.55 });
 
 let ribbonMat: THREE.ShaderMaterial | null = null;
@@ -54,39 +53,10 @@ function ribbons(): THREE.ShaderMaterial {
         col += vec3(0.16) * gleam * smoothstep(0.18, 0.4, d);
         float edge = smoothstep(0.0, 0.035, d);
         float ends = smoothstep(0.0, 0.02, vUv.x) * smoothstep(1.0, 0.97, vUv.x);
-        gl_FragColor = vec4(col, 0.8 * edge * ends);
+        gl_FragColor = vec4(col, 0.4 * edge * ends);
       }`,
   });
   return ribbonMat;
-}
-
-let hazeMat: THREE.ShaderMaterial | null = null;
-function haze(): THREE.ShaderMaterial {
-  if (hazeMat) return hazeMat;
-  hazeMat = new THREE.ShaderMaterial({
-    uniforms: { uTime: ART_UNIFORMS.uTime },
-    transparent: true,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
-    side: THREE.DoubleSide,
-    vertexShader: `
-      uniform float uTime;
-      varying vec2 vUv;
-      void main() {
-        vUv = uv;
-        vec3 p = position;
-        p += normal * sin(uv.x * 1.4 + uTime * 1.6) * 0.08;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
-      }`,
-    fragmentShader: `
-      varying vec2 vUv;
-      void main() {
-        float edge = smoothstep(0.0, 0.18, vUv.y) * smoothstep(1.0, 0.82, vUv.y);
-        float ends = smoothstep(0.0, 0.04, vUv.x) * smoothstep(1.0, 0.94, vUv.x);
-        gl_FragColor = vec4(1.0, 0.96, 0.86, 0.28 * edge * ends);
-      }`,
-  });
-  return hazeMat;
 }
 
 function shapeGeo(build: (s: THREE.Shape) => void): THREE.BufferGeometry {
@@ -147,9 +117,9 @@ export class TuftFx {
   readonly group = new THREE.Group();
   private clouds: { mesh: THREE.InstancedMesh; motes: Mote[] }[] = [];
   private dust: THREE.Mesh;
+  private dustB: THREE.Mesh;
   private dustMat: THREE.MeshBasicMaterial;
-  private glowMat: THREE.MeshBasicMaterial;
-  private stars: THREE.Object3D[] = [];
+  private dustMatB: THREE.MeshBasicMaterial;
   private origin: THREE.Vector3;
   private dir: THREE.Vector3;
   private side: THREE.Vector3;
@@ -174,22 +144,22 @@ export class TuftFx {
     this.bin = new THREE.Vector3().crossVectors(this.dir, this.side).normalize();
 
     this.grate(place, x, streetY, lat0);
+    // Five thin streaks. The column stays inside about 2 m so the street still reads.
     const specs: RibbonSpec[] = [
-      { rad0: 0.2, rad1: 0.85, width: 0.55, revs: 0.45, phase: 0.3 },
-      { rad0: 0.4, rad1: 1.25, width: 0.48, revs: 0.7, phase: 2.0 },
-      { rad0: 0.7, rad1: 1.75, width: 0.62, revs: 1.05, phase: 0.8 },
-      { rad0: 1.0, rad1: 2.25, width: 0.55, revs: 0.65, phase: 3.3 },
-      { rad0: 0.35, rad1: 1.5, width: 0.46, revs: 1.45, phase: 4.5 },
-      { rad0: 1.25, rad1: 2.45, width: 0.52, revs: 0.9, phase: 5.4 },
+      { rad0: 0.12, rad1: 1.15, width: 0.07, revs: 0.55, phase: 0.4 },
+      { rad0: 0.28, rad1: 1.55, width: 0.055, revs: 0.9, phase: 1.8 },
+      { rad0: 0.18, rad1: 1.85, width: 0.08, revs: 1.2, phase: 3.1 },
+      { rad0: 0.4, rad1: 1.4, width: 0.06, revs: 0.7, phase: 4.5 },
+      { rad0: 0.22, rad1: 1.7, width: 0.075, revs: 1.45, phase: 5.6 },
     ];
     for (const spec of specs) this.addRibbon(spec, ribbons());
-    this.addRibbon({ rad0: 0.15, rad1: 1.3, width: 0.7, revs: 0.22, phase: 0.5 }, haze());
 
-    this.clouds.push(this.motes(leafShape(), 40, seed, LEAF, 'sky-tuft-motes', 0.35, 2.1, 0.62, 1.15, 1.5));
-    this.clouds.push(this.motes(petalShape(), 26, seed + 90, PETAL, 'sky-tuft-petals', 0.2, 1.7, 0.42, 0.82, 1.8));
+    this.clouds.push(this.motes(leafShape(), 6, seed, LEAF, 'sky-tuft-motes', 0.2, 1.55, 0.32, 0.52, 1.3));
+    this.clouds.push(this.motes(petalShape(), 5, seed + 90, PETAL, 'sky-tuft-petals', 0.15, 1.35, 0.22, 0.38, 1.6));
 
-    this.dustMat = new THREE.MeshBasicMaterial({ color: '#fff1d0', transparent: true, opacity: 0.7, depthWrite: false, side: THREE.DoubleSide });
-    const ring = new THREE.RingGeometry(0.85, 4.1, 36);
+    this.dustMat = new THREE.MeshBasicMaterial({ color: '#e4d2b0', transparent: true, opacity: 0.22, depthWrite: false, side: THREE.DoubleSide });
+    this.dustMatB = new THREE.MeshBasicMaterial({ color: '#efe0c4', transparent: true, opacity: 0.16, depthWrite: false, side: THREE.DoubleSide });
+    const ring = new THREE.RingGeometry(0.38, 0.52, 28);
     ring.rotateX(-Math.PI / 2);
     this.dust = new THREE.Mesh(ring, this.dustMat);
     this.dust.name = 'sky-tuft-dust';
@@ -197,22 +167,15 @@ export class TuftFx {
     this.dust.renderOrder = 2;
     this.dust.frustumCulled = false;
     this.group.add(this.dust);
+    const ringB = new THREE.RingGeometry(0.72, 0.84, 32);
+    ringB.rotateX(-Math.PI / 2);
+    this.dustB = new THREE.Mesh(ringB, this.dustMatB);
+    this.dustB.name = 'sky-tuft-dust';
+    this.dustB.position.copy(place(x, streetY + 0.04, lat0));
+    this.dustB.renderOrder = 2;
+    this.dustB.frustumCulled = false;
+    this.group.add(this.dustB);
 
-    this.glowMat = new THREE.MeshBasicMaterial({ color: '#ffe7b0', transparent: true, opacity: 0.8, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
-    const glow = new THREE.Mesh(new THREE.CircleGeometry(3.8, 24), this.glowMat);
-    glow.rotation.x = -Math.PI / 2;
-    glow.position.copy(place(x, streetY + 0.05, lat0));
-    glow.renderOrder = 2;
-    glow.name = 'sky-tuft-glow';
-    this.group.add(glow);
-
-    for (let i = 0; i < 4; i++) {
-      const star = new THREE.Mesh(new THREE.OctahedronGeometry(0.22, 0), starMat);
-      star.name = 'sky-tuft-star';
-      star.castShadow = true;
-      this.stars.push(star);
-      this.group.add(star);
-    }
     this.update(0);
   }
 
@@ -344,25 +307,14 @@ export class TuftFx {
       mesh.instanceMatrix.needsUpdate = true;
     }
 
-    const cycle = 0.7;
-    const u = (time % cycle) / cycle;
-    const s = 0.85 + u * 1.8;
-    this.dust.scale.set(s, s, s);
-    this.dustMat.opacity = 0.7 * (1 - u * 0.85);
-    this.glowMat.opacity = 0.62 + 0.16 * Math.sin(time * 3.2);
-
-    for (let i = 0; i < this.stars.length; i++) {
-      const along = this.length * (0.55 + i * 0.1);
-      const ang = time * 0.9 + i * 1.7;
-      this.point(along, ang, 0.45 + i * 0.15, this.p);
-      this.p.y += Math.sin(time * 2 + i) * 0.1;
-      this.stars[i].position.copy(this.p);
-      this.stars[i].rotation.y = time * 0.8 + i;
-    }
+    this.dust.rotation.y = time * 0.8;
+    this.dustB.rotation.y = -time * 0.55;
+    this.dustMat.opacity = 0.16 + 0.08 * Math.sin(time * 1.4);
+    this.dustMatB.opacity = 0.1 + 0.06 * Math.sin(time * 1.1 + 1);
   }
 
   dispose(): void {
     this.dustMat.dispose();
-    this.glowMat.dispose();
+    this.dustMatB.dispose();
   }
 }

@@ -21,14 +21,14 @@ const WOOD_DARK = '#6e4a2c';
 const STONE = '#b9a796';
 const STONE_LIT = '#e6d7c6';
 const INK = '#2a1a14';
-const DYES = ['#fff8ee', '#c96a42', '#3f8f8a', '#d9a441', '#a99ad0'];
+const DYES = ['#efe4d2', '#c48b6a', '#6e9084', '#c6a15a', '#8e8aa8', '#d8c6b0', '#7f93a6'];
 
 const Y_UP = new THREE.Vector3(0, 1, 0);
 const ropeMat = toon('#ffffff', { vertexColors: true, rim: 0.75 });
 /** The rideable rope stays hemp-coloured even in the toon shadow band. */
 const hempMat = toon(HEMP, { rim: 0.2, emissive: '#f3ddb0', emissiveIntensity: 0.72 });
-const clothMat = toon('#ffffff', { vertexColors: true, side: THREE.DoubleSide, sway: true, rim: 0.85 });
-const clothInk = toon(INK, { sway: true, side: THREE.FrontSide });
+const clothMat = toon('#ffffff', { vertexColors: true, side: THREE.DoubleSide, sway: true, rim: 0.85, nearFade: true });
+const clothInk = toon(INK, { sway: true, side: THREE.FrontSide, nearFade: true });
 clothInk.polygonOffset = true;
 clothInk.polygonOffsetFactor = 1;
 clothInk.polygonOffsetUnits = 1;
@@ -93,13 +93,14 @@ function appendGrid(
   xAt: (u: number, v: number) => number,
   colorAt: (u: number, v: number) => THREE.Color,
   foldAt: (u: number, v: number) => number,
+  sagAt: (u: number, v: number) => number = () => 0,
 ): void {
   const base = pos.length / 3;
   for (let j = 0; j <= rows; j++) {
     const v = j / rows;
     for (let i = 0; i <= cols; i++) {
       const u = i / cols;
-      pos.push(xAt(u, v), -v * height, foldAt(u, v));
+      pos.push(xAt(u, v), -v * height + sagAt(u, v), foldAt(u, v));
       const c = colorAt(u, v);
       if (j === rows || i === 0 || i === cols) c.multiplyScalar(0.72);
       col.push(c.r, c.g, c.b);
@@ -124,57 +125,134 @@ function finishCloth(pos: number[], col: number[], sway: number[], idx: number[]
   return g;
 }
 
-/** Sheet, shirt, dress, a pair of socks, striped towel. Origin is the peg; cloth hangs in −Y. */
+/** Small sheet, shirt, gingham dress, trousers, striped socks. Origin is the peg; cloth hangs in −Y. Each piece is 0.4–1.0 m. */
 function clothGeometry(kind: number): THREE.BufferGeometry {
   const pos: number[] = [];
   const col: number[] = [];
   const sway: number[] = [];
   const idx: number[] = [];
-  const fold = (u: number, v: number, amp: number, waves: number) => Math.sin(u * Math.PI * waves) * amp * (0.2 + v);
-  if (kind === 3) {
+  const fold = (u: number, v: number, amp: number, waves: number) => Math.sin(u * Math.PI * waves) * amp * (0.35 + v);
+  const hem = (u: number, v: number, amp: number) => -Math.sin(u * Math.PI) * amp * v * v;
+  const neck = (u: number, v: number) => (v < 0.14 ? -Math.cos((u - 0.5) * Math.PI) * 0.055 * (1 - v / 0.14) : 0);
+  if (kind === 1) {
+    // Torso, then a sleeve each side so the silhouette is a shirt even from the chase camera.
+    appendGrid(pos, col, sway, idx, 8, 12, 0.74,
+      (u, v) => {
+        const chest = v < 0.16 ? 0.2 : 0.155 + 0.035 * Math.sin(Math.min(1, v) * Math.PI);
+        return (u - 0.5) * 2 * chest;
+      },
+      (u, v) => shade(v, Math.abs(u - 0.5) < 0.08 ? 0.12 : Math.abs(u - 0.5) * 0.06),
+      (u, v) => fold(u, v, 0.03, 2),
+      (u, v) => hem(u, v, 0.045) + neck(u, v));
     for (const side of [-1, 1]) {
-      appendGrid(pos, col, sway, idx, 3, 8, 0.55,
-        (u, v) => side * (0.1 + u * 0.16) + (v > 0.82 ? side * 0.02 : 0),
-        (u, v) => shade(v, 0.08 * (1 - u)),
-        (u, v) => fold(u, v, 0.02, 1));
+      appendGrid(pos, col, sway, idx, 6, 4, 0.2,
+        (u, v) => side * (0.15 + u * 0.3 + v * 0.02),
+        (u, v) => {
+          const c = shade(0.15 + v * 0.3, 0.04);
+          if (u > 0.78) c.multiplyScalar(0.78);
+          return c;
+        },
+        (u, v) => Math.sin(u * Math.PI) * 0.02 * (0.4 + v),
+        (u, v) => -0.02 - v * 0.05 + Math.sin(u * Math.PI) * 0.008);
+    }
+  } else if (kind === 2) {
+    appendGrid(pos, col, sway, idx, 10, 16, 0.92,
+      (u, v) => {
+        const flare = v < 0.26 ? 0.15 + v * 0.12 : 0.18 + Math.pow((v - 0.26) / 0.74, 1.2) * 0.3;
+        return (u - 0.5) * 2 * Math.min(0.47, flare);
+      },
+      (u, v) => {
+        const c = shade(v, Math.abs(u - 0.5) * 0.05);
+        const check = (Math.floor(u * 7) + Math.floor(v * 10)) % 2 === 0;
+        if (!check) c.multiplyScalar(0.55);
+        if (v < 0.26) c.multiplyScalar(0.92);
+        return c;
+      },
+      (u, v) => fold(u, v, v < 0.26 ? 0.015 : 0.04, 2),
+      (u, v) => hem(u, v, 0.06) + neck(u, v));
+  } else if (kind === 3) {
+    appendGrid(pos, col, sway, idx, 6, 2, 0.1,
+      (u) => (u - 0.5) * 0.56,
+      (u, v) => shade(v, Math.abs(u - 0.5) * 0.04),
+      (u, v) => fold(u, v, 0.012, 1),
+      () => 0);
+    for (const side of [-1, 1]) {
+      appendGrid(pos, col, sway, idx, 4, 12, 0.76,
+        (u, v) => side * (0.07 + u * 0.2 + (v > 0.82 ? 0.015 : 0)),
+        (u, v) => shade(v, Math.abs(u - 0.5) * 0.07 + (v > 0.9 ? 0.08 : 0)),
+        (u, v) => fold(u, v, 0.02, 1),
+        (u, v) => -0.1 + hem(u, v, 0.04));
     }
   } else if (kind === 4) {
-    const cream = new THREE.Color('#fff8ee');
-    const band = new THREE.Color('#c96a42');
-    appendGrid(pos, col, sway, idx, 6, 12, 1.05,
-      (u, v) => (u - 0.5) * 0.62 * (1 - v * 0.04),
-      (u, v) => {
-        const stripe = Math.floor(v * 8) % 2 === 0 ? cream : band;
-        return stripe.clone().multiplyScalar(0.78 + 0.22 * (1 - v) - Math.abs(u - 0.5) * 0.08);
-      },
-      (u, v) => fold(u, v, 0.035, 2));
-  } else if (kind === 1) {
-    appendGrid(pos, col, sway, idx, 10, 10, 0.84,
-      (u, v) => {
-        const sleeve = Math.exp(-((v - 0.2) ** 2) / 0.012) * 0.34 * (0.25 + 0.75 * Math.abs(u - 0.5) * 2);
-        const body = 0.24 + 0.06 * Math.sin(Math.min(1, v) * Math.PI);
-        return (u - 0.5) * 2 * (body + sleeve);
-      },
-      (u, v) => shade(v, Math.abs(u - 0.5) * 0.06),
-      (u, v) => fold(u, v, 0.03, 2));
-  } else if (kind === 2) {
-    appendGrid(pos, col, sway, idx, 8, 12, 1.22,
-      (u, v) => (u - 0.5) * 2 * (0.2 + v * v * 0.44),
-      (u, v) => shade(v, Math.abs(u - 0.5) * 0.05),
-      (u, v) => fold(u, v, 0.04, 2));
+    for (const side of [-1, 1]) {
+      appendGrid(pos, col, sway, idx, 3, 8, 0.5,
+        (u, v) => side * (0.055 + u * 0.11) + (v > 0.86 ? side * 0.012 : 0),
+        (u, v) => {
+          const c = shade(v, Math.abs(u - 0.5) * 0.05);
+          if (Math.floor(v * 6) % 2 === 0) c.multiplyScalar(0.7);
+          return c;
+        },
+        (u, v) => fold(u, v, 0.01, 1),
+        (u, v) => hem(u, v, 0.02));
+    }
   } else {
-    appendGrid(pos, col, sway, idx, 8, 12, 1.48,
-      (u, v) => (u - 0.5) * 1.36 * (1 - v * 0.03),
-      (u, v) => shade(v, Math.abs(u - 0.5) * 0.04),
-      (u, v) => fold(u, v, 0.07, 3));
+    appendGrid(pos, col, sway, idx, 8, 12, 0.8,
+      (u, v) => (u - 0.5) * 0.66 * (1 + v * 0.06),
+      (u, v) => {
+        const c = shade(v, Math.abs(Math.sin(u * Math.PI * 2)) * 0.08);
+        if (v > 0.9 || u < 0.06 || u > 0.94) c.multiplyScalar(0.75);
+        return c;
+      },
+      (u, v) => fold(u, v, 0.04, 2) + Math.sin(u * Math.PI) * 0.03 * v,
+      (u, v) => hem(u, v, 0.05));
   }
   return finishCloth(pos, col, sway, idx);
 }
 
+/** A thin ink line that follows the garment silhouette, including sleeves and hems. */
 function outlineOf(src: THREE.BufferGeometry): THREE.BufferGeometry {
   const g = src.clone();
   const p = g.getAttribute('position') as THREE.BufferAttribute;
-  for (let i = 0; i < p.count; i++) p.setXYZ(i, p.getX(i) * 1.07, p.getY(i) * 1.045 - 0.015, p.getZ(i));
+  const index = g.getIndex();
+  if (!index) return g;
+  const counts = new Map<string, number>();
+  const key = (a: number, b: number) => (a < b ? `${a}:${b}` : `${b}:${a}`);
+  for (let i = 0; i < index.count; i += 3) {
+    const tri = [index.getX(i), index.getX(i + 1), index.getX(i + 2)];
+    for (let e = 0; e < 3; e++) {
+      const k = key(tri[e], tri[(e + 1) % 3]);
+      counts.set(k, (counts.get(k) ?? 0) + 1);
+    }
+  }
+  const acc = Array.from({ length: p.count }, () => [0, 0]);
+  let cx = 0;
+  let cy = 0;
+  for (let i = 0; i < p.count; i++) { cx += p.getX(i); cy += p.getY(i); }
+  cx /= p.count;
+  cy /= p.count;
+  for (const [k, n] of counts) {
+    if (n !== 1) continue;
+    const [as, bs] = k.split(':');
+    const a = Number(as);
+    const b = Number(bs);
+    const dx = p.getX(b) - p.getX(a);
+    const dy = p.getY(b) - p.getY(a);
+    const len = Math.hypot(dx, dy) || 1;
+    let ox = -dy / len;
+    let oy = dx / len;
+    const mx = (p.getX(a) + p.getX(b)) * 0.5 - cx;
+    const my = (p.getY(a) + p.getY(b)) * 0.5 - cy;
+    if (ox * mx + oy * my < 0) { ox = -ox; oy = -oy; }
+    acc[a][0] += ox; acc[a][1] += oy;
+    acc[b][0] += ox; acc[b][1] += oy;
+  }
+  for (let i = 0; i < p.count; i++) {
+    const x = acc[i][0];
+    const y = acc[i][1];
+    const len = Math.hypot(x, y);
+    if (len < 1e-5) continue;
+    p.setXYZ(i, p.getX(i) + (x / len) * 0.014, p.getY(i) + (y / len) * 0.014, p.getZ(i));
+  }
   p.needsUpdate = true;
   g.computeVertexNormals();
   return g;
@@ -394,6 +472,7 @@ function hangCloth(parent: THREE.Group, place: (x: number, y: number, lat: numbe
     const ink = new THREE.InstancedMesh(src.ink.clone(), clothInk, mine.length);
     color.name = 'sky-laundry';
     ink.name = 'sky-laundry-ink';
+    color.userData.kind = kind;
     color.castShadow = true;
     color.frustumCulled = ink.frustumCulled = false;
     color.renderOrder = 2;
@@ -403,7 +482,7 @@ function hangCloth(parent: THREE.Group, place: (x: number, y: number, lat: numbe
     mine.forEach((peg, i) => {
       yaw.makeRotationY((hash(seed + i * 9 + kind * 3) - 0.5) * 0.22);
       m.multiplyMatrices(clothBasis, yaw);
-      m.setPosition(place(peg.x, peg.y - 0.03, peg.lat));
+      m.setPosition(place(peg.x, peg.y - 0.07, peg.lat));
       color.setMatrixAt(i, m);
       ink.setMatrixAt(i, m);
       if (kind === 4) dye.set('#ffffff');

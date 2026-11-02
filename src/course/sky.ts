@@ -67,6 +67,13 @@ export function clusterSpacing(rise = SKY.rungRise, speed = SKY_SPEED): number {
   return speed * timeAtHeight(SKY_BALLOON_VY, rise);
 }
 
+/**
+ * Extra metres of run between balloon rungs, past the ballistic hop.
+ * Largest gap that still lets a governed rider at 13.5, 14 and 14.5 m/s
+ * catch every rung. With a 4.5 m envelope that is about 4 m of air between crowns.
+ */
+const BALLOON_LADDER_GAP = 0.6;
+
 export function rollSpacing(dy: number, speed = SKY_SPEED): number {
   return speed * timeAtHeight(SKY_ROLL_VY, dy);
 }
@@ -233,7 +240,7 @@ function placeClusters(from: LineEnd, y0: number, n: number, gx: number, harbour
   let x = from.x + rollSpacing(y0 - from.y);
   let y = y0;
   for (let i = 0; i < n; i++) {
-    if (i > 0) { x += clusterSpacing(); y += SKY.rungRise; }
+    if (i > 0) { x += clusterSpacing() + BALLOON_LADDER_GAP; y += SKY.rungRise; }
     out.push(clusterAt(x, y, CLUSTER_COUNTS[i] ?? 5, seedFor(gx, startSeed + i), harbour));
   }
   return out;
