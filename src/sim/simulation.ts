@@ -1,5 +1,5 @@
 import { TUNING, type Tuning } from '../tuning';
-import { Course, type Obstacle, type Rail, type Surface, type Updraft, type Vec2, type Wall } from '../course/course';
+import { Course, type Obstacle, type Rail, type SkySegment, type Surface, type Tuft, type Updraft, type Vec2, type Wall } from '../course/course';
 import { describeAction, type Action } from '../input/actions';
 import type { FailInfo, RiderState, SimEvent } from './types';
 
@@ -18,8 +18,11 @@ import type { FailInfo, RiderState, SimEvent } from './types';
  *   wallRiding --wall end / release / slid off / up--> airborne
  *   airborne --updraft has lifted enough-------------> flying
  *   flying --corridor ends / time / ground-----------> airborne | grounded
+ *   over a tuft, feet within catchH------------------> gusting (fixed path)
+ *   gusting --duration elapses-----------------------> airborne, layer sky
  *   airborne --descending through a bounce pad-------> airborne (bounced)
  *   airborne --hits ledge face / falls below route---> failed
+ *   sky layer lands or fails-------------------------> sky-exit, layer street
  *   grounded --passes finish-------------------------> finished
  *
  * Airborne context resolution (brief §6):
@@ -76,7 +79,12 @@ export class Simulation {
 
   /** Copy the private hold-tracking too (used by predictJumpArc and tests). */
   cloneFrom(other: Simulation): void {
-    this.state = { ...other.state, broken: [...other.state.broken], bounced: [...other.state.bounced] };
+    this.state = {
+      ...other.state,
+      broken: [...other.state.broken],
+      bounced: [...other.state.bounced],
+      gustFrom: { ...other.state.gustFrom },
+    };
     this.sideHeld = other.sideHeld ? { ...other.sideHeld } : null;
     this.upAsSide = other.upAsSide;
     this.upHeld = other.upHeld;
@@ -120,6 +128,7 @@ export class Simulation {
       }
     }
     if (pmode !== 'failed' && pmode !== 'finished' && s.mode !== 'failed') this.checkObstacles(px, py, pmode);
+    if (s.mode !== 'failed' && s.mode !== 'finished' && s.mode !== 'gusting') this.tryTuft();
     s.tick++;
   }
 
@@ -337,7 +346,11 @@ export class Simulation {
         this.tryRailCatch(); // already in a catch band? catch now
         return;
       case 'gusting':
-        return;
+        if (!fresh) { if (strokeId === s.prepStrokeId) s.prepStrength = Math.max(s.prepStrength, strength); return; }
+        s.prepStrokeId = strokeId; s.prepHeld = true; s.prepTimer = this.K.prepArmWindow; s.prepTriedThisAir = true;
+        s.prepAge = 0; s.prepStrength = strength;
+        this.emit({ type: 'prep', armed: true });
+        return this.resolve(name, 'catch armed (carries out of the gust)');
       case 'flying':
         if (!fresh) return;
         s.prepStrokeId = strokeId; s.prepHeld = true; s.prepTimer = this.K.prepArmWindow; s.prepAge = 0; s.prepStrength = strength;
@@ -561,6 +574,7 @@ export class Simulation {
     s.vy -= M.airGravity * dt;
     s.vx -= Math.sign(s.vx) * M.airDrag * s.vx * s.vx * dt;
     s.vx = Math.min(s.vx, M.hardCap);
+    this.governSky();
     const p0 = { x: s.x, y: s.y };
     const p1 = { x: s.x + s.vx * dt, y: s.y + s.vy * dt };
     if (this.tryBounce(p0, p1)) return;
@@ -729,6 +743,7 @@ export class Simulation {
     s.pushStrokeId = -1;
     this.syncContactVelocity();
     this.emit({ type: 'land', x, y: sm.y, impact, speedBefore: before, speedAfter: s.speed, material: surf.material, flipped });
+    this.exitSky('land');
     if (s.jumpBuffer > 0) { this.jump('buffered', -1); return; }
     // a Down stroke begun just before touchdown is (probably) a push, not a landing prep
     const late = s.prepStrokeId !== -1 && s.prepAge <= K.latePushWindow;
@@ -754,7 +769,7 @@ export class Simulation {
     for (const r of this.course.rails) {
       const x0 = Course.railX0(r), x1 = Course.railX1(r);
       if (s.x < x0 - K.railCatchBefore || s.x > x1 - 0.5) continue;
-      if (r.wash && !this.washReachable()) continue;
+      if (r.wash && !r.sky && !this.washReachable()) continue;
       const cx = Math.max(s.x, x0);
       const ry = Course.railSample(r, cx).y;
       const d = s.y - ry;
@@ -804,6 +819,7 @@ export class Simulation {
     if (v < K.grindSustainSpeed) acc += K.grindSustainAccel;
     if (v > M.softCap) acc -= M.overCapDrag * (v - M.softCap);
     s.speed = Math.min(Math.max(v + acc * dt, 0.5), M.hardCap);
+    this.governSky();
     s.contactTime += dt;
     const nx = s.x + s.speed * Math.cos(th) * dt;
     const x1 = Course.railX1(r);
@@ -903,9 +919,148 @@ export class Simulation {
     return trick || s.launchVy > this.M.jumpVelocity + this.K.washLaunchExtra;
   }
 
-  /** Workstream A: fixed-path tuft lift. */
+  /**
+   * Height along the tuft, 0 at the catch and 1 at the exit.
+   * A short gather (the whoosh's anticipation), then easeOutQuad: fast rise and a hang at the top
+   * before the release velocity. x on the gust is linear; this curve is y only.
+   */
+  private gustEase(t: number): number {
+    const u = Math.min(1, Math.max(0, t));
+    const wind = 0.12;
+    const dip = 0.045;
+    if (u < wind) return -dip * Math.sin((u / wind) * Math.PI);
+    const v = (u - wind) / (1 - wind);
+    return 1 - (1 - v) * (1 - v);
+  }
+
+  /** Pull horizontal / along-rail speed toward the sky cruise so authored hops stay put. vy is left alone:
+   *  the balloon ladder is timed off balloonVy and gravity, and governing it would move the rungs. */
+  private governSky(): void {
+    const s = this.state;
+    if (s.layer !== 'sky') return;
+    if (s.mode !== 'airborne' && s.mode !== 'grinding') return;
+    const k = 1 - Math.exp(-this.dt / this.K.sky.speedTau);
+    const target = this.K.sky.speed;
+    if (s.mode === 'grinding') {
+      s.speed += (target - s.speed) * k;
+      s.speed = Math.min(Math.max(s.speed, 0), this.M.hardCap);
+    } else {
+      s.vx += (target - s.vx) * k;
+      s.vx = Math.min(s.vx, this.M.hardCap);
+    }
+  }
+
+  private tuftOf(id: number): Tuft | undefined {
+    return this.course.tuft(id) ?? this.course.tufts.find((t) => t.id === id);
+  }
+
+  /** Feet over a grate and no higher than its catch band: the gust takes the rider. */
+  private tryTuft(): void {
+    const s = this.state;
+    if (s.mode === 'gusting' || s.mode === 'failed' || s.mode === 'finished') return;
+    for (const t of this.course.tufts) {
+      if (s.x < t.x0 || s.x > t.x1) continue;
+      if (s.y < t.yBase - 0.5 || s.y > t.yBase + t.catchH) continue;
+      this.enterGust(t);
+      return;
+    }
+  }
+
+  private enterGust(t: Tuft): void {
+    const s = this.state;
+    if (s.mode === 'heelSkim') this.endSkim('release');
+    if (s.mode === 'flying') this.endFlight();
+    if (s.mode === 'grinding') {
+      this.emit({ type: 'grind-end', railId: s.railId, x: s.x, y: s.y, reason: 'end' });
+      s.railId = -1;
+    }
+    if (s.mode === 'wallRiding') {
+      this.emit({ type: 'wall-end', wallId: s.wallId, x: s.x, y: s.y, reason: 'end' });
+      s.wallId = -1; s.wallExit = 'end';
+    }
+    s.mode = 'gusting';
+    s.tuftId = t.id;
+    s.gustT = 0;
+    s.gustFrom = { x: s.x, y: s.y };
+    s.air = 'none'; s.flip = 0; s.flipQueued = false;
+    s.jumpBuffer = 0; s.coyote = 0;
+    this.emit({ type: 'tuft-start', tuftId: t.id, x: s.x, y: s.y });
+  }
+
+  /** Fixed-path tuft lift. x is linear from the catch to the exit; y eases. */
   private stepGusting(): void {
-    // Stub until sky mechanics land.
+    const s = this.state;
+    const tuft = this.tuftOf(s.tuftId);
+    if (!tuft) {
+      s.mode = 'airborne';
+      s.layer = 'sky';
+      s.leftBy = 'flight';
+      s.vx = this.K.sky.gustExitVx;
+      s.vy = this.K.sky.gustExitVy;
+      return;
+    }
+    const dur = this.K.sky.gustDuration;
+    s.gustT += this.dt;
+    const t = Math.min(1, s.gustT / dur);
+    const from = s.gustFrom;
+    const x = from.x + (tuft.exitX - from.x) * t;
+    const y = from.y + (tuft.exitY - from.y) * this.gustEase(t);
+    s.vx = (x - s.x) / this.dt;
+    s.vy = (y - s.y) / this.dt;
+    s.x = x; s.y = y;
+    s.speed = Math.hypot(s.vx, s.vy);
+    s.angle = Math.atan2(s.vy, Math.max(0.5, s.vx));
+    if (s.gustT >= dur - 1e-8) this.finishGust(tuft);
+  }
+
+  private finishGust(tuft: Tuft): void {
+    const s = this.state;
+    const S = this.K.sky;
+    s.x = tuft.exitX; s.y = tuft.exitY;
+    s.vx = S.gustExitVx; s.vy = S.gustExitVy;
+    s.speed = Math.hypot(s.vx, s.vy);
+    s.angle = Math.atan2(s.vy, Math.max(0.5, s.vx));
+    s.mode = 'airborne';
+    s.layer = 'sky';
+    s.leftBy = 'flight';
+    s.launchVy = s.vy;
+    s.airTime = 0;
+    s.jumpStrokeId = -1;
+    s.coyote = 0;
+    s.jumpBuffer = 0;
+    // A Down during the gust is the catch for the first line, still armed as the flight begins.
+    if (s.prepStrokeId !== -1) {
+      s.prepTimer = Math.max(s.prepTimer, this.K.prepArmWindow);
+      s.prepTriedThisAir = true;
+      s.prepAge = 0;
+    }
+    this.emit({ type: 'tuft-end', tuftId: tuft.id, x: s.x, y: s.y });
+  }
+
+  private skySegment(): SkySegment | undefined {
+    const s = this.state;
+    const at = this.course.skyAt(s.x);
+    if (at) return at;
+    if (s.tuftId >= 0) {
+      const byTuft = this.course.sky.find((seg) => seg.tuftId === s.tuftId);
+      if (byTuft) return byTuft;
+    }
+    let best: SkySegment | undefined;
+    for (const seg of this.course.sky) if (seg.x0 <= s.x + 1e-6 && (!best || seg.x0 >= best.x0)) best = seg;
+    return best;
+  }
+
+  /** Leave the sky layer. A landing at or past xLand − 10 is a clear; anything else fell off the route. */
+  private exitSky(kind: 'land' | 'fail'): void {
+    const s = this.state;
+    if (s.layer !== 'sky') return;
+    const seg = this.skySegment();
+    if (seg) {
+      const reason = kind === 'land' && s.x >= seg.xLand - 10 ? 'complete' : 'fell';
+      this.emit({ type: 'sky-exit', segmentId: seg.id, reason, x: s.x, y: s.y });
+    }
+    s.layer = 'street';
+    s.tuftId = -1;
   }
 
   /** Columns only catch a deliberate launch, not a crest the street itself threw the rider off. */
@@ -968,10 +1123,10 @@ export class Simulation {
     for (const b of this.course.bounces) {
       if (s.bounced.includes(b.id)) continue;
       const half = b.half;
+      const rad = b.rad ?? b.half;
       const xLo = Math.min(p0.x, p1.x), xHi = Math.max(p0.x, p1.x);
       if (xHi < b.x - half || xLo > b.x + half) continue;
       const yLo = Math.min(p0.y, p1.y), yHi = Math.max(p0.y, p1.y);
-      const rad = b.half;
       if (yHi < b.y - rad || yLo > b.y + rad) continue;
       s.x = Math.min(Math.max(s.x, b.x - half), b.x + half);
       s.y = b.y;
@@ -1037,6 +1192,7 @@ export class Simulation {
 
   private fail(info: FailInfo): void {
     const s = this.state;
+    this.exitSky('fail');
     s.mode = 'failed';
     s.fail = info;
     s.vx = 0; s.vy = 0; s.speed = 0;

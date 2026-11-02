@@ -39,6 +39,10 @@ export const SCORE = {
   swing: 380, swingPerSec: 320,
   flight: 700, flightPerSec: 220,
   bounce: 260,
+  /** Sky balloon ladder: one combo link, 50 points. Street balloons keep `bounce`. */
+  skyBalloon: 50,
+  /** Clearing a sky segment (sky-exit complete). Banked at once. */
+  skyRun: 500,
   skim: 60, skimPerSec: 120,
   pot: 200, pillar: 600,
   airMin: 0.7, airPerSec: 150,
@@ -254,7 +258,15 @@ export class ScoreKeeper {
           break;
         }
         case 'flight-start': if (fresh) this.addLink('flight', SCORE.flight); break;
-        case 'bounce': if (fresh) this.addLink('bounce', SCORE.bounce); break;
+        case 'bounce': {
+          if (!fresh) break;
+          const pad = course.bounce(e.bounceId);
+          this.addLink('bounce', pad?.sky ? SCORE.skyBalloon : SCORE.bounce);
+          break;
+        }
+        case 'sky-exit':
+          if (fresh && e.reason === 'complete') this.bonus('Sky run!', SCORE.skyRun, e.segmentId + 1_000_000);
+          break;
         case 'skim-start': this.endFlight(); if (fresh) this.addLink('skim', SCORE.skim); break;
         case 'wall-start': {
           this.endFlight();

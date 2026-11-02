@@ -23,6 +23,13 @@ export interface AutopilotOptions {
   riskyLine?: boolean;
   /** Jump the risky high line but never swipe down, so the attempt misses. */
   riskyMistime?: 'nodown';
+  /**
+   * Sky-layer hops. On by default: arm Down 0.15 s before each `down` hop, jump at the middle of each
+   * `jump` window, and do nothing on `roll`. `false` rides the gust and then stays passive.
+   */
+  sky?: boolean;
+  /** Skip the second sky line and do not catch the street rail under that segment, so a death gap is real. */
+  skyMistime?: 'drop-over-gap';
   /** How to deal with pots: jump over them (default) or heel-break them. */
   pots?: 'jump' | 'heel';
   /** How to smash pillars: jump into them grabbing (default) or flipping, or heel-skim through. */
@@ -51,6 +58,9 @@ export class Autopilot {
   private heelNext = false;
   private pillarId = -1;
   private readonly bounced = new Set<number>();
+  /** Sky hops already committed, keyed by segment and hop. Cleared if a retry rewinds the rider. */
+  private skyDone = new Set<string>();
+  private skyX = 0;
   constructor(private opts: AutopilotOptions) {}
 
   private id(): number { return ++this.sid; }
@@ -131,7 +141,7 @@ export class Autopilot {
       const r = course.rails.find((q) => this.takes(q) && q.points[q.points.length - 1].x > st.x);
       const nearOptional = r && st.x > r.points[0].x - 3.5 && st.x < r.points[0].x + 2;
       const skipDown = !!r?.risky && this.opts.riskyMistime === 'nodown';
-      if ((g?.requires === 'rail' || (nearOptional && !skipDown)) && !this.prepDone) { out.push({ type: 'down', strokeId: this.id(), strength: 0.65, fresh: true, source: 'test' }); this.prepDone = true; }
+      if ((g?.requires === 'rail' || (nearOptional && !skipDown)) && !this.prepDone && !this.dropOverGap(sim)) { out.push({ type: 'down', strokeId: this.id(), strength: 0.65, fresh: true, source: 'test' }); this.prepDone = true; }
       if (g?.requires === 'wall' && this.wallStroke === -1 && st.lastContact !== 'wall') {
         const w = course.walls.find((q) => st.x > q.x0 - 6 && st.x < q.x1) ?? course.walls[0];
         if (w && st.x >= w.x0) { this.wallStroke = this.id(); out.push({ type: 'side', side: 'right', held: true, strokeId: this.wallStroke, source: 'test' }); }
@@ -168,12 +178,84 @@ export class Autopilot {
         this.grabStroke = -1; this.airPlan = 'done';
       }
     }
+    if (this.opts.sky !== false) out.push(...this.skyActions(sim));
     return out;
   }
 
-  /** Risky rails only for a high-line rider. Other optional rails only when optionalRail is set. */
+  /** Horizontal speed the sky timers should use, including the scripted gust. */
+  private skySpeed(sim: Simulation): number {
+    const st = sim.state;
+    if (st.mode === 'gusting') {
+      const tuft = sim.course.tuft(st.tuftId) ?? sim.course.tufts.find((t) => t.id === st.tuftId);
+      if (tuft) return Math.max(1, (tuft.exitX - st.gustFrom.x) / sim.K.sky.gustDuration);
+    }
+    if (st.mode === 'airborne' || st.mode === 'flying' || st.mode === 'gusting') return Math.max(1, st.vx);
+    return Math.max(1, st.speed * Math.cos(st.angle || 0));
+  }
+
+  /**
+   * Sky hops from the segment under the rider. Down is armed early and held (the sim keeps the catch
+   * until a grind consumes it). Jumps fire once, at the middle of the window, and the target line is
+   * caught on the way across.
+   */
+  private skyActions(sim: Simulation): Action[] {
+    const out: Action[] = [];
+    const st = sim.state;
+    if (st.x < this.skyX - 8) this.skyDone.clear();
+    this.skyX = st.x;
+    const seg = sim.course.skyAt(st.x) ?? sim.course.sky.find((s) => st.x >= s.x0 - 1 && st.x <= s.x1);
+    if (!seg) return out;
+    const speed = this.skySpeed(sim);
+    const lead = speed * 0.15;
+    const l2 = seg.lines[1]?.railId;
+    const mistime = this.opts.skyMistime === 'drop-over-gap';
+    const airborne = st.mode === 'airborne' || st.mode === 'gusting';
+    for (let i = 0; i < seg.hops.length; i++) {
+      const h = seg.hops[i];
+      const key = `${seg.id}:${seg.gx}:${i}`;
+      if (h.action === 'roll') continue;
+      if (mistime && h.targetRail !== undefined && h.targetRail === l2) continue;
+      if (h.action === 'down') {
+        if (this.skyDone.has(key) || !airborne) continue;
+        if (st.x >= h.x0 - lead && st.x < h.x1) {
+          out.push({ type: 'down', strokeId: this.id(), strength: 0.65, fresh: true, source: 'test' });
+          this.skyDone.add(key);
+        }
+      } else if (h.action === 'jump') {
+        const onSky = seg.lines.some((ln) => ln.railId === st.railId);
+        if (!this.skyDone.has(key) && st.mode === 'grinding' && onSky && st.railId !== h.targetRail && st.x >= (h.x0 + h.x1) / 2 && st.x <= h.x1) {
+          out.push({ type: 'up', strokeId: this.id(), source: 'test' });
+          this.skyDone.add(key);
+        }
+        const catchKey = `${key}:catch`;
+        if (h.targetRail !== undefined && this.skyDone.has(key) && !this.skyDone.has(catchKey) && st.mode === 'airborne') {
+          const rail = sim.course.rails.find((r) => r.id === h.targetRail);
+          if (rail && st.x >= rail.points[0].x - lead && st.x < rail.points[rail.points.length - 1].x) {
+            out.push({ type: 'down', strokeId: this.id(), strength: 0.65, fresh: true, source: 'test' });
+            this.skyDone.add(catchKey);
+          }
+        }
+      }
+    }
+    return out;
+  }
+
+  /** Mistime: do not catch the street rail that bridges the gap under this sky segment. */
+  private dropOverGap(sim: Simulation): boolean {
+    if (this.opts.skyMistime !== 'drop-over-gap') return false;
+    const x = sim.state.x;
+    return sim.course.sky.some((seg) => {
+      const g = seg.gapBelow;
+      if (!g) return false;
+      return x > seg.gx && x < seg.x1 + 5 && x > g.x0 - 8 && x < g.x1 + 8;
+    });
+  }
+
+  /** Risky rails only for a high-line rider. Other optional rails only when optionalRail is set.
+   *  Sky lines are hopped from the segment, not treated as street rails. */
   private takes(q: Rail): boolean {
     if (q.required) return false;
+    if (q.sky) return false;
     if (q.wash) return false;
     if (q.risky) return !!this.opts.riskyLine || this.opts.riskyMistime === 'nodown';
     return !!this.opts.optionalRail;

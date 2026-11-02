@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { Course, Vec2 } from '../course/course';
 import type { EndlessCourse } from '../course/endless';
 import type { RiderState, SimEvent } from '../sim/types';
-import { CameraRig } from './cameraRig';
+import { CameraRig, chaseAheadMax, skyCameraZone, stepSkyCamera, type SkyCamMemory } from './cameraRig';
 import { CourseView, bounceRiderLateral } from './courseView';
 import { Effects, SpeedLines, Petals } from './effects';
 import { OrbPickupFx } from './orbFx';
@@ -21,13 +21,14 @@ import { biomeName } from './biomeHills';
 
 /** Interpolatable slice of sim state. */
 export interface Snapshot {
-  x: number; y: number; angle: number; speed: number; vy: number; mode: RiderState['mode'];
+  x: number; y: number; angle: number; speed: number; vx: number; vy: number; mode: RiderState['mode'];
+  layer: RiderState['layer'];
   air: RiderState['air']; flip: number; railId: number; wallId: number; bounceId: number;
   /** Landing prep armed (presentation: the heroine's catch pose). */
   prep?: boolean;
 }
 export const snap = (s: RiderState): Snapshot => ({
-  x: s.x, y: s.y, angle: s.angle, vy: s.vy, mode: s.mode, air: s.air, flip: s.air === 'flip' ? s.flip : 0,
+  x: s.x, y: s.y, angle: s.angle, vx: s.vx, vy: s.vy, mode: s.mode, layer: s.layer, air: s.air, flip: s.air === 'flip' ? s.flip : 0,
   railId: s.railId, wallId: s.wallId, bounceId: s.bounceId,
   prep: (s.mode === 'airborne' || s.mode === 'flying') && s.prepStrokeId !== -1 && (s.prepHeld || s.prepTimer > 0),
   speed: s.mode === 'airborne' || s.mode === 'flying' || s.mode === 'gusting' ? Math.hypot(s.vx, s.vy) : s.speed,
@@ -41,6 +42,7 @@ export class GameView {
   readonly renderer: THREE.WebGLRenderer;
   readonly scene = new THREE.Scene();
   readonly rig = new CameraRig();
+  private skyCam: SkyCamMemory = { postGust: 0 };
   readonly env: Environment;
   private courseView: CourseView | null = null;
   readonly rider = new RiderView();
@@ -351,7 +353,10 @@ export class GameView {
     this.trailLine.visible = false;
     this.failMarker.visible = false;
     this.edgeMarker.visible = false;
-    this.rig.update(0, s.x, s.y, s.speed, true, this.courseView ? this.courseView.course.maxHeightAhead(s.x, TUNING.camera.lookOverRange) : -Infinity);
+    this.skyCam.postGust = 0;
+    const ahead = this.courseView ? chaseAheadMax(this.courseView.course, s.x, TUNING.camera.lookOverRange) : -Infinity;
+    const zone = skyCameraZone(this.courseView?.course, s.x, s.mode, s.layer);
+    this.rig.update(0, s.x, s.y, s.speed, true, ahead, 0, stepSkyCamera(s.mode, s.layer, 0, this.skyCam, zone));
   }
 
   onEvent(e: SimEvent, speed: number): void {
@@ -504,8 +509,11 @@ export class GameView {
       // pull back and up to the takeoff level so the miss, both gap edges and the flight path are in frame
       this.rig.update(dt, this.failCam.x, this.failCam.y, 0, false);
     } else {
-      const ahead = course ? course.maxHeightAhead(x, TUNING.camera.lookOverRange) : -Infinity;
-      this.rig.update(dt, x, y, curr.speed, false, ahead, 0);
+      const ahead = course ? chaseAheadMax(course, x, TUNING.camera.lookOverRange) : -Infinity;
+      const plan = stepSkyCamera(curr.mode, curr.layer, dt, this.skyCam, skyCameraZone(course, x, curr.mode, curr.layer));
+      // The gust and the ladder are mostly vertical. Follow forward speed so the whoosh doesn't zoom the frame.
+      const camSpeed = curr.mode === 'gusting' || (curr.layer === 'sky' && curr.mode === 'airborne') ? Math.max(0, curr.vx) : curr.speed;
+      this.rig.update(dt, x, y, camSpeed, false, ahead, 0, plan);
     }
     ART_UNIFORMS.uTime.value += dt;
     this.env.follow(toScene(x + 18, y, 0, this.focus), this.rig.camera.position, x, y);
