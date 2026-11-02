@@ -156,6 +156,11 @@ export class CourseView {
   /** Pennants on a bunting string. Tips carry a sway weight; the cord and hooks do not. */
   private buntingCloth = toon('#ffffff', { vertexColors: true, sway: true, side: THREE.DoubleSide, rim: 0.85 });
   private beaconGlow = toon('#fff6d4', { vertexColors: true, emissive: '#ff8a2a', emissiveIntensity: 1.15, side: THREE.DoubleSide });
+  /**
+   * Choice lanterns on the pavement before a risky line. Swing lamps keep beaconGlow.
+   * These heads pass close to the chase camera, so a hot emissive turns them into white discs.
+   */
+  private choiceGlow = toon('#fff1c4', { vertexColors: true, emissive: '#e87830', emissiveIntensity: 0.32, side: THREE.DoubleSide });
   /** Toon steam sheets. One material per puff; the maps are shared. */
   private steamTex: THREE.Texture[] = [];
   private steamTried = false;
@@ -358,6 +363,7 @@ export class CourseView {
     this.iron.dispose();
     this.craneMat.dispose();
     this.beaconGlow.dispose();
+    this.choiceGlow.dispose();
     for (const t of this.steamTex) t.dispose();
     this.puffGeo?.dispose();
     for (const m of this.clothMats.values()) m.dispose();
@@ -613,6 +619,25 @@ export class CourseView {
   }
 
   /**
+   * The lamp glass and flame are stored as sRGB bytes divided by 255, with no town layer.
+   * Treated as linear, and then given a hot emissive, they blow out into white discs beside the cobbles.
+   * The rock post is left in the same space as the other props.
+   */
+  private calmLamp(geo: THREE.BufferGeometry): void {
+    const col = geo.getAttribute('color');
+    const tl = geo.getAttribute('tl');
+    const toLin = (c: number) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+    for (let i = 0; i < col.count; i++) {
+      const r = col.getX(i), g = col.getY(i), b = col.getZ(i);
+      if (tl.getX(i) >= 0 && r + g + b < 2.2) continue;
+      // The lit toon step is nearly white, so the authored cream still reads as a paper disc.
+      const warm = 0.62;
+      col.setXYZ(i, toLin(r) * warm, toLin(g) * warm, toLin(b) * warm);
+    }
+    col.needsUpdate = true;
+  }
+
+  /**
    * Risky high line: a painted fence panel (the grind is its top rail) and two post lanterns
    * framing the street before it. The street mesh itself is untouched, so the safe line stays readable.
    */
@@ -636,15 +661,23 @@ export class CourseView {
     }
     const mouth = x0 - 5.5;
     const base = this.course.groundBelow(mouth, 1e6)?.sample.y ?? r.points[0].y - 1.1;
-    if (beacon) for (const lat of [-1.25, 1.25]) {
-      const sc = 1.55;
+    // Under 2.6 m, so they stand on the pavement, outside the 1.6 m street. In the lane the
+    // chase camera passes over the lamp heads and they fill the bottom corners.
+    if (beacon) for (const lat of [-2.05, 2.05]) {
+      const sc = 1.15;
       const place = (u: number, v: number, w: number) => ({ x: mouth + u * sc, y: base + v * sc, lat: lat + w * sc });
-      ironParts.push(this.stamp(beacon.body, place));
-      if (beacon.glow) glowParts.push(this.stamp(beacon.glow, place));
+      const post = this.stamp(beacon.body, place);
+      this.calmLamp(post);
+      ironParts.push(post);
+      if (beacon.glow) {
+        const flame = this.stamp(beacon.glow, place);
+        this.calmLamp(flame);
+        glowParts.push(flame);
+      }
     }
     const im = mergeAttrs(ironParts), gm = mergeAttrs(glowParts);
     if (im) { const mesh = new THREE.Mesh(im, this.iron); mesh.castShadow = true; g.add(mesh); }
-    if (gm) { const mesh = new THREE.Mesh(gm, this.beaconGlow); mesh.castShadow = false; g.add(mesh); }
+    if (gm) { const mesh = new THREE.Mesh(gm, this.choiceGlow); mesh.castShadow = false; g.add(mesh); }
     return g;
   }
 
