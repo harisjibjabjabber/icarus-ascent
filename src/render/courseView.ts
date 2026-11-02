@@ -8,6 +8,7 @@ import { townMaterial } from './town/kit';
 import type { Vector3 } from 'three';
 import { toon } from './materials';
 import { GeoBuilder, blob } from './geo';
+import { awningLocal, balloonLocal, garmentLocal, poseSoft, type GarmentKind, type SoftProp } from './setDress';
 import { mulberry32 } from '../rng';
 
 /**
@@ -119,13 +120,13 @@ function lineMat(color: string): THREE.LineBasicMaterial {
   return m as THREE.LineBasicMaterial;
 }
 
-interface ChunkView { chunk: Chunk; group: THREE.Group; pooled: { kind: 'pot' | 'pillar'; obj: THREE.Group }[]; wisps: Wisp[]; glints: THREE.Sprite[] }
+interface ChunkView { chunk: Chunk; group: THREE.Group; pooled: { kind: 'pot' | 'pillar'; obj: THREE.Group }[]; wisps: Wisp[]; glints: THREE.Sprite[]; soft: SoftProp[] }
 
 /** One rising wisp. Route metres, parented to its chunk so a rebase carries it. */
 interface Wisp {
   sprite: THREE.Sprite;
   x0: number; x1: number; y0: number; y1: number; lat0: number; lat1: number;
-  phase: number; speed: number; scale: number;
+  phase: number; speed: number; scale: number; warm: boolean;
   chunkX: number; chunkY: number;
 }
 
@@ -152,6 +153,9 @@ export class CourseView {
   private restRopes = new Map<number, THREE.Group>();
   private heldSwing: number | null = null;
   private glints: THREE.Sprite[] = [];
+  private now = 0;
+  private readonly wispWarm = [new THREE.Color('#fff1d2'), new THREE.Color('#f6e2c0')];
+  private readonly wispCool = [new THREE.Color('#e7f6f8'), new THREE.Color('#f3fafb')];
   private readonly orbView: OrbView;
   private pool: Record<'pot' | 'pillar', THREE.Group[]> = { pot: [], pillar: [] };
   private bx = 0;
@@ -202,21 +206,36 @@ export class CourseView {
 
   /** Twinkle collectible stars, drift the steam, and pulse hook glints. */
   animate(time: number, cam?: THREE.Camera, screenH = 844): void {
+    this.now = time;
     this.orbView.animate(time, cam, screenH);
     for (const w of this.wisps()) {
       const t = (time * w.speed + w.phase) % 1;
       const fade = Math.sin(t * Math.PI);
-      const x = w.x0 + (w.x1 - w.x0) * t + Math.sin(time * 0.9 + w.phase * 6) * 0.28 * t;
+      // a slow curl that opens as the wisp rises, then thins out
+      const curl = Math.sin(time * 0.62 + w.phase * 6.2) * (0.12 + 0.7 * t * t);
+      const x = w.x0 + (w.x1 - w.x0) * t + curl * 0.55;
       const y = w.y0 + (w.y1 - w.y0) * t;
-      const lat = w.lat0 + (w.lat1 - w.lat0) * t + Math.sin(time * 1.4 + w.phase * 9) * 0.22;
+      const lat = w.lat0 + (w.lat1 - w.lat0) * t + Math.cos(time * 0.48 + w.phase * 4.1) * 0.16 * t;
       w.sprite.position.copy(toSceneRaw(x - w.chunkX, y - w.chunkY, lat));
       const mat = w.sprite.material as THREE.SpriteMaterial;
-      mat.opacity = 0.4 + 0.5 * fade;
-      const s = w.scale * (0.55 + 0.85 * t);
-      w.sprite.scale.set(s * (0.85 + 0.15 * Math.sin(time * 1.2 + w.phase)), s * (1.25 + 0.2 * fade), 1);
+      const pair = w.warm ? this.wispWarm : this.wispCool;
+      mat.color.copy(pair[0]).lerp(pair[1], t);
+      mat.opacity = (0.38 + 0.5 * fade) * (1 - t * 0.4);
+      mat.rotation = w.phase * 4 + time * 0.15;
+      const s = w.scale * (0.45 + 0.7 * t);
+      w.sprite.scale.set(s * (0.75 + 0.2 * Math.sin(time * 1.1 + w.phase)), s * (1.35 + 0.25 * fade), 1);
     }
+    for (const v of this.views.values()) for (const p of v.soft) poseSoft(p, time);
     const glint = 0.15 + 0.035 * Math.sin(time * 3.2);
     for (const s of this.glints) s.scale.set(glint, glint, 1);
+  }
+
+  /** The canvas, balloon or hull gives under her and springs back. Presentation only. */
+  squashPad(id: number): void {
+    for (const v of this.views.values()) {
+      const p = v.soft.find((s) => s.id === id);
+      if (p) { p.hit = this.now; return; }
+    }
   }
 
   /** Hide the resting rope of the swing she is on, so only the live rope to her hands shows. */
@@ -242,7 +261,7 @@ export class CourseView {
   private build(c: Chunk): void {
     const g = new THREE.Group();
     this.bx = c.x0; this.by = c.y0;
-    const v: ChunkView = { chunk: c, group: g, pooled: [], wisps: [], glints: [] };
+    const v: ChunkView = { chunk: c, group: g, pooled: [], wisps: [], glints: [], soft: [] };
     const surfaces = c.surfaces.map((id) => this.course.findSurface(id)).filter((q): q is Surface => !!q);
     const lip: THREE.Vector3[] = [], edge: THREE.Vector3[] = [];
     for (const s of surfaces) { g.add(this.surfaceMesh(s)); this.lipLine(s, lip, edge); }
@@ -553,22 +572,31 @@ export class CourseView {
     const x0 = pts[0].x, x1 = pts[pts.length - 1].x;
     const yAt = (x: number) => Course.railSample(r, Math.min(Math.max(x, x0), x1)).y;
     const facade = 4.65;
-    const rope = dress === 'gutter' ? '#8a8078' : dress === 'balcony' ? '#e0b15a' : '#e6d3b8';
-    for (let x = x0; x < x1 - 0.05; x += 1.15) {
-      const b = Math.min(x1, x + 1.15);
-      const y = (yAt(x) + yAt(b)) / 2;
-      const mid = (x + b) / 2;
-      gb.add(new THREE.BoxGeometry(b - x, dress === 'gutter' ? 0.1 : 0.055, 0.06), this.L(mid, y, r.lateral), rope, { rot, top: '#fff6e4' });
-      if (dress === 'gutter') gb.add(new THREE.BoxGeometry(b - x, 0.08, 0.18), this.L(mid, y - 0.08, r.lateral + 0.08), '#6a6058', { rot });
-      if (dress === 'balcony') gb.add(new THREE.BoxGeometry(b - x, 0.07, Math.max(0.4, facade - r.lateral - 0.45)), this.L(mid, y - 0.82, (r.lateral + 0.4 + facade) / 2), '#e7d7c4', { rot, top: '#f6ecdf' });
-      if (dress === 'bunting') {
-        const hue = (Math.round(x) % 3 === 0) ? '#c4543a' : (Math.round(x) % 3 === 1) ? '#e2b15a' : '#3d6f8a';
-        gb.add(new THREE.ConeGeometry(0.16, 0.32, 4), this.L(mid, y - 0.2, r.lateral), hue, { rot: [Math.PI, ROUTE_YAW, 0] });
+    if (dress === 'wash') {
+      // a real line: short spans, a visible dip, thin enough to read as rope
+      const step = 4, sag = 0.2;
+      for (let x = x0; x < x1 - 0.05; x += step) {
+        const b = Math.min(x1, x + step);
+        this.rope(gb, x, yAt(x), r.lateral, b, yAt(b), r.lateral, sag, '#c4ae92', 0.028);
+      }
+    } else {
+      const rope = dress === 'gutter' ? '#8a8078' : dress === 'balcony' ? '#e0b15a' : '#e6d3b8';
+      for (let x = x0; x < x1 - 0.05; x += 1.15) {
+        const b = Math.min(x1, x + 1.15);
+        const y = (yAt(x) + yAt(b)) / 2;
+        const mid = (x + b) / 2;
+        gb.add(new THREE.BoxGeometry(b - x, dress === 'gutter' ? 0.1 : 0.055, 0.06), this.L(mid, y, r.lateral), rope, { rot, top: '#fff6e4' });
+        if (dress === 'gutter') gb.add(new THREE.BoxGeometry(b - x, 0.08, 0.18), this.L(mid, y - 0.08, r.lateral + 0.08), '#6a6058', { rot });
+        if (dress === 'balcony') gb.add(new THREE.BoxGeometry(b - x, 0.07, Math.max(0.4, facade - r.lateral - 0.45)), this.L(mid, y - 0.82, (r.lateral + 0.4 + facade) / 2), '#e7d7c4', { rot, top: '#f6ecdf' });
+        if (dress === 'bunting') {
+          const hue = (Math.round(x) % 3 === 0) ? '#c4543a' : (Math.round(x) % 3 === 1) ? '#e2b15a' : '#3d6f8a';
+          gb.add(new THREE.ConeGeometry(0.16, 0.32, 4), this.L(mid, y - 0.2, r.lateral), hue, { rot: [Math.PI, ROUTE_YAW, 0] });
+        }
       }
     }
     const ironParts: THREE.BufferGeometry[] = [];
     const bracket = this.props?.piece('bracket');
-    for (let x = x0; x <= x1 + 0.01; x += 8) {
+    for (let x = x0; x <= x1 + 0.01; x += (dress === 'wash' ? 4 : 8)) {
       const y = yAt(Math.min(x, x1));
       const arm = facade - r.lateral;
       if (bracket) ironParts.push(this.stamp(bracket.body, (u, v, w) => ({ x: x + w, y: y + v * 0.85, lat: facade - u * (arm / 0.95) })));
@@ -577,25 +605,36 @@ export class CourseView {
         gb.add(new THREE.BoxGeometry(0.14, 0.4, 0.12), this.L(x, y - 0.12, facade - 0.05), '#4a3c34', { rot });
       }
     }
-    for (let s = 0; s < 6; s++) {
-      const yy = yAt(x0) - 1.05 + s * 0.18;
-      gb.add(new THREE.BoxGeometry(1.35, 0.14, 1.05), this.L(x0 - 9 + s * 1.45, yy, 3.9), '#cbb89a', { rot, top: '#f3e6d4' });
+    if (dress !== 'wash') {
+      for (let s = 0; s < 6; s++) {
+        const yy = yAt(x0) - 1.05 + s * 0.18;
+        gb.add(new THREE.BoxGeometry(1.35, 0.14, 1.05), this.L(x0 - 9 + s * 1.45, yy, 3.9), '#cbb89a', { rot, top: '#f3e6d4' });
+      }
     }
     const built = gb.build();
     if (built) { const mesh = new THREE.Mesh(built, vc(1.05)); mesh.castShadow = true; g.add(mesh); }
-    if (dress === 'wash') {
-      const names = ['cloth-shirt', 'cloth-towel', 'cloth-sock', 'cloth-sheet'];
-      let k = 0;
-      for (let x = x0 + 1.6; x < x1 - 1; x += 2.4) {
-        const piece = this.props?.piece(names[k % names.length]);
-        k++;
-        if (!piece) continue;
-        ironParts.push(this.stamp(piece.body, (u, v, w) => ({ x: x + u * 0.5, y: yAt(x) + v * 0.36, lat: r.lateral + 1.05 + w * 0.45 })));
-      }
-    }
+    if (dress === 'wash') this.hangLaundry(g, x0, x1, yAt, r.lateral);
     const im = mergeAttrs(ironParts);
     if (im) { const mesh = new THREE.Mesh(im, this.iron); mesh.castShadow = true; g.add(mesh); }
     return g;
+  }
+
+  /** Shirts, sheets and socks on the same dip as the rope, hung toward the facade. */
+  private hangLaundry(parent: THREE.Group, x0: number, x1: number, yAt: (x: number) => number, lateral: number): void {
+    const kinds: GarmentKind[] = ['sheet', 'shirt', 'towel', 'sock'];
+    const step = 4, sag = 0.2;
+    let n = 0;
+    for (let x = x0 + 0.55; x < x1 - 0.45; x += 1.05) {
+      const span0 = x0 + Math.floor((x - x0) / step) * step;
+      const span1 = Math.min(x1, span0 + step);
+      const t = (x - span0) / Math.max(0.01, span1 - span0);
+      const y = yAt(span0) + (yAt(span1) - yAt(span0)) * t - Math.sin(Math.PI * t) * sag;
+      const piece = garmentLocal(kinds[n % kinds.length], n + Math.round(x0));
+      piece.name = 'set-laundry';
+      piece.position.copy(this.L(x, y, lateral));
+      parent.add(piece);
+      n++;
+    }
   }
 
   /** Harbour warehouse: corrugated bays and a loading door. The gold coping is the ride. */
@@ -627,8 +666,9 @@ export class CourseView {
   }
 
   /**
-   * Swings, bounces and updrafts. One activity per chunk. Balloons and rope are code;
-   * lamp, sign, crane, chimney, vent, boat, bollard and awning are the baked CC0 pieces.
+   * Swings, bounces and updrafts. One activity per chunk. Awnings, laundry and balloon
+   * clusters are painted in the town's toon; lamp, sign, crane, chimney, vent and the
+   * fishing boat are the baked CC0 pieces, recoloured in the prop pipeline.
    * Anything below 2.6 m stays outside 1.6 m of the street centre, and every prop stands on the street or a facade.
    */
   private dressActivities(c: Chunk, g: THREE.Group, v: ChunkView): void {
@@ -639,9 +679,9 @@ export class CourseView {
     const pads = (c.bounces ?? []).map((id) => this.course.bounce(id)).filter((b): b is Bounce => !!b);
     let awningN = 0;
     for (const b of pads) {
-      if (b.kind === 'balloon') this.balloonDress(b, gb);
-      else if (b.kind === 'boat') this.boatDress(b, iron);
-      else this.awningDress(b, gb, iron, awningN++);
+      if (b.kind === 'balloon') this.balloonDress(b, g, v, gb);
+      else if (b.kind === 'boat') this.boatDress(b, g, v);
+      else this.awningDress(b, g, v, awningN++);
     }
     this.boatChain(pads.filter((b) => b.kind === 'boat'), gb, iron);
     for (const id of c.updrafts ?? []) { const u = this.course.updraft(id); if (u) this.updraftDress(u, g, v, gb, iron); }
@@ -657,7 +697,7 @@ export class CourseView {
   }
 
   /** Hanging rope in route metres. Sag is the dip at mid-span. */
-  private rope(gb: GeoBuilder, ax: number, ay: number, az: number, bx: number, by: number, bz: number, sag = 0.16, color = '#cbb89a'): void {
+  private rope(gb: GeoBuilder, ax: number, ay: number, az: number, bx: number, by: number, bz: number, sag = 0.16, color = '#cbb89a', radius = 0.07): void {
     const n = 7;
     const up = new THREE.Vector3(0, 1, 0);
     const q = new THREE.Quaternion();
@@ -675,7 +715,7 @@ export class CourseView {
       const len = Math.max(0.04, dir.length());
       q.setFromUnitVectors(up, dir.normalize());
       e.setFromQuaternion(q);
-      gb.add(new THREE.CylinderGeometry(0.07, 0.07, len, 6), A.clone().add(B).multiplyScalar(0.5), color, { rot: [e.x, e.y, e.z], top: '#f0e0c4' });
+      gb.add(new THREE.CylinderGeometry(radius, radius, len, radius < 0.04 ? 5 : 6), A.clone().add(B).multiplyScalar(0.5), color, { rot: [e.x, e.y, e.z], top: '#f0e0c4' });
     }
   }
 
@@ -751,27 +791,22 @@ export class CourseView {
     this.hangRope(sw, g, v);
   }
 
-  private balloonDress(b: Bounce, gb: GeoBuilder): void {
-    const dyes = ['#e4546a', '#f2c14e', '#6aaed4', '#f7f3ee'];
-    const r = Math.min(0.58, b.half * 0.82);
-    const puffs: [number, number, number, number][] = [[0, 0.08, 0, 1], [-0.38, -0.2, 0.1, 0.72], [0.36, -0.16, 0.05, 0.7], [0.06, 0.46, -0.06, 0.55]];
-    for (let i = 0; i < puffs.length; i++) {
-      const [ox, oy, oz, sc] = puffs[i];
-      gb.add(new THREE.SphereGeometry(r * sc, 12, 9), this.L(b.x + ox, b.y + oy, b.lateral + oz), dyes[i], { top: '#fffaf4' });
-      gb.add(new THREE.SphereGeometry(0.05, 6, 5), this.L(b.x + ox, b.y + oy - r * sc, b.lateral + oz), '#3a3642');
-    }
+  private balloonDress(b: Bounce, g: THREE.Group, v: ChunkView, gb: GeoBuilder): void {
+    const cluster = balloonLocal(b.id);
+    cluster.name = 'set-balloon';
+    cluster.position.copy(this.L(b.x, b.y, b.lateral));
+    g.add(cluster);
+    this.trackSoft(v, cluster, b.id, 0.06, 1.5);
     const street = this.streetY(b.x, b.y - 1.05);
     const postLat = Math.max(b.lateral + 0.35, 2.45);
-    this.rope(gb, b.x, b.y - r * 0.35, b.lateral, b.x + 0.1, street + 1.05, postLat, 0.28, '#8d7b66');
+    this.rope(gb, b.x, b.y - 0.55, b.lateral, b.x + 0.1, street + 1.05, postLat, 0.28, '#8d7b66', 0.02);
     gb.add(new THREE.CylinderGeometry(0.07, 0.09, 1.05, 6), this.L(b.x + 0.1, street + 0.52, postLat), '#4a3c34', { top: '#8d7360' });
     gb.add(new THREE.SphereGeometry(0.1, 7, 6), this.L(b.x + 0.1, street + 1.08, postLat), '#8a6238', { top: '#e0b070' });
   }
 
-  private boatDress(b: Bounce, iron: THREE.BufferGeometry[]): void {
+  private boatDress(b: Bounce, g: THREE.Group, v: ChunkView): void {
     const street = this.streetY(b.x, b.y - 0.42);
-    // Pixor fishing boat: length on local Z, beam on local X, mast up. Laid along the quay it
-    // faces the chase camera as a tan stern. Turn the length across the view so the hull, blue
-    // stripe, cabin and mast read, bow out over the water. No crate fallback.
+    // Pixor hull, painted in the town palette and turned broadside. Its own group so it can bob.
     const fish = this.props?.piece('boat-fish');
     if (!fish) return;
     const P = fish.body.getAttribute('position');
@@ -779,11 +814,46 @@ export class CourseView {
     for (let i = 0; i < P.count; i++) zMin = Math.min(zMin, P.getZ(i));
     const sc = 1.18;
     const near = Math.max(1.85, bounceRiderLateral(b) - 0.25);
-    iron.push(this.stamp(fish.body, (u, v, w) => ({
+    const geo = this.stamp(fish.body, (u, vv, w) => ({
       x: b.x + u * sc,
-      y: street + 0.02 + v * sc,
+      y: street + 0.02 + vv * sc,
       lat: near + (w - zMin) * sc,
-    })));
+    }), 'along');
+    this.paintHull(geo);
+    geo.computeBoundingBox();
+    const c = geo.boundingBox!.getCenter(new THREE.Vector3());
+    geo.translate(-c.x, -c.y, -c.z);
+    const hull = new THREE.Group();
+    hull.name = 'set-boat';
+    const mesh = new THREE.Mesh(geo, this.iron);
+    mesh.castShadow = true;
+    hull.add(mesh);
+    hull.position.copy(c);
+    g.add(hull);
+    this.trackSoft(v, hull, b.id, 0.028, 0.85);
+  }
+
+  /** Multiply the baked hull colours. The blue stripe and the wood stay; the flat fills break up. */
+  private paintHull(geo: THREE.BufferGeometry): void {
+    const C = geo.getAttribute('color');
+    const P = geo.getAttribute('position');
+    let y0 = Infinity, y1 = -Infinity;
+    for (let i = 0; i < P.count; i++) {
+      const y = P.getY(i);
+      if (y < y0) y0 = y;
+      if (y > y1) y1 = y;
+    }
+    const span = Math.max(1e-4, y1 - y0);
+    for (let i = 0; i < C.count; i++) {
+      const y = (P.getY(i) - y0) / span;
+      const h = hash(P.getX(i) * 2.3 + i * 0.017, P.getZ(i) * 1.7);
+      const k = (0.9 + 0.14 * h) * (0.86 + 0.18 * y);
+      C.setXYZ(i, C.getX(i) * k, C.getY(i) * k, C.getZ(i) * k);
+    }
+  }
+
+  private trackSoft(v: ChunkView, group: THREE.Group, id: number, bob: number, bobRate: number): void {
+    v.soft.push({ id, group, hit: -1, phase: id * 0.7, baseY: group.position.y, bob, bobRate });
   }
 
   /** Quay rope from a bollard through every boat in the chunk. */
@@ -805,36 +875,13 @@ export class CourseView {
     }
   }
 
-  /** Kenney awning, striped in town colours, mounted on the facade. Smaller than a street-wide slab. */
-  private awningDress(b: Bounce, gb: GeoBuilder, iron: THREE.BufferGeometry[], index: number): void {
-    const rot: [number, number, number] = [0, ROUTE_YAW, 0];
-    const facade = 4.52;
-    const dyes = ['#c4543a', '#2f6d86', '#c47a32'];
-    const stripe = new THREE.Color(dyes[index % dyes.length]);
-    const cream = new THREE.Color('#f4ead8');
-    const wood = new THREE.Color('#5c4030');
-    const narrow = this.props?.piece('awning');
-    const piece = this.props?.piece('awning-wide') ?? narrow;
-    const nativeW = piece && piece === narrow ? 0.4 : 0.8;
-    if (piece) {
-      // Uniform scale keeps the awning's own slope. Three of them step out from the plaster.
-      const sc = 3.1;
-      const tint = (u: number, v: number) => (v < 0.05 ? wood : (Math.floor((u + nativeW / 2) / (nativeW / 6)) % 2 === 0 ? cream : stripe));
-      for (let i = 0; i < 3; i++) {
-        const out = 0.15 + i * 0.42;
-        iron.push(this.stamp(piece.body, (u, v, w) => ({
-          x: b.x + u * sc,
-          y: b.y + 0.15 + (2 - i) * 0.22 + v * sc,
-          lat: facade - out - (w + 0.075) * sc,
-        }), 'along', tint));
-      }
-    } else {
-      for (let i = 0; i < 7; i++) {
-        const band = (i - 3) * (2.05 / 7);
-        gb.add(new THREE.BoxGeometry(2.05 / 7 + 0.01, 0.05, 2.05), this.L(b.x + band, b.y + 0.42, facade - 1.02), i % 2 ? dyes[index % dyes.length] : '#f4ead8', { rot });
-      }
-    }
-    gb.add(new THREE.BoxGeometry(2.5, 0.08, 0.1), this.L(b.x, b.y + 1.35, facade + 0.02), '#5c4030', { rot, top: '#8d7360' });
+  /** Doorway canvas on the right facade, at the pad's height. The landing is in the street; the squash still plays on this awning. */
+  private awningDress(b: Bounce, parent: THREE.Group, v: ChunkView, index: number): void {
+    const g = awningLocal(index);
+    g.name = 'set-awning';
+    g.position.copy(this.L(b.x, b.y, 4.55));
+    parent.add(g);
+    this.trackSoft(v, g, b.id, 0, 0);
   }
 
   private updraftDress(u: Updraft, g: THREE.Group, v: ChunkView, gb: GeoBuilder, iron: THREE.BufferGeometry[]): void {
@@ -862,8 +909,8 @@ export class CourseView {
     // The chimney stays on the facade. The column the player jumps into stands over the street, tall enough to read from down the road.
     const column = { x: (u.x0 + u.x1) / 2, y: u.y0 + 0.2, lat: 0.85 };
     const top = { x: column.x + Math.min(7, (u.corridorX1 - column.x) * 0.3), y: Math.max(column.y + 8, u.y1), lat: 0.45 };
-    this.addPlume(g, v, source, column, u.source === 'chimney', 10, 1.45);
-    this.addPlume(g, v, column, top, u.source === 'chimney', 28, 3.15);
+    this.addPlume(g, v, source, column, u.source === 'chimney', 8, 1.15);
+    this.addPlume(g, v, column, top, u.source === 'chimney', 26, 2.35);
   }
 
   /** Soft rising wisps. Sprites, not flat discs. The shared map is not disposed with a chunk. */
@@ -876,6 +923,7 @@ export class CourseView {
         transparent: true, depthWrite: false, fog: false, opacity: 0.85,
       });
       const sprite = new THREE.Sprite(mat);
+      sprite.name = 'set-wisp';
       sprite.renderOrder = 6;
       sprite.frustumCulled = false;
       g.add(sprite);
@@ -886,6 +934,7 @@ export class CourseView {
         phase: i / n,
         speed: 0.16 + (i % 5) * 0.025,
         scale: scale * (0.75 + (i % 4) * 0.18),
+        warm,
         chunkX: v.chunk.x0, chunkY: v.chunk.y0,
       });
     }
@@ -896,30 +945,24 @@ export class CourseView {
     const c = document.createElement('canvas');
     c.width = c.height = 128;
     const g = c.getContext('2d')!;
-    const puff = (x: number, y: number, r: number, a: number) => {
-      const grd = g.createRadialGradient(x, y, r * 0.04, x, y, r);
-      grd.addColorStop(0, `rgba(255,255,255,${a})`);
-      grd.addColorStop(0.42, `rgba(255,255,255,${(a * 0.32).toFixed(3)})`);
+    // an S of soft brush curls: dense at the belly, gone at the tail. No hard disc.
+    const brush = (x: number, y: number, rx: number, ry: number, a: number) => {
+      const grd = g.createRadialGradient(x, y - ry * 0.15, rx * 0.05, x, y, Math.max(rx, ry));
+      grd.addColorStop(0, `rgba(255,248,236,${a})`);
+      grd.addColorStop(0.38, `rgba(255,255,255,${(a * 0.4).toFixed(3)})`);
       grd.addColorStop(1, 'rgba(255,255,255,0)');
       g.fillStyle = grd;
       g.beginPath();
-      g.ellipse(x, y, r * 0.7, r, 0, 0, Math.PI * 2);
+      g.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
       g.fill();
     };
-    puff(64, 78, 36, 0.42);
-    puff(46, 66, 22, 0.26);
-    puff(84, 60, 20, 0.24);
-    puff(58, 44, 16, 0.2);
-    puff(74, 96, 18, 0.18);
-    const tail = g.createLinearGradient(64, 16, 64, 120);
-    tail.addColorStop(0, 'rgba(255,255,255,0)');
-    tail.addColorStop(0.35, 'rgba(255,255,255,0.14)');
-    tail.addColorStop(0.72, 'rgba(255,255,255,0.06)');
-    tail.addColorStop(1, 'rgba(255,255,255,0)');
-    g.fillStyle = tail;
-    g.beginPath();
-    g.ellipse(64, 72, 14, 50, 0, 0, Math.PI * 2);
-    g.fill();
+    brush(72, 108, 14, 11, 0.28);
+    brush(52, 94, 18, 13, 0.48);
+    brush(46, 76, 13, 15, 0.34);
+    brush(64, 62, 20, 14, 0.5);
+    brush(80, 48, 14, 13, 0.32);
+    brush(68, 34, 10, 11, 0.18);
+    brush(56, 22, 8, 9, 0.08);
     const tex = new THREE.CanvasTexture(c);
     tex.colorSpace = THREE.SRGBColorSpace;
     this.wispTex = tex;

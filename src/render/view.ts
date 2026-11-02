@@ -420,6 +420,9 @@ export class GameView {
       case 'grab-start':
         this.rider.kick(0.1);
         break;
+      case 'bounce':
+        this.courseView?.squashPad(e.bounceId);
+        break;
       case 'fail': {
         const c = this.courseView?.course;
         const lip = c ? c.maxHeightAhead(e.info.x - 14, 18) : e.info.y;

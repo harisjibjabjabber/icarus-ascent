@@ -336,6 +336,15 @@ def kenney_piece(path, colormap, foot=True):
         pos[:, 2] -= pos[:, 2].mean()
     return pos, nor, col, uv, tl, idx, np.zeros(0, np.int64)
 
+def brush(piece, amt=0.09):
+    """A second painted pass: soft brush variation and a little light from above. Hue stays."""
+    pos, nor, col, uv, tl, idx, glow = piece
+    n = np.sin(pos[:, 0] * 2.1 + 0.4) * np.cos(pos[:, 2] * 1.7) * np.sin(pos[:, 1] * 2.4 + 1.2)
+    broad = np.sin(pos[:, 0] * 0.55 + pos[:, 1] * 0.35)
+    k = (1 + amt * (0.65 * n + 0.35 * broad)) * (0.92 + 0.12 * np.clip(nor[:, 1], -1, 1))
+    col = np.clip(col * k[:, None], 0, 1)
+    return pos, nor, col, uv, tl, idx, glow
+
 def activities(blob, index):
     def go(name, piece):
         pack(name, *piece, blob, index)
@@ -343,9 +352,9 @@ def activities(blob, index):
     W = os.path.join(PIX, 'pixor-library-washing-line.glb')
     for piece, node in (('cloth-sheet', 'Washing sheet'), ('cloth-shirt', 'Washing shirt'),
                         ('cloth-sock', 'Washing sock A'), ('cloth-towel', 'Washing towel')):
-        go(piece, pixor_parts(W, keep={node}, hang=True))
+        go(piece, brush(pixor_parts(W, keep={node}, hang=True), 0.07))
     go('bracket', pixor_parts(os.path.join(PIX, 'pixor-library-sign-inn.glb'), keep={'Sign bracket'}, wall=True))
-    go('boat-fish', pixor_parts(os.path.join(PIX, 'pixor-library-fishing-boat.glb'), foot=True))
+    go('boat-fish', brush(pixor_parts(os.path.join(PIX, 'pixor-library-fishing-boat.glb'), foot=True)))
     go('bollard', pixor_parts(os.path.join(PIX, 'pixor-library-pier-post.glb'), foot=True))
     go('balloon', pixor_parts(os.path.join(PIX, 'pixor-library-hot-air-balloon.glb'), foot=True))
     go('lamp-oil', pixor_parts(os.path.join(PIX, 'pixor-library-street-lamp-oil.glb'), foot=True))
