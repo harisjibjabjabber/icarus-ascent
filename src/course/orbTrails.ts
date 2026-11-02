@@ -5,6 +5,7 @@
 import type { Feature, Gap, Obstacle, Rail, Surface, Wall } from './course';
 import { Course } from './course';
 import type { OrbPlacement, OrbPickup, OrbTier } from './orbs';
+import { SKY_BALLOON_VY, SKY_G, SKY_JUMP_VY, SKY_SPEED, type SkyLayout } from './sky';
 
 export interface OrbTrailContext {
   phraseId: string;
@@ -357,6 +358,63 @@ export function stampOrbTrails(out: OrbPlacement[], ctx: OrbTrailContext): void 
   }
 
   dedupe(out);
+}
+
+function yOn(points: { x: number; y: number }[], x: number): number {
+  for (let i = 1; i < points.length; i++) {
+    if (x <= points[i].x) {
+      const a = points[i - 1], b = points[i];
+      const t = (x - a.x) / Math.max(1e-6, b.x - a.x);
+      return a.y + (b.y - a.y) * t;
+    }
+  }
+  return points[points.length - 1].y;
+}
+
+/**
+ * Gold every 2.5 m, 0.9 m above each sky line and along the hop and balloon arcs.
+ * Purple at the apex of the last balloon, or of the line-1 hop when the segment has no ladder.
+ */
+export function stampSkyTrails(out: OrbPlacement[], L: SkyLayout, nextTrailId: () => number): void {
+  const step = 2.5;
+  const lift = 0.9;
+  for (const line of L.lines) {
+    const pts: { x: number; y: number; lat: number }[] = [];
+    const x0 = line.points[0].x, x1 = line.points[line.points.length - 1].x;
+    for (let x = x0; x <= x1 + 1e-6; x += step) pts.push({ x, y: yOn(line.points, x) + lift, lat: 0 });
+    pushTrail(out, nextTrailId(), 'common', 'grind', pts);
+  }
+  const arc = (x0: number, y0: number, vy: number, x1: number): { x: number; y: number; lat: number }[] => {
+    const pts: { x: number; y: number; lat: number }[] = [];
+    for (let x = x0; x <= x1 + 1e-6; x += step) {
+      const t = (x - x0) / SKY_SPEED;
+      pts.push({ x, y: y0 + vy * t - 0.5 * SKY_G * t * t + lift, lat: 0 });
+    }
+    return pts;
+  };
+  for (const h of L.hops) {
+    if (h.action !== 'jump' || h.line === undefined) continue;
+    const x = (h.x0 + h.x1) / 2;
+    const dst = L.lines[h.line].points[0].x;
+    pushTrail(out, nextTrailId(), 'common', 'air', arc(x, L.lines[0].anchors[0].y, SKY_JUMP_VY, dst));
+  }
+  for (let i = 0; i + 1 < L.clusters.length; i++) {
+    const a = L.clusters[i], b = L.clusters[i + 1];
+    pushTrail(out, nextTrailId(), 'common', 'air', arc(a.x, a.y, SKY_BALLOON_VY, b.x));
+  }
+  const last = L.clusters[L.clusters.length - 1];
+  if (last) {
+    const t = SKY_BALLOON_VY / SKY_G;
+    pushTrail(out, nextTrailId(), 'rare', 'air', [{ x: last.x + SKY_SPEED * t, y: last.y + SKY_BALLOON_VY * t - 0.5 * SKY_G * t * t, lat: 0 }]);
+  } else {
+    const h = L.hops.find((q) => q.action === 'jump');
+    if (h) {
+      const t = SKY_JUMP_VY / SKY_G;
+      const x0 = (h.x0 + h.x1) / 2;
+      const y0 = L.lines[0].anchors[0].y;
+      pushTrail(out, nextTrailId(), 'rare', 'air', [{ x: x0 + SKY_SPEED * t, y: y0 + SKY_JUMP_VY * t - 0.5 * SKY_G * t * t, lat: 0 }]);
+    }
+  }
 }
 
 export function yAtSurfaces(surfaces: Surface[], x: number): number {
