@@ -25,6 +25,8 @@ const DYES = ['#fff8ee', '#c96a42', '#3f8f8a', '#d9a441', '#a99ad0'];
 
 const Y_UP = new THREE.Vector3(0, 1, 0);
 const ropeMat = toon('#ffffff', { vertexColors: true, rim: 0.75 });
+/** The rideable rope stays hemp-coloured even in the toon shadow band. */
+const hempMat = toon(HEMP, { rim: 0.2, emissive: '#f3ddb0', emissiveIntensity: 0.72 });
 const clothMat = toon('#ffffff', { vertexColors: true, side: THREE.DoubleSide, sway: true, rim: 0.85 });
 const clothInk = toon(INK, { sway: true, side: THREE.FrontSide });
 clothInk.polygonOffset = true;
@@ -236,7 +238,7 @@ export function buildSkyLine(opts: {
     for (let k = 0; k < n; k++) {
       const x0 = a.x + span * (k / n);
       const x1 = a.x + span * ((k + 1) / n);
-      addSpan(rope, opts.place, x0, yAt(x0), latAt(x0), x1, yAt(x1), latAt(x1), 0.05, HEMP, HEMP_LIT);
+      addSpan(rope, opts.place, x0, yAt(x0), latAt(x0), x1, yAt(x1), latAt(x1), 0.034, HEMP, HEMP_LIT);
     }
   }
 
@@ -248,7 +250,7 @@ export function buildSkyLine(opts: {
 
   const ropeGeo = rope.build();
   if (ropeGeo) {
-    const mesh = new THREE.Mesh(ropeGeo, ropeMat);
+    const mesh = new THREE.Mesh(ropeGeo, hempMat);
     mesh.name = 'sky-rope';
     mesh.userData.lateral = opts.anchors[0].lateral;
     mesh.userData.laterals = opts.anchors.map((a) => a.lateral);
@@ -351,24 +353,33 @@ function facadeTie(gb: GeoBuilder, place: (x: number, y: number, lat: number) =>
 function quayCrane(gb: GeoBuilder, place: (x: number, y: number, lat: number) => THREE.Vector3, x: number, y: number, street: number, ropeLat: number): void {
   const rot: [number, number, number] = [0, ROUTE_YAW, 0];
   const foot = (TOWN.streetEdge + TOWN.front) * 0.5;
-  const mastTop = y + 1.7;
-  const mastH = Math.max(1.2, mastTop - street);
-  gb.add(new THREE.BoxGeometry(1.15, 0.22, 1.15), place(x, street + 0.1, foot), STONE, { rot, top: STONE_LIT });
-  gb.add(new THREE.CylinderGeometry(0.07, 0.12, mastH, 8), place(x, street + mastH / 2, foot), WOOD, { top: WOOD_LIT });
-  gb.add(new THREE.SphereGeometry(0.09, 8, 6), place(x, street + mastH, foot), WOOD_DARK);
-  addSpan(gb, place, x, mastTop, foot, x, y + 0.45, ropeLat, 0.055, WOOD, WOOD_LIT);
-  addSpan(gb, place, x, street + mastH * 0.62, foot, x, (mastTop + y + 0.45) / 2, (foot + ropeLat) / 2, 0.032, WOOD_DARK, WOOD);
-  addSpan(gb, place, x, y + 0.45, ropeLat, x, y, ropeLat, 0.014, HEMP, HEMP_LIT);
-  gb.add(new THREE.SphereGeometry(0.07, 8, 6), place(x, y + 0.45, ropeLat), WOOD_LIT, { top: HEMP_LIT });
+  // One boom from a stone foot on the quay up to the rope. A row of horizontal arms reads as a rail.
+  const tip = y + 0.85;
+  gb.add(new THREE.BoxGeometry(1.7, 0.34, 1.7), place(x, street + 0.15, foot), STONE, { rot, top: STONE_LIT });
+  gb.add(new THREE.CylinderGeometry(0.2, 0.28, 1.15, 8), place(x, street + 0.75, foot), WOOD, { top: WOOD_LIT });
+  timber(gb, place, x, street + 1.15, foot, x, tip, ropeLat, 0.24, WOOD, WOOD_LIT);
+  addSpan(gb, place, x, tip, ropeLat, x, y, ropeLat, 0.016, HEMP, HEMP_LIT);
+  gb.add(new THREE.SphereGeometry(0.16, 8, 6), place(x, tip, ropeLat), WOOD_DARK, { top: WOOD_LIT });
   const wall = -TOWN.front;
   gb.add(new THREE.BoxGeometry(0.18, 0.55, 0.08), place(x, y, wall + 0.06), WOOD, { rot, top: WOOD_LIT });
   gb.add(new THREE.BoxGeometry(0.1, 0.38, 0.05), place(x, y, wall + 0.1), DYES[Math.abs(Math.round(x)) % DYES.length], { rot });
   addSpan(gb, place, x, y + 0.05, wall + 0.12, x, y, ropeLat, 0.014, HEMP, HEMP_LIT);
 }
 
+/** A square timber, long axis along the span. Reads as a beam, not a rail. */
+function timber(gb: GeoBuilder, place: (x: number, y: number, lat: number) => THREE.Vector3, x0: number, y0: number, lat0: number, x1: number, y1: number, lat1: number, thick: number, color: string, top: string): void {
+  const A = place(x0, y0, lat0);
+  const B = place(x1, y1, lat1);
+  const dir = B.clone().sub(A);
+  const len = Math.max(0.05, dir.length());
+  const q = new THREE.Quaternion().setFromUnitVectors(Y_UP, dir.clone().multiplyScalar(1 / len));
+  const e = new THREE.Euler().setFromQuaternion(q);
+  gb.add(new THREE.BoxGeometry(thick, len, thick * 0.7), A.clone().add(B).multiplyScalar(0.5), color, { rot: [e.x, e.y, e.z], top });
+}
+
 const clothBasis = new THREE.Matrix4();
 {
-  const tilt = new THREE.Matrix4().makeRotationX(-0.5);
+  const tilt = new THREE.Matrix4().makeRotationX(-0.68);
   const facing = new THREE.Matrix4().makeBasis(ROUTE_RIGHT, Y_UP, ROUTE_DIR.clone().negate());
   clothBasis.multiplyMatrices(facing, tilt);
 }

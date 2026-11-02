@@ -43,16 +43,18 @@ function ribbons(): THREE.ShaderMaterial {
       uniform float uTime;
       varying vec2 vUv;
       void main() {
-        float core = 1.0 - abs(vUv.y - 0.5) * 2.0;
+        float d = min(vUv.y, 1.0 - vUv.y);
+        vec3 ink = vec3(0.34, 0.18, 0.11);
         vec3 cream = vec3(${CREAM.r.toFixed(4)}, ${CREAM.g.toFixed(4)}, ${CREAM.b.toFixed(4)});
         vec3 white = vec3(${WHITE.r.toFixed(4)}, ${WHITE.g.toFixed(4)}, ${WHITE.b.toFixed(4)});
-        vec3 col = mix(cream, white, smoothstep(0.15, 0.85, core));
-        float scroll = fract(vUv.x * 0.35 - uTime * 0.55);
+        vec3 col = mix(ink, cream, smoothstep(0.0, 0.14, d));
+        col = mix(col, white, smoothstep(0.14, 0.42, d));
+        float scroll = fract(vUv.x * 4.0 - uTime * 0.55);
         float gleam = smoothstep(0.46, 0.5, scroll) * smoothstep(0.58, 0.5, scroll);
-        col += vec3(0.18) * gleam;
-        float edge = smoothstep(0.0, 0.06, vUv.y) * smoothstep(1.0, 0.92, vUv.y);
-        float ends = smoothstep(0.0, 0.015, vUv.x) * smoothstep(1.0, 0.975, vUv.x);
-        gl_FragColor = vec4(col, 0.92 * edge * ends);
+        col += vec3(0.16) * gleam * smoothstep(0.18, 0.4, d);
+        float edge = smoothstep(0.0, 0.035, d);
+        float ends = smoothstep(0.0, 0.02, vUv.x) * smoothstep(1.0, 0.97, vUv.x);
+        gl_FragColor = vec4(col, 0.8 * edge * ends);
       }`,
   });
   return ribbonMat;
@@ -81,7 +83,7 @@ function haze(): THREE.ShaderMaterial {
       void main() {
         float edge = smoothstep(0.0, 0.18, vUv.y) * smoothstep(1.0, 0.82, vUv.y);
         float ends = smoothstep(0.0, 0.04, vUv.x) * smoothstep(1.0, 0.94, vUv.x);
-        gl_FragColor = vec4(1.0, 0.97, 0.9, 0.42 * edge * ends);
+        gl_FragColor = vec4(1.0, 0.96, 0.86, 0.28 * edge * ends);
       }`,
   });
   return hazeMat;
@@ -137,9 +139,9 @@ interface Mote {
 interface RibbonSpec { rad0: number; rad1: number; width: number; revs: number; phase: number; }
 
 /**
- * One grate and its column. The column rises 9.5 m and leans forward the
- * same distance, so the gust (which climbs through the middle of it) has
- * streaks around Ao.
+ * One grate and its column. The column rises 10 m and leans a few metres
+ * forward, so it stacks as a column down the street and still wraps Ao
+ * while the gust lifts her.
  */
 export class TuftFx {
   readonly group = new THREE.Group();
@@ -161,9 +163,9 @@ export class TuftFx {
     this.group.name = 'sky-tuft';
     const { place, x, streetY, seed } = opts;
     const lat0 = opts.lat ?? 0;
-    const rise = 9.5;
+    const rise = 10;
     this.origin = place(x, streetY, lat0);
-    const tip = place(x + rise, streetY + rise, lat0);
+    const tip = place(x + 4.2, streetY + rise, lat0);
     const lat = place(x, streetY, lat0 + 1);
     const axis = tip.clone().sub(this.origin);
     this.length = axis.length();
@@ -173,21 +175,21 @@ export class TuftFx {
 
     this.grate(place, x, streetY, lat0);
     const specs: RibbonSpec[] = [
-      { rad0: 0.35, rad1: 1.15, width: 0.7, revs: 2.4, phase: 0.2 },
-      { rad0: 0.55, rad1: 1.45, width: 0.62, revs: 2.1, phase: 2.2 },
-      { rad0: 1.3, rad1: 2.8, width: 0.95, revs: 1.6, phase: 0.8 },
-      { rad0: 1.7, rad1: 3.5, width: 1.05, revs: 1.35, phase: 2.6 },
-      { rad0: 2.0, rad1: 3.3, width: 0.85, revs: 1.8, phase: 4.1 },
-      { rad0: 1.15, rad1: 2.6, width: 0.78, revs: 2.6, phase: 5.2 },
+      { rad0: 0.2, rad1: 0.85, width: 0.55, revs: 0.45, phase: 0.3 },
+      { rad0: 0.4, rad1: 1.25, width: 0.48, revs: 0.7, phase: 2.0 },
+      { rad0: 0.7, rad1: 1.75, width: 0.62, revs: 1.05, phase: 0.8 },
+      { rad0: 1.0, rad1: 2.25, width: 0.55, revs: 0.65, phase: 3.3 },
+      { rad0: 0.35, rad1: 1.5, width: 0.46, revs: 1.45, phase: 4.5 },
+      { rad0: 1.25, rad1: 2.45, width: 0.52, revs: 0.9, phase: 5.4 },
     ];
     for (const spec of specs) this.addRibbon(spec, ribbons());
-    this.addRibbon({ rad0: 0.2, rad1: 1.6, width: 2.5, revs: 0.35, phase: 0.4 }, haze());
+    this.addRibbon({ rad0: 0.15, rad1: 1.3, width: 0.7, revs: 0.22, phase: 0.5 }, haze());
 
-    this.clouds.push(this.motes(leafShape(), 80, seed, LEAF, 'sky-tuft-motes', 0.4, 2.4, 1.7, 3.1, 1.8));
-    this.clouds.push(this.motes(petalShape(), 48, seed + 90, PETAL, 'sky-tuft-petals', 0.25, 2.0, 1.5, 2.6, 2.2));
+    this.clouds.push(this.motes(leafShape(), 40, seed, LEAF, 'sky-tuft-motes', 0.35, 2.1, 0.62, 1.15, 1.5));
+    this.clouds.push(this.motes(petalShape(), 26, seed + 90, PETAL, 'sky-tuft-petals', 0.2, 1.7, 0.42, 0.82, 1.8));
 
-    this.dustMat = new THREE.MeshBasicMaterial({ color: '#fff1d0', transparent: true, opacity: 0.62, depthWrite: false, side: THREE.DoubleSide });
-    const ring = new THREE.RingGeometry(0.55, 2.15, 32);
+    this.dustMat = new THREE.MeshBasicMaterial({ color: '#fff1d0', transparent: true, opacity: 0.7, depthWrite: false, side: THREE.DoubleSide });
+    const ring = new THREE.RingGeometry(0.85, 4.1, 36);
     ring.rotateX(-Math.PI / 2);
     this.dust = new THREE.Mesh(ring, this.dustMat);
     this.dust.name = 'sky-tuft-dust';
@@ -196,8 +198,8 @@ export class TuftFx {
     this.dust.frustumCulled = false;
     this.group.add(this.dust);
 
-    this.glowMat = new THREE.MeshBasicMaterial({ color: '#ffe7b0', transparent: true, opacity: 0.72, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
-    const glow = new THREE.Mesh(new THREE.CircleGeometry(1.85, 20), this.glowMat);
+    this.glowMat = new THREE.MeshBasicMaterial({ color: '#ffe7b0', transparent: true, opacity: 0.8, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
+    const glow = new THREE.Mesh(new THREE.CircleGeometry(3.8, 24), this.glowMat);
     glow.rotation.x = -Math.PI / 2;
     glow.position.copy(place(x, streetY + 0.05, lat0));
     glow.renderOrder = 2;
@@ -251,25 +253,28 @@ export class TuftFx {
     const prev = new THREE.Vector3();
     const tang = new THREE.Vector3();
     const across = new THREE.Vector3();
-    let metres = 0;
     for (let i = 0; i <= steps; i++) {
       const t = i / steps;
       const along = t * this.length;
       const ang = spec.phase + t * spec.revs * Math.PI * 2;
       const rad = spec.rad0 + (spec.rad1 - spec.rad0) * t;
       this.point(along, ang, rad, a);
-      if (i > 0) metres += a.distanceTo(prev);
       const ahead = Math.min(this.length, along + 0.3);
       this.point(ahead, spec.phase + ((ahead / this.length) * spec.revs * Math.PI * 2), spec.rad0 + (spec.rad1 - spec.rad0) * (ahead / this.length), tang);
-      tang.sub(a).normalize();
-      across.crossVectors(tang, this.dir).normalize();
+      tang.sub(a);
+      if (tang.lengthSq() < 1e-8) tang.copy(this.dir);
+      tang.normalize();
+      // Width stays across the street, so the chase camera sees the face of the streak
+      // and not its edge. Drop any component along the streak itself.
+      across.copy(this.side).addScaledVector(tang, -this.side.dot(tang));
       if (across.lengthSq() < 1e-6) across.copy(this.side);
+      across.normalize();
       const half = spec.width * (0.82 + 0.18 * Math.sin(ang * 2));
       for (const s of [-1, 1]) {
         const p = a.clone().addScaledVector(across, s * half);
         pos.push(p.x, p.y, p.z);
         nrm.push(this.bin.x, this.bin.y, this.bin.z);
-        uv.push(metres, s < 0 ? 0 : 1);
+        uv.push(t, s < 0 ? 0 : 1);
       }
       if (i > 0) {
         const v = i * 2;
