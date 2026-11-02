@@ -971,12 +971,11 @@ export class Simulation {
       const xLo = Math.min(p0.x, p1.x), xHi = Math.max(p0.x, p1.x);
       if (xHi < b.x - half || xLo > b.x + half) continue;
       const yLo = Math.min(p0.y, p1.y), yHi = Math.max(p0.y, p1.y);
-      const rad = b.kind === 'balloon' ? b.half : 0.35;
+      const rad = b.half;
       if (yHi < b.y - rad || yLo > b.y + rad) continue;
-      if (b.kind !== 'balloon' && !(p0.y >= b.y - 0.05 && p1.y <= b.y + 0.05)) continue;
       s.x = Math.min(Math.max(s.x, b.x - half), b.x + half);
-      s.y = b.kind === 'balloon' ? b.y : Math.max(s.y, b.y);
-      s.vy = b.kind === 'balloon' ? K.balloonVy : Math.max(K.bounceMinVy, -s.vy * 0.62);
+      s.y = b.y;
+      s.vy = K.balloonVy;
       s.bounced = [...s.bounced, b.id];
       s.bounceId = b.id; s.leftBy = 'bounce'; s.launchVy = s.vy;
       this.emit({ type: 'bounce', bounceId: b.id, kind: b.kind, x: s.x, y: s.y });

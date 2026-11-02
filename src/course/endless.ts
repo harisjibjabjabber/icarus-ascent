@@ -1145,16 +1145,7 @@ export class EndlessCourse extends Course {
       for (const s of surfaces) if (x >= Course.x0(s) && x <= Course.x1(s)) return Course.sample(s, x).y;
       throw new Error(`no ground at ${x} in ${plan.spec.id}`);
     };
-    const bounces: Bounce[] = b.bounces.map((q) => {
-      const pad: Bounce = { id: this.ids.bo++, ...q };
-      if (plan.zone === 'harbour' && pad.kind === 'balloon' && !pad.sky) {
-        pad.kind = 'boat';
-        pad.y = ground(pad.x) + 0.42;
-        pad.half = 1.05;
-        pad.lateral = 2.05;
-      }
-      return pad;
-    });
+    const bounces: Bounce[] = b.bounces.map((q) => ({ id: this.ids.bo++, ...q }));
     const updrafts: Updraft[] = b.updrafts.map((q) => ({ id: this.ids.up++, ...q, source: plan.zone === 'harbour' ? 'vent' as const : q.source }));
     const obstacles: Obstacle[] = b.obstacles.map((q) => ({
       id: this.ids.o++, kind: q.kind, x: q.x, baseY: ground(q.x),

@@ -173,14 +173,6 @@ export function buildOpeningCourse(): Course {
   flat(28);
   pots.push(cur().x - 12, cur().x - 8);
 
-  // Optional lessons. The street never breaks, so skipping a move still finishes the run.
-  flat(8);
-  const bCp = cur().x;
-  const bY = cur().y;
-  const boatSpecs = [0, 1, 2, 3].map((i) => ({ x: bCp + 9 + i * 4.4, y: bY + 0.42, half: 1.05, lateral: 2.05, kind: 'boat' as const }));
-  flat(30);
-  lesson({ title: 'Bounce', cpX: bCp, cpSpeed: 12, prompt: 'Jump onto the boats and bounce along the chain', keys: '↑ onto each boat', promptX0: bCp, promptX1: bCp + 14, featureX: boatSpecs[0].x, required: false });
-
   // ---------------------------------------------------------------- finish (harbour quay)
   const aF = cur().x;
   slope(26, -2.5);
@@ -199,12 +191,5 @@ export function buildOpeningCourse(): Course {
   const O = TUNING.obstacles;
   for (const x of pots) course.addObstacle('pot', x, O.potHalfWidth, O.potHeight);
   for (const x of pillars) course.addObstacle('pillar', x, O.pillarHalfWidth, O.pillarHeight);
-  const pads = boatSpecs.map((q) => course.addBounce(q));
-  course.addRide({
-    activity: 'bounce',
-    path: pads.map((p) => ({ x: p.x, y: p.y + 1.1, lateral: p.lateral * 0.75 })),
-    hardest: { x: pads[pads.length - 1].x, y: pads[pads.length - 1].y + 1.1, lateral: pads[pads.length - 1].lateral * 0.75, pickup: 'air' },
-  });
-  for (const h of course.chunks[0].rides ?? []) course.placeOrb({ x: h.hardest.x, y: h.hardest.y, lateral: h.hardest.lateral, tier: 'rare', pickup: h.hardest.pickup, trailId: 0, trailIdx: 0, trailLen: 1 });
   return course;
 }

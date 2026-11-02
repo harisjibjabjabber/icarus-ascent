@@ -6,9 +6,11 @@ Units: metres, seconds, m/s. **G** is the x where the tuft grate starts. **yS** 
 ## 0. Why (what the code does today)
 - The sim is 2D: x runs along the route and y is height. "Lateral" is used for presentation only.
 - **Washing line.** The `wash-line` grind spline runs *along* the route at lip+2.05 m. Its laundry is drawn on separate cross-street spans at street+4.5–5.6 m (`hangSpans`, `courseView.ts:787`). The thing you see is not the thing you grind, so Haris reads the line as horizontal, ungrindable and too high.
-- **Bounce phrase.** It puts 4 "balloon" pads at street+1.05 m and lateral 2.25 (`endless.ts:509`). In the harbour they become boats.
+- **Bounce phrase (retired on the street).** It used to put 4 pads at street+1.05 m and lateral 2.25; that lateral breaks the placement rule above. Street and harbour `bounce` phrases are removed in phase 0; balloons remain for the sky layer only (`Bounce.sky`).
 - **Updraft.** A chimney column at lateral 3.6 needs a deliberate jump in. It only gains 1.5 m, then gives a 2.35 s steered flight. It is not a ground tuft and it reaches no upper level.
 - **Cross-street props.** Laundry (`town.ts` laundry at g+5.7) and the bunting (street+5.7) cross the street right where an upper layer would fly.
+
+**Placement rule (interactive geometry).** Anything the rider must interact with is either **on the lane** — centred above or in the running path, lateral **0–0.3 m** — or, **for grind rails and wall rides only**, **slightly to the side** when it stays **close** (the existing street rails at about **1.15–1.2 m** and wall rides at about **2.4 m** already read and play well because they sit near the player). New layout must not place interactive geometry **farther out** than those existing rails and walls. **Do not change** the lateral of rails and wall rides already in the course. Nothing else sits far to the side (the old street `bounce` pads at lateral **2.25 m** and harbour boat bounces are out of spec and are removed in phase 0). Sky laundry lines in §1 currently alternate at **±1.1 m**; they should eventually be **re-centred over the street** to match this rule — that is sky-template work for C, not a retroactive move of today's street rails and walls.
 
 ## 1. Player-facing design
 **Loop:** you see a tuft, it lifts you, you grind lines along the street, hop between them, ride a balloon ladder, grind a top line, then glide down a descending line back to the street.
@@ -48,12 +50,12 @@ Units: metres, seconds, m/s. **G** is the x where the tuft grate starts. **yS** 
 ## 2. Fixes to existing pieces
 | Piece | Change | Owner |
 |---|---|---|
-| `wash-line`, town `updraft`, town `bounce` phrases | Remove them from `TOWN.phrases` and `weights`. Remove `wash-line` and `updraft` from harbour too; the harbour keeps `bounce` (boats). The flight code stays for later cliffs. | C |
+| `wash-line`, town `updraft`, town `bounce` phrases | Remove them from `TOWN.phrases` and `weights`. Remove `wash-line`, `updraft` and `bounce` from harbour too (no harbour boat bounces). The flight code stays for later cliffs. | C |
 | `hangSpans` cross-street laundry | Delete it. Laundry only appears under sky lines. | B |
 | Low `lineDress`/`highLine` with dress `wash` (wall-line, high-line) | Re-dress as `balcony` / `gutter` / `bunting` (C changes the values; B renders). | C, B |
 | Cross-street laundry in `town.ts` | Remove it from the near and far LOD. | B |
 | Bunting (approved) | Keep it, except within [segment.x0 − 10, segment.x1 + 10]. | B |
-| Balloons | Only on the sky layer (`Bounce.sky`). The harbour's balloon→boat conversion skips `sky` pads. | C |
+| Balloons | Only on the sky layer (`Bounce.sky`). No street or harbour bounce pads. | C |
 | Front-row houses in sky zones | Force 3 floors (eave 9.36 m) on both sides from x0 − 10 to x1 + 10. Today they are 2–3 floors, and a 6.24 m eave sits under the 6.4 m lines. Flower boxes on at least 50% of 3rd-floor windows. | B |
 
 **Balloon art bar (Ghibli, no flat placeholders):**

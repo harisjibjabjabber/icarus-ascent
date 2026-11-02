@@ -45,15 +45,9 @@ export const COURSE_STYLE = {
 
 const vc = (rim = 1) => mat('#ffffff', { vertexColors: true, rim });
 
-/** Centre of a moored hull. The near gunwale stays outside the 1.6 m safe street. */
-export function boatCenterLateral(b: Bounce): number {
-  const zIn = b.id % 2 === 0 ? 1.1 : 1.2;
-  return Math.max(b.lateral + 0.45, 1.62 + zIn);
-}
-
-/** Rider offset while a bounce is live: on the pad, or on the near deck of a boat. */
+/** Rider lateral while a bounce pad is live (balloon tether point). */
 export function bounceRiderLateral(b: Bounce): number {
-  return b.kind === 'boat' ? boatCenterLateral(b) - 0.35 : b.lateral;
+  return b.lateral;
 }
 const hash = (a: number, b: number) => { const v = Math.sin(a * 127.1 + b * 311.7) * 43758.5453; return v - Math.floor(v); };
 
@@ -805,11 +799,7 @@ export class CourseView {
     const iron: THREE.BufferGeometry[] = [];
     const glow: THREE.BufferGeometry[] = [];
     const pads = (c.bounces ?? []).map((id) => this.course.bounce(id)).filter((b): b is Bounce => !!b);
-    for (const b of pads) {
-      if (b.kind === 'balloon') this.balloonDress(b, g, v);
-      else if (b.kind === 'boat') this.boatDress(b, g, v);
-    }
-    this.boatChain(pads.filter((b) => b.kind === 'boat'), gb, iron);
+    for (const b of pads) this.balloonDress(b, g, v);
     for (const id of c.updrafts ?? []) { const u = this.course.updraft(id); if (u) this.updraftDress(u, g, v, iron); }
     const built = gb.build();
     if (built) { const mesh = new THREE.Mesh(built, vc(1.05)); mesh.castShadow = true; g.add(mesh); }
@@ -888,25 +878,6 @@ export class CourseView {
     return g;
   }
 
-  private boatDress(b: Bounce, g: THREE.Group, v: ChunkView): void {
-    const fish = this.props?.piece(SET_ASSET.boat);
-    if (!fish) return;
-    const street = this.streetY(b.x, b.y - 0.42);
-    const P = fish.body.getAttribute('position');
-    let zMin = Infinity, zMax = -Infinity;
-    for (let i = 0; i < P.count; i++) { zMin = Math.min(zMin, P.getZ(i)); zMax = Math.max(zMax, P.getZ(i)); }
-    const sc = 1;
-    // Broadside: length runs across the street so the chase camera sees the hull, centred on the bounce.
-    const center = boatCenterLateral(b);
-    const zMid = (zMin + zMax) / 2;
-    const tint = new THREE.Color(['#f4e6d4', '#e4d5cc', '#d7e3e1'][b.id % 3]);
-    this.placeSoft(v, g, fish, (u, vv, w) => ({
-      x: b.x + u * sc,
-      y: street + 0.02 + vv * sc,
-      lat: center + (w - zMid) * sc,
-    }), 'along', b.id, 0.028, 0.85, SET_ASSET.boat, 0.6, tint);
-  }
-
   /** A sourced mesh, centred so a landing can squash it. No stand-in when the slot is empty. */
   private placeSoft(v: ChunkView, parent: THREE.Group, piece: PropPiece, place: (u: number, vv: number, w: number) => { x: number; y: number; lat: number }, frame: 'along' | 'out' | 'cross', id: number, bob: number, bobRate: number, name: string, rim = 0.7, tint?: THREE.Color, ramp: 'set' | 'awning' = 'set'): void {
     const geo = this.stamp(piece.body, place, frame, undefined, tint);
@@ -936,25 +907,6 @@ export class CourseView {
       this.clothMats.set(key, m);
     }
     return m;
-  }
-
-  /** Quay rope from a bollard through every boat in the chunk. Nothing until the hull slot is filled. */
-  private boatChain(boats: Bounce[], gb: GeoBuilder, iron: THREE.BufferGeometry[]): void {
-    if (!boats.length || !this.props?.piece(SET_ASSET.boat)) return;
-    const ordered = [...boats].sort((a, b) => a.x - b.x);
-    const street = this.streetY(ordered[0].x, ordered[0].y - 0.42);
-    const postX = ordered[0].x - 2.3;
-    const postLat = boatCenterLateral(ordered[0]) + 0.85;
-    const bollard = this.props?.piece('bollard');
-    if (bollard) iron.push(this.stamp(bollard.body, (u, v, w) => ({ x: postX + u, y: street + v, lat: postLat + w })));
-    else gb.add(new THREE.CylinderGeometry(0.12, 0.16, 0.9, 7), this.L(postX, street + 0.45, postLat), '#5c534c');
-    let px = postX, py = street + 0.85, pz = postLat;
-    for (const b of ordered) {
-      const center = boatCenterLateral(b);
-      const y = this.streetY(b.x, b.y) + 0.7;
-      this.rope(gb, px, py, pz, b.x, y, center, 0.22, '#8d7b66');
-      px = b.x; py = y; pz = center;
-    }
   }
 
   /** Doorway canvas on the right shopfront. Decoration only. */

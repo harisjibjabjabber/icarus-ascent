@@ -9,7 +9,6 @@ export const TOWN: Zone = {
     'crest-pop', 'rollers', 'valley-launch', 'pop-chain', 'big-kicker', 'double-pop', 'high-line',
     'hop', 'pot', 'skim-pair', 'pot-pillar', 'stepdowns', 'ramp-flip', 'rail-launch', 'rail-gap', 'rail-gap-early',
     'wall-over', 'wall-gap', 'death-gauntlet', 'wall-tap', 'wall-long', 'wall-transfer', 'wall-line',
-    'bounce',
     'ramp-pillar', 'crest-pillar', 'gap-pillar',
   ],
   setPieces: ['sp-pot-gauntlet', 'sp-quay', 'sp-stepdown-flip', 'sp-rooftops', 'sp-rail-wall', 'sp-bell-tower', 'sp-canal', 'sp-crest-wall'],
@@ -22,7 +21,6 @@ export const TOWN: Zone = {
     'wall-over': 2.4,
     'death-gauntlet': 1.8,
     'rail-gap': 1.7,
-    bounce: 2.8,
   },
   waves: 3,
   theme: {

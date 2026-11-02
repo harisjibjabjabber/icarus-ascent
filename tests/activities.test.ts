@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import { EndlessCourse } from '../src/course/endless';
-import { buildOpeningCourse } from '../src/course/opening';
 import { Simulation } from '../src/sim/simulation';
 import { Autopilot, type AutopilotOptions } from '../src/diag/autopilot';
 import { TUNING } from '../src/tuning';
@@ -24,7 +23,7 @@ function ride(id: string, opts: AutopilotOptions, zones: string[] = ['town'], sp
 }
 
 describe('activity set pieces', () => {
-  it('balloons in town and boats in harbour bounce once each', () => {
+  it('balloon bounce pads trigger once each when engaged', () => {
     const lazy = ride('bounce', { minSpeed: 12 });
     expect(lazy.events.filter((e) => e.type === 'bounce').length).toBe(0);
     const go = ride('bounce', ENGAGED);
@@ -35,9 +34,6 @@ describe('activity set pieces', () => {
     expect(go.course.bounces.every((b) => b.kind === 'balloon')).toBe(true);
     const hook = go.chunk.rides?.find((h) => h.activity === 'bounce');
     expect(hook?.path.length).toBe(go.course.bounces.length);
-    const boats = ride('bounce', ENGAGED, ['harbour']);
-    expect(boats.course.bounces.every((b) => b.kind === 'boat')).toBe(true);
-    expect(boats.events.some((e) => e.type === 'bounce')).toBe(true);
   });
 
   it('a lazy rider still finishes bounce, and a chunk carries at most one activity', () => {
@@ -50,17 +46,5 @@ describe('activity set pieces', () => {
       const n = (c.bounces?.length ?? 0) > 0 ? 1 : 0;
       expect(n, c.spec).toBeLessThanOrEqual(1);
     }
-  });
-
-  it('the opening course teaches bounce and hangs a purple on its hardest point', () => {
-    const course = buildOpeningCourse();
-    expect(course.lessons.some((l) => l.title === 'Bounce' && !l.required)).toBe(true);
-    const rides = course.chunks[0].rides ?? [];
-    expect(rides.map((h) => h.activity)).toEqual(['bounce']);
-    for (const h of rides) {
-      expect(h.path.length).toBeGreaterThan(1);
-      expect(course.orbs.some((o) => o.tier === 'rare' && Math.hypot(o.x - h.hardest.x, o.y - h.hardest.y) < 0.4)).toBe(true);
-    }
-    expect(course.bounces.every((b) => b.kind === 'boat')).toBe(true);
   });
 });

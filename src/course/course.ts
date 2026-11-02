@@ -76,16 +76,16 @@ export interface Wall {
   face?: 'shop' | 'warehouse' | 'hull';
 }
 
-/** One bounce. Balloons are spent after a single hit; boats are one trigger per pass too. */
+/** One bounce pad. Balloons are spent after a single hit (sky ladder uses `rad`). */
 export interface Bounce {
   id: number;
-  kind: 'boat' | 'balloon';
+  kind: 'balloon';
   x: number;
   y: number;
   /** Horizontal half-width. A balloon uses this as its radius. */
   half: number;
   lateral: number;
-  /** Sky-layer balloon ladder pad (harbour boat conversion skips these). */
+  /** Sky-layer balloon ladder pad. */
   sky?: true;
   /** Gameplay radius for sky clusters (m). */
   rad?: number;

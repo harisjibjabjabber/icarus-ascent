@@ -149,7 +149,7 @@ export type SimEvent =
   | { type: 'sky-exit'; segmentId: number; reason: 'complete' | 'fell'; x: number; y: number }
   | { type: 'flight-start'; updraftId: number; x: number; y: number }
   | { type: 'flight-end'; x: number; y: number }
-  | { type: 'bounce'; bounceId: number; kind: 'boat' | 'balloon'; x: number; y: number }
+  | { type: 'bounce'; bounceId: number; kind: 'balloon'; x: number; y: number }
   | { type: 'skim-start'; x: number; y: number }
   | { type: 'skim-end'; x: number; y: number; reason: 'release' | 'push' | 'jump' | 'edge' | 'stopped' }
   | { type: 'break'; obstacleId: number; kind: 'pot' | 'pillar'; by: 'heel' | 'flip' | 'grab'; x: number; y: number; vx: number; vy: number; speed: number }
