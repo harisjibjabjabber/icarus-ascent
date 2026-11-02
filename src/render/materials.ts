@@ -35,6 +35,20 @@ export const ART_UNIFORMS = {
   uWind: { value: 1 },
 };
 
+/** Three-step ramp for sourced set pieces. Shadow is lavender, not black. */
+let setRampTex: THREE.DataTexture | null = null;
+export function setPieceRamp(): THREE.DataTexture {
+  if (setRampTex) return setRampTex;
+  const stops = [[0x8a, 0x7f, 0xa0], [0xe4, 0xd0, 0xc2], [0xff, 0xf6, 0xea]];
+  const data = new Uint8Array(stops.length * 4);
+  stops.forEach(([r, g, b], i) => data.set([r, g, b, 255], i * 4));
+  setRampTex = new THREE.DataTexture(data, stops.length, 1, THREE.RGBAFormat);
+  setRampTex.minFilter = setRampTex.magFilter = THREE.LinearFilter;
+  setRampTex.colorSpace = THREE.SRGBColorSpace;
+  setRampTex.needsUpdate = true;
+  return setRampTex;
+}
+
 let ramp: THREE.DataTexture | null = null;
 function toonRamp(): THREE.DataTexture {
   if (ramp) return ramp;

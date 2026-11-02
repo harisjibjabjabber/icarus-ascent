@@ -1,34 +1,35 @@
 import type { Group } from 'three';
 
 /**
- * Set-piece visuals that are not drawn until a sourced asset is in the slot.
- * Gameplay (the rail, the bounce, the updraft) does not consult this file.
+ * Set-piece visuals. Gameplay (the rail, the bounce, the updraft) does not consult this file.
  *
- * A slot is empty when `PropSet.piece(name)` is missing, or when the steam
- * sheet 404s. Do not fill an empty slot with procedural geometry, flat colour,
- * or a box. Drop the authored file in and rebake under the name below.
+ * A slot is empty when `PropSet.piece(name)` is missing, or when the steam sheets fail to load.
+ * Do not fill an empty slot with procedural geometry, flat colour, or a box.
  *
- * Expected axes, in the piece's local space (stamp frame `along`: +X follows
- * the route, +Z is the rider's right, +Y is up):
- * - set-awning: origin on the wall at the top bar. +Z points toward the street.
- * - set-sheet / set-shirt / set-towel / set-sock: peg at the origin, cloth hangs
- *   down (−Y), width along +X.
- * - set-balloon: cluster around the origin, knot toward −Y.
+ * Expected axes, in the piece's local space (stamp frame `along`: +X follows the route,
+ * +Z is the rider's right, +Y is up):
+ * - set-awning*: origin on the wall at the top bar. +Z points toward the street.
+ *   Valance hangs toward −Y. Three atlases, one mesh family.
+ * - set-sheet / set-shirt / set-towel / set-dress / set-sock: peg at the origin, cloth hangs
+ *   down (−Y), width along +Z so the chase camera sees the face.
+ * - set-balloon: knot at the origin, cluster toward +Y.
  * - set-boat: keel on y=0, length along Z, bow toward +Z.
- * - props/steam.png: one painted wisp, or a horizontal strip of equal frames.
- *   Set STEAM_FRAMES to the frame count when the sheet arrives.
+ * - props/steam/*.webp: one camera-facing puff each. Mixed per updraft.
  */
 export const SET_ASSET = {
   awning: 'set-awning',
-  laundry: ['set-sheet', 'set-shirt', 'set-towel', 'set-sock'] as const,
+  awnings: ['set-awning', 'set-awning-teal', 'set-awning-ochre'] as const,
+  laundry: ['set-sheet', 'set-shirt', 'set-towel', 'set-dress', 'set-sock', 'set-sock-b'] as const,
   balloon: 'set-balloon',
   boat: 'set-boat',
-  /** Path under the site base. Missing file means no plume. */
-  steam: 'props/steam.png',
+  /** Paths under the site base. An empty load leaves the plume undrawn. */
+  steam: [
+    'props/steam/smoke1.webp',
+    'props/steam/smoke3.webp',
+    'props/steam/smoke_04.webp',
+    'props/steam/smoke_07.webp',
+  ] as const,
 } as const;
-
-/** Frames across props/steam.png. 1 until the sheet is a strip. */
-export const STEAM_FRAMES = 1;
 
 export interface SoftProp {
   id: number;
