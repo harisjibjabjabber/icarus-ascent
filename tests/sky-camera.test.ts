@@ -58,6 +58,16 @@ describe('sky chase camera', () => {
     let worstHi = 1;
     let worstLo = 0;
     let samples = 0;
+    let gustHi = 1;
+    let preGust = -1;
+    let lineGap = -1;
+    let lineFeet = -1;
+    let linePitch = 0;
+    let topFeet = -1;
+    let topStreet = -1;
+    let highPitch = 0;
+    let lowPitch = 0;
+    let nextIn = false;
     let streetMiss = '';
     const dt = TUNING.sim.dt;
     const maxTicks = Math.round(40 / dt);
@@ -68,7 +78,7 @@ describe('sky chase camera', () => {
       sim.drainEvents();
       const s = sim.state;
       const ahead = chaseAheadMax(course, s.x, TUNING.camera.lookOverRange);
-      const plan = stepSkyCamera(s.mode, s.layer, dt, mem, skyCameraZone(course, s.x, s.mode, s.layer));
+      const plan = stepSkyCamera(s.mode, s.layer, dt, mem, skyCameraZone(course, s.x, s.mode, s.layer), s.y);
       const camSpeed = s.mode === 'gusting' || (s.layer === 'sky' && s.mode === 'airborne') ? Math.max(0, s.vx) : s.speed;
       rig.update(dt, s.x, s.y, camSpeed, !snapped, ahead, 0, plan);
       snapped = true;
@@ -79,6 +89,28 @@ describe('sky chase camera', () => {
       worstHi = Math.min(worstHi, fromTop);
       worstLo = Math.max(worstLo, fromTop);
       samples++;
+      if (s.mode === 'grounded' && s.x < seg.gx && preGust < 0) preGust = fromTop;
+      if (s.mode === 'gusting') gustHi = Math.min(gustHi, fromTop);
+      if (s.mode === 'grinding' && s.railId === 1 && s.x > seg.gx + 16 && s.x < seg.gx + 24 && lineGap < 0) {
+        lineFeet = fromTop;
+        const under = toScene(s.x + 4, 0, 0, new THREE.Vector3()).project(rig.camera);
+        lineGap = (1 - under.y) / 2 - fromTop;
+        linePitch = -rig.camera.rotation.x * 180 / Math.PI;
+      }
+      if (s.mode === 'grinding' && s.railId === 1 && s.x > seg.gx + 30) {
+        const hop = toScene(seg.gx + 38, 7, 0, new THREE.Vector3()).project(rig.camera);
+        if (hop.z > 0 && hop.z < 1 && Math.abs(hop.x) < 1 && Math.abs(hop.y) < 1) nextIn = true;
+      }
+      if (s.mode === 'grinding' && s.railId === 4 && s.y > 8 && topFeet < 0) {
+        topFeet = fromTop;
+        const under = toScene(s.x + 6, 0, 0, new THREE.Vector3()).project(rig.camera);
+        topStreet = (1 - under.y) / 2;
+        highPitch = -rig.camera.rotation.x * 180 / Math.PI;
+      }
+      if (s.mode === 'grinding' && s.railId === 4 && s.y < 6.2) {
+        const p = -rig.camera.rotation.x * 180 / Math.PI;
+        if (lowPitch === 0 || p < lowPitch) lowPitch = p;
+      }
       const ground = course.groundBelow(s.x + 10, 1e6);
       const streetY = ground ? ground.sample.y : seg.yBase;
       const street = toScene(s.x + 10, streetY, 0, new THREE.Vector3());
@@ -93,6 +125,18 @@ describe('sky chase camera', () => {
     expect(streetMiss).toBe('');
     expect(worstHi, `feet rose to ${(worstHi * 100).toFixed(1)}% from the top`).toBeGreaterThanOrEqual(0.45);
     expect(worstLo, `feet sank to ${(worstLo * 100).toFixed(1)}% from the top`).toBeLessThanOrEqual(0.85);
+    // The gust trails below her, so she climbs the frame instead of the camera matching the rise.
+    expect(preGust).toBeGreaterThan(0.7);
+    expect(gustHi).toBeLessThanOrEqual(preGust - 0.15);
+    // Settled on a line, the cobbles sit well below her feet and the next line is still in frame.
+    expect(lineFeet).toBeLessThan(0.75);
+    expect(lineGap).toBeGreaterThanOrEqual(0.12);
+    expect(linePitch).toBeGreaterThan(21);
+    expect(nextIn).toBe(true);
+    expect(topStreet - topFeet).toBeGreaterThanOrEqual(0.12);
+    // The look-down eases off on the glide down from the top line.
+    expect(highPitch).toBeGreaterThan(24);
+    expect(lowPitch).toBeLessThan(highPitch - 2);
   });
 
   it('looks ahead at sky lines, not only the street', () => {

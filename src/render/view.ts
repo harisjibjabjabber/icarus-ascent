@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { Course, Vec2 } from '../course/course';
 import type { EndlessCourse } from '../course/endless';
 import type { RiderState, SimEvent } from '../sim/types';
-import { CameraRig, chaseAheadMax, skyCameraZone, stepSkyCamera, type SkyCamMemory } from './cameraRig';
+import { CameraRig, chaseAheadMax, skyCameraZone, stepSkyCamera, streetUnder, type SkyCamMemory } from './cameraRig';
 import { CourseView, bounceRiderLateral } from './courseView';
 import { Effects, SpeedLines, Petals } from './effects';
 import { OrbPickupFx } from './orbFx';
@@ -356,7 +356,8 @@ export class GameView {
     this.skyCam.postGust = 0;
     const ahead = this.courseView ? chaseAheadMax(this.courseView.course, s.x, TUNING.camera.lookOverRange) : -Infinity;
     const zone = skyCameraZone(this.courseView?.course, s.x, s.mode, s.layer);
-    this.rig.update(0, s.x, s.y, s.speed, true, ahead, 0, stepSkyCamera(s.mode, s.layer, 0, this.skyCam, zone));
+    const above = s.y - streetUnder(this.courseView?.course, s.x, s.y);
+    this.rig.update(0, s.x, s.y, s.speed, true, ahead, 0, stepSkyCamera(s.mode, s.layer, 0, this.skyCam, zone, above));
   }
 
   onEvent(e: SimEvent, speed: number): void {
@@ -510,7 +511,8 @@ export class GameView {
       this.rig.update(dt, this.failCam.x, this.failCam.y, 0, false);
     } else {
       const ahead = course ? chaseAheadMax(course, x, TUNING.camera.lookOverRange) : -Infinity;
-      const plan = stepSkyCamera(curr.mode, curr.layer, dt, this.skyCam, skyCameraZone(course, x, curr.mode, curr.layer));
+      const above = y - streetUnder(course, x, y);
+      const plan = stepSkyCamera(curr.mode, curr.layer, dt, this.skyCam, skyCameraZone(course, x, curr.mode, curr.layer), above);
       // The gust and the ladder are mostly vertical. Follow forward speed so the whoosh doesn't zoom the frame.
       const camSpeed = curr.mode === 'gusting' || (curr.layer === 'sky' && curr.mode === 'airborne') ? Math.max(0, curr.vx) : curr.speed;
       this.rig.update(dt, x, y, camSpeed, false, ahead, 0, plan);
