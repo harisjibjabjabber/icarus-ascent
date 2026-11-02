@@ -10,6 +10,10 @@ import type { Heroine, HeroineTier } from './heroine/heroine';
 import { initialLook, lookUrl, saveLook, type Look } from './heroine/looks';
 import { BROOM, Broom, BristleTrail } from './broom';
 
+/** Swing rope meets her hands: chest height, just in front (she faces +lateral). Shared with the live rope. */
+export const ROPE_GRIP_Y = 1.12;
+export const ROPE_GRIP_AHEAD = 0.24;
+
 /** Palette of the procedural low-poly stand-in rider (shown only until Ao's VRM loads, or if it fails). Ao herself is styled in src/render/heroine. */
 const RIDER_STYLE = {
   skin: '#f0c49c', skinShade: '#d89e7a', hair: '#4a3328', tunic: '#d4513a', tunicShade: '#a83a2c', chiton: '#fbf3e6',
@@ -27,6 +31,7 @@ const RIDER_STYLE = {
  */
 export class RiderView {
   readonly root = new THREE.Group();
+  private holdAt = new THREE.Vector3();
   private roll = new THREE.Group();
   private pivot = new THREE.Group();
   private stance = new THREE.Group();
@@ -176,7 +181,8 @@ export class RiderView {
       this.root.updateMatrixWorld(true);
       const latVel = dt > 0 ? (this.lateral - this.latPrev) / dt : 0;
       this.latPrev = this.lateral;
-      this.figure.update(dt, { mode: s.mode, air: s.air, flip, speed: s.speed, vy: s.vy, angle, prep: !!s.prep, lateralVel: latVel });
+      const hold = s.mode === 'swinging' ? toScene(x, y + ROPE_GRIP_Y, this.lateral + ROPE_GRIP_AHEAD, this.holdAt) : null;
+      this.figure.update(dt, { mode: s.mode, air: s.air, flip, speed: s.speed, vy: s.vy, angle, prep: !!s.prep, lateralVel: latVel, hold });
       return;
     }
 

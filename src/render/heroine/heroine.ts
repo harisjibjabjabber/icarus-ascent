@@ -17,6 +17,8 @@ export interface HeroineFrame {
   prep: boolean;
   /** Presentation lateral velocity (m/s, + = toward the rider's right). */
   lateralVel: number;
+  /** World point of the rope in her hands. Set only while swinging. */
+  hold?: THREE.Vector3 | null;
 }
 export type HeroineTier = 'low' | 'medium' | 'high' | 'ultra';
 
@@ -491,6 +493,7 @@ export class Heroine {
     // --- leg IK to the deck (last) and grab-hand IK ---
     this.solveLegs();
     if (this.tier !== 'low') this.solveHands(THREE.MathUtils.clamp(ctl.x, 0, 1), THREE.MathUtils.clamp(ctl.y, 0, 1));
+    if (f.mode === 'swinging' && f.hold) this.holdRope(f.hold);
 
     // --- expressions + blink ---
     this.updateFace(dt);
@@ -608,6 +611,20 @@ export class Heroine {
       const foot = H.getNormalizedBoneNode(`${s}Foot` as never)!.getWorldPosition(_w);
       this.stats.ik[side === 'L' ? 0 : 1] = foot.distanceTo(tgt);
     }
+  }
+
+  /** Both hands meet the rope. Presentation only; the pendulum is unchanged. */
+  private ropeL = new THREE.Vector3();
+  private ropeR = new THREE.Vector3();
+  private holdRope(hold: THREE.Vector3): void {
+    const H = this.vrm.humanoid;
+    // Two hands stacked on the rope, elbows out to her sides so the grip reads from behind.
+    const up = _ax.set(0, 1, 0);
+    const hint = _v2.set(1, 0, 0).transformDirection(this.object.matrixWorld);
+    this.ropeL.copy(hold).addScaledVector(up, 0.08);
+    this.ropeR.copy(hold).addScaledVector(up, -0.07);
+    solveTwoBone(H.getNormalizedBoneNode('leftUpperArm')!, H.getNormalizedBoneNode('leftLowerArm')!, H.getNormalizedBoneNode('leftHand')!, this.ropeL, hint, null, 1);
+    solveTwoBone(H.getNormalizedBoneNode('rightUpperArm')!, H.getNormalizedBoneNode('rightLowerArm')!, H.getNormalizedBoneNode('rightHand')!, this.ropeR, hint, null, 1);
   }
 
   private solveHands(gl: number, gr: number): void {
