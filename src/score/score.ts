@@ -47,9 +47,10 @@ export const SCORE = {
   /** Landing within this far past a jump gap's far lip (m). Gap landings fall 0.1-6 m past the lip. */
   edge: 300, edgeWithin: 1.8,
   /** Wall caught later than this relative to the takeoff lip (m; negative = before it). A right held
-   *  into the kicker catches as the rider leaves it, 0.47-0.65 m before the lip: a catch from the
-   *  lip's last half metre on, or over the gap, came late. */
-  lateWall: 300, lateWallOver: -0.48,
+   *  into the kicker catches as the rider leaves it, about 0.45-0.65 m before the lip. A catch in
+   *  the lip's last 0.45 m, or over the gap, came late. Required gap-walls land a few centimetres
+   *  later than the older entries, so the line sits just inside half a metre. */
+  lateWall: 300, lateWallOver: -0.455,
   /** Pot cleared in the air with less than this under the board (m). Jumps clear by 0.25-0.55 m. */
   closePot: 200, closePotClearance: 0.35,
   /** Pillar smashed within this of its real face or of its top (m): the trick came on with the rider

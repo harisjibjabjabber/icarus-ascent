@@ -6,7 +6,7 @@ import { extend, kicker, smooth, easeOut, linear, crestPop, rollingHills, type E
 import { TUNING } from '../tuning';
 import { mulberry32 } from '../rng';
 import { SET_PIECES, type SetPieceSpec } from './setpieces';
-import { waveAt, type WaveInfo } from './waves';
+import { WAVE, waveAt, type WaveInfo } from './waves';
 import { ZoneSequence } from '../zones/sequence';
 import type { Zone } from '../zones/zone';
 
@@ -225,7 +225,38 @@ const HC = TUNING.movement.hardCap;
 
 /** Phrases that offer a wall ride (optional taps, transfers, the gap ride, and the wall set pieces). */
 function isWallRide(id: string): boolean {
-  return id.startsWith('wall-') || id === 'sp-rail-wall' || id === 'sp-canal' || id === 'sp-crest-wall';
+  return id.startsWith('wall-') || id === 'death-gauntlet' || id === 'sp-rail-wall' || id === 'sp-canal' || id === 'sp-crest-wall';
+}
+
+/**
+ * Phrases where the street itself is gone and the only way across is the rail or the wall.
+ * Missing it is the ordinary gap fail (missed rail / missed wall / fell short).
+ */
+export function isDeath(id: string): boolean {
+  return id === 'rail-gap' || id === 'rail-gap-early' || id === 'wall-over' || id === 'wall-gap' || id === 'death-gauntlet';
+}
+
+/**
+ * Longest unassisted jump from a flat lip at `speed`, landing `drop` metres lower.
+ * Coyote and a fresh jump share this: grab is a pose and does not add range.
+ */
+export function maxJumpReach(speed: number, drop: number): number {
+  const M = TUNING.movement;
+  const vy = M.jumpVelocity;
+  const v = Math.min(speed, M.hardCap);
+  const t = (vy + Math.sqrt(vy * vy + 2 * M.airGravity * Math.max(0, drop))) / M.airGravity;
+  return v * t;
+}
+
+/** Same jump off the lip of a kicker (ease t², so the lip grade is 2·rise/len). */
+export function kickerJumpReach(speed: number, rise: number, len: number, drop: number): number {
+  const M = TUNING.movement;
+  const theta = Math.atan((2 * rise) / len);
+  const v = Math.min(speed, M.hardCap);
+  const vx = v * Math.cos(theta);
+  const vy = v * Math.sin(theta) + M.jumpVelocity;
+  const t = (vy + Math.sqrt(vy * vy + 2 * M.airGravity * Math.max(0, drop))) / M.airGravity;
+  return vx * t;
 }
 
 /** Optional activities that fill a plain roll. One per chunk; the same one stays rare. */
@@ -266,7 +297,69 @@ function activityRides(rails: Rail[], swings: Swing[], updrafts: Updraft[], boun
   }
   return out;
 }
+
+/** Height on a rail polyline at x (rails are short and monotonic). */
+function railAt(points: Vec2[], x: number): number {
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1], b = points[i];
+    if (x <= b.x) return a.y + ((b.y - a.y) * (x - a.x)) / Math.max(1e-6, b.x - a.x);
+  }
+  return points[points.length - 1].y;
+}
+
+/**
+ * Gold along every required rail and wall of a death phrase (the stamper keeps only two trails),
+ * and a purple on a gauntlet when that chunk does not already have one. Returns the purple's x.
+ */
+function dressDeathOrbs(placements: OrbPlacement[], rails: Rail[], walls: Wall[], phraseId: string): number | null {
+  const reqRails = rails.filter((r) => r.required);
+  const purpleRail = phraseId === 'death-gauntlet' ? reqRails[reqRails.length - 1] : undefined;
+  const purple = purpleRail ? (() => {
+    const a = purpleRail.points[0], z = purpleRail.points[purpleRail.points.length - 1];
+    const x = a.x + (z.x - a.x) * 0.85;
+    return { x, y: railAt(purpleRail.points, x), lateral: purpleRail.lateral };
+  })() : null;
+  const hasCommon = (x0: number, x1: number, lat: number) => placements.some((p) => p.tier === 'common' && p.x >= x0 && p.x <= x1 && Math.abs(p.lateral - lat) < 1.1);
+  for (const r of reqRails) {
+    const a = r.points[0], z = r.points[r.points.length - 1];
+    if (hasCommon(a.x, z.x, r.lateral)) continue;
+    for (let i = 0; i < 5; i++) {
+      const t = (i + 0.5) / 5;
+      const x = a.x + (z.x - a.x) * t;
+      const y = railAt(r.points, x);
+      if (purple && Math.hypot(x - purple.x, y - purple.y) < 2) continue;
+      addOrb(placements, 'common', x, y, r.lateral, 'grind');
+    }
+  }
+  for (const w of walls) if (w.required) {
+    const lat = w.lateral - 0.35;
+    if (hasCommon(w.x0, w.x1, lat)) continue;
+    const y = w.yBottom + (w.yTop - w.yBottom) * 0.42;
+    const len = w.x1 - w.x0;
+    for (let i = 0; i < 5; i++) {
+      const x = w.x0 + len * (((i + 0.5) / 5) * 0.78);
+      addOrb(placements, 'common', x, y, lat, 'wall');
+    }
+  }
+  if (purple && !placements.some((p) => p.tier === 'rare')) {
+    addOrb(placements, 'rare', purple.x, purple.y, purple.lateral, 'grind');
+    return purple.x;
+  }
+  return null;
+}
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+
+/**
+ * Rail across a hole that is past a hard-cap jump. The early copy is tier 1 so it can sit just
+ * after 300 m; the later copy is tier 2 so the difficulty curve still climbs.
+ */
+function buildRailGap(b: PhraseBuilder, d: number): void {
+  b.flat(4).runIn().slope(48, -4, linear).flat(8);
+  const y = b.cur().y, len = 26 + 6 * d;
+  const lip = b.gap(len, -0.5, 'rail');
+  b.rail(lip.x - 3, len + 8, y + 1.0, y + 0.2, 0, true, y + 0.55);
+  b.flat(14);
+}
 
 /** Phrase library. Entry/exit speeds are checked by tests/endless*.test.ts. */
 export const PHRASES: PhraseSpec[] = [
@@ -332,7 +425,8 @@ export const PHRASES: PhraseSpec[] = [
       b.flat(len + 6).highLine(x0, len, 1.12, 0.96, dresses[Math.floor(r() * dresses.length)]).flat(8).crest(1.6, 9, 1.6, 14).flat(14);
     },
   },
-  // optional wall rides: a chance about every 150-250 m. The street stays continuous except wall-gap.
+  // optional wall rides: a chance about every 150-250 m. The street stays continuous except the death gaps
+  // (rail-gap, wall-over, wall-gap, death-gauntlet), which the assembler spaces out after the teaching stretch.
   {
     id: 'wall-tap', title: 'Short wall tap', tier: 1, style: false, required: false, entry: [6, HC], exit: [8, HC], airtime: 0.35, receiving: 'flat', cpSpeed: 12,
     build: (b) => {
@@ -467,23 +561,49 @@ export const PHRASES: PhraseSpec[] = [
     },
   },
   {
+    id: 'rail-gap-early', title: 'Rail over a gap', tier: 1, style: false, required: true, entry: [8, HC], exit: [10, HC], airtime: 0, receiving: 'broad', cpSpeed: 14,
+    build: (b, d) => buildRailGap(b, d),
+  },
+  {
     id: 'rail-gap', title: 'Rail over a gap', tier: 2, style: false, required: true, entry: [8, HC], exit: [10, HC], airtime: 0, receiving: 'broad', cpSpeed: 14,
-    build: (b, d) => {
-      b.flat(4).runIn().slope(46, -3, linear);
-      const y = b.cur().y, len = 18 + 4 * d;
-      const lip = b.gap(len, -0.8, 'rail');
-      b.rail(lip.x, len + 5, y + 1.0, y - 0.1, 0, true, y + 0.7);
-      b.flat(28);
+    build: (b, d) => buildRailGap(b, d),
+  },
+  {
+    id: 'wall-over', title: 'Wall ride over a gap', tier: 2, style: false, required: true, entry: [8, HC], exit: [10, HC], airtime: 0, receiving: 'broad', cpSpeed: 12,
+    build: (b) => {
+      b.flat(4).runIn().railSlope(44, -12).flat(8).kicker(10, 1.2);
+      const len = 36; // past a hard-cap jump off this kicker
+      const lip = b.gap(len, -0.4, 'wall');
+      b.wall({ x0: lip.x - 4, x1: lip.x + len + 4, yBottom: lip.y - 4.5, yTop: lip.y + 4.5, side: 'right', lateral: 2.4, required: true });
+      b.flat(18);
     },
   },
   {
-    id: 'wall-gap', title: 'Compression → wall ride → receiving climb', tier: 3, style: false, required: true, entry: [10, HC], exit: [10, HC], airtime: 0, receiving: 'climb', cpSpeed: 12,
+    id: 'wall-gap', title: 'Compression → wall ride → receiving climb', tier: 3, style: false, required: true, entry: [8, HC], exit: [10, HC], airtime: 0, receiving: 'climb', cpSpeed: 12,
     build: (b, d) => {
       b.flat(4).runIn().railSlope(44, -12).flat(8).kicker(10, 1.2);
-      const len = 30 + 6 * d;
-      const lip = b.gap(len, -1.4, 'wall');
-      b.wall({ x0: lip.x - 4, x1: lip.x + len + 3, yBottom: lip.y - 4.5, yTop: lip.y + 4.5, side: 'right', lateral: 2.4, required: true });
+      const len = 36 + 4 * d;
+      const lip = b.gap(len, -0.4, 'wall');
+      b.wall({ x0: lip.x - 4, x1: lip.x + len + 4, yBottom: lip.y - 4.5, yTop: lip.y + 4.5, side: 'right', lateral: 2.4, required: true });
       b.flat(8).slope(26, 2.5).flat(10);
+    },
+  },
+  {
+    id: 'death-gauntlet', title: 'Gap, rail, wall, rail', tier: 3, style: false, required: true, entry: [8, HC], exit: [10, HC], airtime: 0, receiving: 'broad', cpSpeed: 14,
+    build: (b) => {
+      // Rail, then a wall ride, then a rail. Each hole is past a jump. Piers are long enough to re-jump.
+      b.flat(4).runIn().railSlope(44, -12).flat(6);
+      const y1 = b.cur().y;
+      const lip1 = b.gap(26, -0.5, 'rail');
+      b.rail(lip1.x - 3, 34, y1 + 1.0, y1 + 0.2, 0, true, y1 + 0.55);
+      b.flat(20).kicker(10, 1.2);
+      const lip2 = b.gap(36, -0.4, 'wall');
+      b.wall({ x0: lip2.x - 4, x1: lip2.x + 40, yBottom: lip2.y - 4.5, yTop: lip2.y + 4.5, side: 'right', lateral: 2.4, required: true });
+      b.flat(30);
+      const y3 = b.cur().y;
+      const lip3 = b.gap(26, -0.45, 'rail');
+      b.rail(lip3.x - 3, 34, y3 + 1.0, y3 + 0.25, 0, true, y3 + 0.55);
+      b.flat(14);
     },
   },
   {
@@ -568,7 +688,7 @@ export { SET_PIECES };
 /** Highest tier allowed at difficulty d. */
 export function maxTier(d: number): Tier { return d >= 0.35 ? 3 : d >= 0.1 ? 2 : 1; }
 /** Longest run of consecutive compulsory phrases allowed at difficulty d (longer combinations later). */
-export function maxRequiredRun(d: number): number { return d >= 0.6 ? 3 : d >= 0.15 ? 2 : 1; }
+export function maxRequiredRun(d: number): number { return d >= 0.35 ? 3 : d >= 0.15 ? 2 : 1; }
 
 /**
  * Neighbour validation: can `b` follow `a` directly, or which connector is needed?
@@ -577,8 +697,13 @@ export function maxRequiredRun(d: number): number { return d >= 0.6 ? 3 : d >= 0
  * Height: keeps the route within a band so it doesn't drift forever downward.
  */
 export function connectorFor(a: PhraseSpec, b: PhraseSpec, ctx: { requiredRun: number; d: number; y: number; y0: number }): string | null {
+  // The same hole twice in a row reads as a seam, so a recovery gives the next one its own approach.
+  if (isDeath(a.id) && a.id === b.id) return 'recovery';
+  // Two different holes share a landing until the compulsory run is full; then a recovery, same as any
+  // other required phrase. The climb still leads into the first hole once the route has dropped.
+  const deathChain = isDeath(a.id) && isDeath(b.id);
   if (b.required && ctx.requiredRun >= maxRequiredRun(ctx.d)) return 'recovery';
-  if (ctx.y < ctx.y0 - 160 && a.id !== 'climb' && a.id !== 'boost' && netDrop(b) < 0) return 'climb';
+  if (!deathChain && ctx.y < ctx.y0 - 160 && a.id !== 'climb' && a.id !== 'boost' && netDrop(b) < 0) return 'climb';
   if (a.exit[0] < b.entry[0]) return 'boost';
   if (a.exit[1] > b.entry[1] + 0.01) return 'bleed';
   return null;
@@ -615,6 +740,14 @@ export class Assembler {
   private lastSetPiece = '';
   /** Route distance where the last wall-ride phrase was committed. */
   private lastWallX = 0;
+  /** Route distance where the last death-gap phrase started. */
+  private lastDeathX = -1e9;
+  /** Wave index the death count belongs to, how many holes that wave has committed, and the last gauntlet. */
+  private deathWave = -999;
+  private deathsInWave = 0;
+  private lastGauntletX = -1e9;
+  /** Id of the last death phrase, so the next hole can be a different one (no recovery between them). */
+  private lastDeathId = '';
   constructor(readonly seed: number, private script?: { ids: string[]; d: number }, readonly zones: ZoneSequence = new ZoneSequence(['town'])) {}
 
   private rng(i: number): () => number { return mulberry32((this.seed ^ Math.imul(i + 1, 0x9e3779b1)) >>> 0); }
@@ -663,6 +796,22 @@ export class Assembler {
   }
 
   /**
+   * A short wall ride in front of the set piece when the last wall is far enough behind that the
+   * set piece's own wall would open a gap past the town cadence. Only if the set piece still ends
+   * before the breather.
+   */
+  private offerWallBeforeSetPiece(plan: { sp: SetPieceSpec; d: number }, x: number, y: number, y0: number, wave: WaveInfo, zone: Zone): boolean {
+    if (x - this.lastWallX < 280 || !zone.phrases.includes('wall-tap')) return false;
+    const tap = SPEC['wall-tap'];
+    const span = Assembler.lengthOf([...this.connectorChain(tap, plan.d, y, y0), tap], plan.d);
+    if (x + span >= wave.breatherAt) return false;
+    const lead = this.leadIn(tap, 0, plan, y + netDrop(tap), y0, true);
+    if (x + span + Assembler.lengthOf(lead, plan.d) + phraseLength(plan.sp, plan.d) > wave.breatherAt + 1e-6) return false;
+    this.enqueueWithConnectors(tap, { d: plan.d, zone: zone.id, wave }, y, y0);
+    return true;
+  }
+
+  /**
    * Queue the wave's set piece so it starts at or after the peak and ends by the breather. If its
    * lead-in doesn't reach the peak, the first connector is lengthened by a calm run-up (or, with
    * no connector due, a runway chunk pads the route). Returns false (nothing queued) if it can't
@@ -686,13 +835,95 @@ export class Assembler {
     return true;
   }
 
+  /**
+   * Death holes live in the build (the peak is the set piece, the breather stays calm).
+   * Two per wave through the first 1.7 km, then three. The second hole of an early wave waits
+   * so it doesn't sit on the first; a gauntlet takes a later slot only when the holes still due
+   * after it still fit. `wait` is how long a filler may run before the next hole is due.
+   */
+  private deathSlot(wave: WaveInfo, x: number, y: number, y0: number, d: number, pool: PhraseSpec[], prev: PhraseSpec, allowed: (p: PhraseSpec) => boolean, force = false): { phrases: PhraseSpec[] } | { wait: number } | null {
+    if (wave.phase !== 'build' || wave.index < 0) return null;
+    const have = this.deathWave === wave.index ? this.deathsInWave : 0;
+    const want = wave.start >= 1700 ? 3 : 2;
+    if (have >= want) return null;
+    if (x < 300 && have === 0) return null;
+    const room = wave.peakAt - x;
+    const span = (p: PhraseSpec) => Assembler.lengthOf([...this.connectorChain(p, d, y, y0), p], d);
+    // Early waves: hold the second hole past ~1.2 km on wave 1, and keep wave 0's pair from stacking.
+    // Wave 1 holds its second hole so it doesn't sit on the first. Wave 0 has room for both
+    // before the peak, and waiting there spends the only window the second hole has.
+    const gap = !force && have >= 1 && wave.index === 1 ? 220 : 0;
+    if (gap && x < this.lastDeathX + gap && this.lastDeathX + gap + (want - have) * 108 <= wave.peakAt + 8) {
+      return { wait: Math.max(28, this.lastDeathX + gap + 12 - x) };
+    }
+    const gauntletDue = x >= 1400 && x - this.lastGauntletX >= 1100;
+    const gauntlet = pool.find((p) => p.id === 'death-gauntlet');
+    const gauntletSpan = gauntlet && gauntlet !== prev && allowed(gauntlet) ? span(gauntlet) : Infinity;
+    // 72 m stays free at the end of the build so the set piece still gets its recovery before the peak.
+    const tail = 72;
+    const after = Math.max(0, want - have - 1) * 112;
+    // The gauntlet replaces whatever holes were still owed: it is the last one, and it still leaves the set piece its recovery.
+    if (gauntletDue && have >= 1 && gauntlet && gauntletSpan + tail <= room + 8) return { phrases: [gauntlet] };
+    const follow = after + tail;
+    // The rail may repeat once tier 2 is shut; a recovery is inserted so the two chunks are not adjacent.
+    const fits = (p: PhraseSpec, keep: number) =>
+      isDeath(p.id) && p.id !== 'death-gauntlet' && allowed(p) && span(p) <= room - keep + 8;
+    let deaths = pool.filter((p) => fits(p, follow));
+    // A later hole can be dropped. The set piece's recovery cannot: a hole that runs into that tail is skipped.
+    if (!deaths.length && after > 0) deaths = pool.filter((p) => fits(p, tail));
+    if (!deaths.length) return null;
+    // Later holes are the harder tier, so the run's average difficulty still climbs.
+    if (x >= 2200) {
+      const hard = deaths.filter((p) => p.tier >= 2);
+      if (hard.length) deaths = hard;
+    }
+    // The same hole twice needs a recovery between the chunks, and that recovery costs the third hole.
+    const other = deaths.filter((p) => p.id !== this.lastDeathId);
+    if (other.length) deaths = other;
+    // Keep the first hole of a gauntlet wave short enough that the chain still fits after it.
+    if (gauntletDue && have === 0 && Number.isFinite(gauntletSpan)) {
+      const short = deaths.filter((p) => span(p) + gauntletSpan + tail <= room + 16);
+      if (short.length) deaths = short;
+    }
+    const wallDue = x - this.lastWallX >= 188;
+    // A wall that is already due becomes the wall over the gap, so the hole doesn't add an extra wall.
+    if (wallDue) {
+      const over = deaths.filter((p) => p.id === 'wall-over');
+      if (over.length) return { phrases: over };
+      const taller = deaths.filter((p) => p.id === 'wall-gap');
+      if (taller.length) return { phrases: taller };
+    }
+    const rails = deaths.filter((p) => p.id === 'rail-gap' || p.id === 'rail-gap-early');
+    // Before tier 2 is doing the work, keep the hole on the tier-1 rail so the opening kilometre stays teachable.
+    if (x < 1000 && !wallDue) {
+      const easy = rails.filter((p) => p.tier <= 1);
+      if (easy.length) return { phrases: easy };
+    }
+    // Rail, then a wall over the next gap, then a rail: three different holes fit in one build.
+    if (x >= 1000 && (this.lastDeathId === 'rail-gap' || this.lastDeathId === 'rail-gap-early')) {
+      const over = deaths.filter((p) => p.id === 'wall-over');
+      if (over.length) return { phrases: over };
+    }
+    return { phrases: rails.length ? rails : deaths };
+  }
+
   /** Next phrase to build, given where the route currently ends (x = distance from the start). */
   next(x: number, y: number, y0: number): Plan {
     const wave = waveAt(x);
     if (this.queue.length) {
-      const queued = this.queue.shift()!;
-      if (isWallRide(queued.spec.id)) this.lastWallX = x;
-      return this.commit(queued);
+      const protect = this.queue.some((q) => q.setPiece || !!q.gate || isDeath(q.spec.id));
+      // A filler chosen before the hole was due would run past it. Phrase length alone (no connectors)
+      // is the test: the queue is still in the way, so the real span is decided on the next pass.
+      if (!protect && wave.phase === 'build' && x >= 300) {
+        const have = this.deathWave === wave.index ? this.deathsInWave : 0;
+        const want = wave.start >= 1700 ? 3 : 2;
+        if (have < want && x + phraseLength(SPEC['rail-gap'], wave.d) <= wave.peakAt + 8) this.queue.length = 0;
+      }
+      if (this.queue.length) {
+        const queued = this.queue.shift()!;
+        this.notePhrase(queued.spec.id, x);
+        return this.commit(queued);
+      }
     }
     const i = this.index;
     const zone = this.zones.zoneAt(x);
@@ -756,9 +987,15 @@ export class Assembler {
       return fresh.length ? fresh : ok;
     };
     let cands = choose(true);
-    if (pending && !cands.length) { // nothing else fits before the peak: the set piece goes in now
-      if (this.scheduleSetPiece(pending, x, y, y0, wave, zone)) return this.commit(this.queue.shift()!);
-      this.spPlan = null;
+    const slotNow = (force = false) => this.deathSlot(wave, x, y, y0, d, pool, prev, allowed, force);
+    if (pending && !cands.length) { // nothing else fits before the peak: the set piece goes in now, unless a death hole is still owed
+      if (!slotNow() && this.offerWallBeforeSetPiece(pending, x, y, y0, wave, zone)) {
+        const first = this.queue.shift()!;
+        this.notePhrase(first.spec.id, x);
+        return this.commit(first);
+      }
+      if (!slotNow() && this.scheduleSetPiece(pending, x, y, y0, wave, zone)) return this.commit(this.queue.shift()!);
+      if (!slotNow()) this.spPlan = null;
       cands = choose(false);
     }
     if (!cands.length) cands = pool.filter((p) => p !== prev && !p.required && p.tier <= tier);
@@ -772,10 +1009,58 @@ export class Assembler {
       if (isWallRide(this.history[i].id)) break;
       sinceWall++;
     }
+    // Holes are placed as soon as one fits before the peak. Before 300 m, and while a hole is
+    // waiting out its gap, keep the next phrase short enough that the slot is not skipped.
+    let slot = slotNow();
+    let deathDue = !!slot && 'phrases' in slot;
+    if (deathDue && slot && 'phrases' in slot) cands = slot.phrases;
+    else {
+      const calm = cands.filter((p) => !isDeath(p.id));
+      if (calm.length) cands = calm;
+      const span = (p: PhraseSpec) => Assembler.lengthOf([...this.connectorChain(p, d, y, y0), p], d);
+      const cap = (budget: number) => {
+        if (budget <= 24) return false;
+        const short = cands.filter((p) => span(p) <= budget);
+        if (!short.length) return false;
+        cands = short;
+        return true;
+      };
+      if (slot && 'wait' in slot && !cap(slot.wait)) {
+        const forced = slotNow(true);
+        if (forced && 'phrases' in forced) { cands = forced.phrases; deathDue = true; slot = forced; }
+      }
+      // Once this wave's holes are in, don't run a phrase into the peak: the set piece needs the whole of it.
+      if (!deathDue && pending && wave.phase === 'build' && !cap(wave.peakAt + 4 - x)) {
+        if (this.offerWallBeforeSetPiece(pending, x, y, y0, wave, zone)) {
+          const first = this.queue.shift()!;
+          this.notePhrase(first.spec.id, x);
+          return this.commit(first);
+        }
+        if (this.scheduleSetPiece(pending, x, y, y0, wave, zone)) return this.commit(this.queue.shift()!);
+        this.spPlan = null;
+      }
+      // A warmup or breather phrase that runs into the next build steals the holes' window.
+      if (!deathDue && (wave.phase === 'warmup' || wave.phase === 'breather')) {
+        const nextBuild = wave.phase === 'warmup' ? WAVE.first : wave.start + WAVE.length;
+        if (!cap(nextBuild + 8 - x) && nextBuild - x >= MIN_RUNWAY) {
+          return this.commit({ spec: runwaySpec(Math.max(MIN_RUNWAY, nextBuild - x)), d, connector: true, zone: zone.id, wave });
+        }
+      }
+    }
+    const wallDue = x - this.lastWallX >= 188;
     // Distance, not phrase count: a long set piece must not hide the next wall ride.
-    if (x - this.lastWallX >= 188) {
+    if (!deathDue && wallDue) {
       const walls = cands.filter((p) => isWallRide(p.id));
       if (walls.length) cands = walls;
+    }
+    // The first hole starts at 300 m. A filler chosen just before that pushes it back far enough
+    // that the wave's second hole no longer fits ahead of the set piece.
+    if (!deathDue && wave.phase === 'build' && wave.index >= 0 && x < 300 && (this.deathWave !== wave.index || this.deathsInWave === 0)) {
+      const budget = 300 - x;
+      const span = (p: PhraseSpec) => Assembler.lengthOf([...this.connectorChain(p, d, y, y0), p], d);
+      const short = budget >= 8 ? cands.filter((p) => span(p) <= budget) : [];
+      if (short.length) cands = short;
+      else if (budget >= 1) return this.commit({ spec: runwaySpec(Math.max(budget, 1)), d, connector: true, zone: zone.id, wave });
     }
     const w = cands.map((p) => {
       let k = p.style ? 1.3 : 1; // the user wants lots of hills/kickers to trick off (but also things to do: dense course)
@@ -784,6 +1069,12 @@ export class Assembler {
       if (wave.phase === 'peak' && p.required) k *= 1.5; // peaks: more compulsory chains
       if (p.required && this.requiredRun >= maxRequiredRun(d)) k *= 0.5;
       if (y < y0 - 100 && netDrop(p) < -6) k *= 0.6; // deep below the start: fewer big descents
+      if (deathDue && isDeath(p.id)) {
+        if (p.id === 'death-gauntlet') k *= 2.6;
+        else if (p.id === 'rail-gap') k *= 1.7;
+        else if (p.id === 'wall-over') k *= wallDue ? 2.4 : 1.4;
+        else if (wallDue) k *= 1.6;
+      }
       if (isWallRide(p.id)) {
         if (sinceWall === 0) k *= 0.35;
         else if (sinceWall >= 2) {
@@ -812,8 +1103,21 @@ export class Assembler {
     for (let k = 0; k < cands.length; k++) { pick -= w[k]; if (pick <= 0) { spec = cands[k]; break; } }
     this.enqueueWithConnectors(spec, { d, zone: zone.id, wave }, y, y0);
     const first = this.queue.shift()!;
-    if (isWallRide(first.spec.id)) this.lastWallX = x;
+    this.notePhrase(first.spec.id, x);
     return this.commit(first);
+  }
+
+  /** Remember when a wall ride or a death gap actually starts (not the connector in front of it). */
+  private notePhrase(id: string, x: number): void {
+    if (isWallRide(id)) this.lastWallX = x;
+    if (isDeath(id)) {
+      this.lastDeathX = x;
+      const w = waveAt(x).index;
+      if (w !== this.deathWave) { this.deathWave = w; this.deathsInWave = 0; }
+      this.deathsInWave++;
+      this.lastDeathId = id;
+      if (id === 'death-gauntlet') this.lastGauntletX = x;
+    }
   }
 
   private commit(p: Plan): Plan {
@@ -960,6 +1264,10 @@ export class EndlessCourse extends Course {
     });
     const rides = activityRides(rails, swings, updrafts, bounces);
     for (const h of rides) addOrb(trailPlacements, 'rare', h.hardest.x, h.hardest.y, h.hardest.lateral, h.hardest.pickup);
+    if (isDeath(plan.spec.id)) {
+      const rareX = dressDeathOrbs(trailPlacements, rails, walls, plan.spec.id);
+      if (rareX !== null) this.nextRareX.at = Math.max(this.nextRareX.at, rareX + 170);
+    }
     const orbs: Orb[] = trailPlacements.map((q) => ({ id: this.ids.h++, ...q }));
     const chunk: Chunk = {
       id: this.ids.c++, x0: this.endX, x1: end.x, y0: this.endY, y1: end.y, title: plan.spec.title, spec: plan.spec.id, tier: plan.spec.tier,

@@ -7,6 +7,7 @@ describe('endless seeds 101-150', () => {
     const r = seedBlock(101, 150, 5);
     expect(r.fails).toEqual([]);
     expect(r.approach).toEqual([]);
-    expect(r.maxChunks).toBeLessThan(16);
+    // A wall tap queued in front of a set piece adds one chunk to the live window.
+    expect(r.maxChunks).toBeLessThan(17);
   }, 300000);
 });
