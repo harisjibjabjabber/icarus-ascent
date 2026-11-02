@@ -24,7 +24,7 @@ export type HeroineTier = 'low' | 'medium' | 'high' | 'ultra';
 
 /** Minimum visual hold of a grab pose (s), so a quick tap-grab still reads. Presentation only. */
 const GRAB_MIN_HOLD = 0.45; // broom polish: a grab holds for a satisfying beat (presentation only; the sim's trick timing is untouched)
-type StateName = 'loco' | 'push' | 'pop' | 'air' | 'float' | 'grabL' | 'grabR' | 'flip' | 'prep' | 'grind' | 'wall' | 'skim'
+type StateName = 'loco' | 'push' | 'pop' | 'air' | 'float' | 'grabL' | 'grabR' | 'flip' | 'prep' | 'grind' | 'wall' | 'skim' | 'gust'
   | 'landClean' | 'landBig' | 'landFlip' | 'landSketchy' | 'crash' | 'crashSit' | 'respawn' | 'finish' | 'finishIdle' | 'fidget';
 interface StateDef { acts: [string, (h: Heroine) => number][]; once?: { clip: string; next: StateName; fade: number } }
 const ONE = () => 1;
@@ -37,6 +37,7 @@ const STATES: Record<StateName, StateDef> = {
   grabL: { acts: [['grabL', ONE]] }, grabR: { acts: [['grabR', ONE]] },
   flip: { acts: [['flip', ONE]] }, prep: { acts: [['prep', ONE]] },
   grind: { acts: [['grind', ONE]] }, wall: { acts: [['wall', ONE]] }, skim: { acts: [['skim', ONE]] },
+  gust: { acts: [['gust', ONE]] },
   landClean: { acts: [['landClean', ONE]], once: { clip: 'landClean', next: 'loco', fade: 0.25 } },
   landBig: { acts: [['landBig', ONE]], once: { clip: 'landBig', next: 'loco', fade: 0.3 } },
   landFlip: { acts: [['landFlip', ONE]], once: { clip: 'landFlip', next: 'loco', fade: 0.3 } },
@@ -53,9 +54,9 @@ const ALLOWED: Record<MoveMode, StateName[]> = {
   grounded: ['loco', 'push', 'landClean', 'landBig', 'landFlip', 'landSketchy', 'respawn', 'fidget', 'pop'],
   heelSkim: ['skim', 'landClean', 'landBig', 'landFlip', 'landSketchy'],
   airborne: ['air', 'pop', 'float', 'grabL', 'grabR', 'flip', 'prep'],
-  grinding: ['grind'], wallRiding: ['wall'], gusting: ['air', 'prep'], flying: ['air', 'float'], failed: ['crash', 'crashSit'], finished: ['finish', 'finishIdle'],
+  grinding: ['grind'], wallRiding: ['wall'], gusting: ['gust', 'prep'], flying: ['air', 'float'], failed: ['crash', 'crashSit'], finished: ['finish', 'finishIdle'],
 };
-const DEFAULT: Record<MoveMode, StateName> = { grounded: 'loco', heelSkim: 'skim', airborne: 'air', grinding: 'grind', wallRiding: 'wall', gusting: 'air', flying: 'air', failed: 'crash', finished: 'finish' };
+const DEFAULT: Record<MoveMode, StateName> = { grounded: 'loco', heelSkim: 'skim', airborne: 'air', grinding: 'grind', wallRiding: 'wall', gusting: 'gust', flying: 'air', failed: 'crash', finished: 'finish' };
 
 // ---- faces: expression targets per mood (VRM0 presets + custom groups added by the optimiser) ----
 type Face = Partial<Record<string, number>>;
@@ -389,9 +390,9 @@ export class Heroine {
       if (f.air === 'flip' && this.state !== 'flip') this.go('flip', 0.05);
       else if (f.air === 'grabLeft' && this.state !== 'grabL') this.go('grabL', 0.08);
       else if (f.air === 'grabRight' && this.state !== 'grabR') this.go('grabR', 0.08);
-      else if (f.air === 'none' && (this.state === 'flip' || ((this.state === 'grabL' || this.state === 'grabR') && this.stateTime >= GRAB_MIN_HOLD))) this.go('air', 0.15);
-      else if (f.air === 'none' && f.prep && this.state === 'air') this.go('prep', 0.1);
-      else if (!f.prep && this.state === 'prep') this.go('air', 0.15);
+      else if (f.air === 'none' && (this.state === 'flip' || ((this.state === 'grabL' || this.state === 'grabR') && this.stateTime >= GRAB_MIN_HOLD))) this.go(f.mode === 'gusting' ? 'gust' : 'air', 0.15);
+      else if (f.air === 'none' && f.prep && (this.state === 'air' || this.state === 'gust')) this.go('prep', 0.1);
+      else if (!f.prep && this.state === 'prep') this.go(f.mode === 'gusting' ? 'gust' : 'air', 0.15);
     }
     // one-shots hand over when done
     const once = STATES[this.state].once;
@@ -415,6 +416,7 @@ export class Heroine {
     else if (this.state === 'grind') this.moodBase = 'grind';
     else if (this.state === 'wall') this.moodBase = 'wall';
     else if (this.state === 'skim') this.moodBase = 'skim';
+    else if (this.state === 'gust') this.moodBase = 'whee';
     else if (this.state === 'push') this.moodBase = 'push';
     else if (this.state === 'fidget') this.moodBase = this.fidgetClip === 'fidgetStretch' ? 'relief' : 'calm';
     else if (this.state === 'respawn') this.moodBase = 'calm';
@@ -480,6 +482,11 @@ export class Heroine {
     if (this.stateW.has('air')) { // wind flutter on the arms in flight
       const w = (this.stateW.get('air') ?? 0) * Math.min(1, this.sp / 15) * 0.02;
       this.addRot('leftUpperArm', 0, 0, w * Math.sin(this.t * 9.1)); this.addRot('rightUpperArm', 0, 0, w * Math.sin(this.t * 8.3 + 1));
+    }
+    if (this.stateW.has('gust')) {
+      const w = (this.stateW.get('gust') ?? 0) * 0.045;
+      this.addRot('leftUpperArm', w * Math.sin(this.t * 11), 0, w * Math.sin(this.t * 9));
+      this.addRot('rightUpperArm', w * Math.sin(this.t * 10 + 1), 0, -w * Math.sin(this.t * 8.4));
     }
     this.object.updateMatrixWorld(true);
     this.applyPosture(f);
@@ -665,13 +672,14 @@ export class Heroine {
     // wind blows back along the route (world), more with speed; in the air falling lifts hair and skirt
     const travel = _v2.set(1, 0, 0).transformDirection(this.center.matrixWorld);
     const w = Math.min(1, this.sp / 25);
-    const fall = f.mode === 'airborne' || f.mode === 'flying' || f.mode === 'gusting' ? THREE.MathUtils.clamp(-f.vy / 12, -0.3, 0.6) : 0;
+    const gusting = f.mode === 'gusting';
+    const lift = gusting ? 0.55 : (f.mode === 'airborne' || f.mode === 'flying' ? THREE.MathUtils.clamp(-f.vy / 12, -0.3, 0.6) : 0);
     const tuck = (this.stateW.get('flip') ?? 0) + (this.stateW.get('crash') ?? 0) * 0.5 + this.inner.tuck * (this.stateW.get('loco') ?? 0);
     for (let i = 0; i < this.joints.length; i++) {
       const j = this.joints[i], b = this.jointBase[i];
-      const gust = 1 + 0.1 * Math.sin(this.t * 3.1 + i * 0.7) * w;
-      j.settings.gravityDir.set(0, -1, 0).multiplyScalar(1 - w * 0.8 - fall).addScaledVector(travel, -w * 1.2 * gust).normalize();
-      j.settings.gravityPower = b.grav + w * (b.kind === 'hair' ? 0.24 : 0.18);
+      const gust = 1 + (gusting ? 0.55 : 0.1) * Math.sin(this.t * (gusting ? 7.5 : 3.1) + i * 0.7) * (gusting ? 1 : w);
+      j.settings.gravityDir.set(0, -1, 0).multiplyScalar(1 - w * 0.8 - lift).addScaledVector(travel, -w * 1.2 * gust).normalize();
+      j.settings.gravityPower = b.grav + w * (b.kind === 'hair' ? 0.24 : 0.18) + (gusting ? (b.kind === 'hair' ? 0.45 : 0.32) : 0);
       j.settings.stiffness = b.stiff * (b.kind === 'hair' ? 1 : 1 + tuck * 0.8);
     }
   }

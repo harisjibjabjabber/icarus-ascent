@@ -127,6 +127,17 @@ CC0 1.0. Grab3D models are the GLB on each model page (no login). Restyle drops 
 | `art/props/fabric/Fabric019_Color.jpg` | CC0 1.0, ambientCG, https://ambientcg.com/view?id=Fabric019 | **CC0 1.0** | ambientCG lists CC0 1.0 | weave baked into cloth atlases, not shipped as its own file |
 | Laundry garments | no sourced mesh; cloth sim in `art/pipeline/laundry_sim.py` | project | — | yes — `set-sheet`, `set-shirt`, `set-towel`, `set-dress`, `set-sock`, `set-sock-b` |
 
+## Sky layer (workstream B, 2026-11-02)
+
+No CC0 balloon with a tied neck and knot was a better fit than building one: the packed `set-balloon` (Grab3D) is a different prop and is not used for sky clusters. The pieces below are procedural three.js geometry in the game, toon-shaded with the existing lavender ramp.
+
+| Asset | Where | Licence | Evidence | Ships? |
+|---|---|---|---|---|
+| Balloon clusters (lathe teardrop, knot, string, inverted-hull outline) | `src/render/sky/balloons.ts` | project code, self-made | — | yes |
+| Tuft grate, spiral ribbons, leaves, petals, dust, lure stars | `src/render/sky/tuftFx.ts` | project code, self-made | — | yes |
+| Centre-line rope, facade brackets, poles, pegs, procedural laundry fallback | `src/render/sky/skyLines.ts` | project code, self-made | — | yes. When `props.bin` has loaded, the hanging cloth is the existing self-made laundry set instead of the fallback |
+| Gust pose | `src/render/heroine/clips.ts` (`gust`) | project code, self-made | — | yes |
+
 ## Vision presets (time of day + hills biome mock, ported from `spike/vision`, 2026-11-01)
 
 | Asset | Where | Licence | Evidence | Ships? |
