@@ -17,12 +17,6 @@ export interface AutopilotOptions {
   styleGrabs?: boolean;
   /** Ride the optional (non-risky) rail. */
   optionalRail?: boolean;
-  /** Jump the crest into a washing line and swipe down. */
-  washLine?: boolean;
-  /** Jump, hold down to hook a rope, release on the way up. */
-  swing?: boolean;
-  /** Jump into an updraft and fly the corridor. */
-  flight?: boolean;
   /** Jump onto bounce pads. */
   bounce?: boolean;
   /** Take the risky high line: jump it and swipe down. */
@@ -56,7 +50,6 @@ export class Autopilot {
   private pillarsTried = new Set<number>();
   private heelNext = false;
   private pillarId = -1;
-  private swingStroke = -1;
   private readonly bounced = new Set<number>();
   constructor(private opts: AutopilotOptions) {}
 
@@ -102,32 +95,11 @@ export class Autopilot {
       }
       const r = course.rails.find((q) => this.takes(q) && q.points[0].x > st.x - 4);
       if (r && st.x > r.points[0].x - 3.2 && st.x < r.points[0].x - 2.6) jump = true;
-      if (this.opts.swing) {
-        const sw = course.swings.find((q) => q.ax > st.x && q.ax - st.x < 28);
-        if (sw) {
-          const lead = Math.max(1.3, st.speed * 0.31);
-          if (st.x > sw.ax - lead && st.x < sw.ax - lead + 0.7) jump = true;
-        }
-      }
-      if (this.opts.flight) {
-        const u = course.updrafts.find((q) => q.x0 > st.x - 1 && q.x0 - st.x < 22);
-        if (u) {
-          const lead = Math.max(1.5, st.speed * 0.24);
-          if (st.x > u.x0 - lead && st.x < u.x0 - lead + 0.7) jump = true;
-        }
-      }
       if (this.opts.bounce) {
         const b = course.bounces.find((q) => !this.bounced.has(q.id) && q.x > st.x && q.x - st.x < 14);
         if (b) {
-          // The first awning is 5.4 m past the kicker lip. Leave the ramp; later pads are a shorter hop.
-          if (b.kind === 'awning') {
-            const first = course.bounces.find((q) => q.kind === 'awning');
-            const back = b === first ? 5.4 : Math.max(1.6, st.speed * 0.22);
-            if (st.x > b.x - back - 0.7 && st.x < b.x - back) { jump = true; this.bounced.add(b.id); }
-          } else {
-            const lead = Math.max(1.4, st.speed * 0.3);
-            if (st.x > b.x - lead && st.x < b.x - 0.5) { jump = true; this.bounced.add(b.id); }
-          }
+          const lead = Math.max(1.4, st.speed * 0.3);
+          if (st.x > b.x - lead && st.x < b.x - 0.5) { jump = true; this.bounced.add(b.id); }
         }
       }
       for (const o of course.obstacles) {
@@ -191,17 +163,10 @@ export class Autopilot {
       }
       // hold the grab through the pillar, then let go
       const holdUntilPast = this.pillarId >= 0 && !st.broken.includes(this.pillarId) && (course.obstacle(this.pillarId)?.x ?? -Infinity) + 0.5 > st.x;
-      if (this.opts.swing && this.swingStroke === -1) {
-        const sw = course.swings.find((q) => Math.hypot(st.x - q.ax, st.y - (q.ay - q.length)) < 2.4);
-        if (sw && st.vy <= 2) { this.swingStroke = this.id(); out.push({ type: 'down', strokeId: this.swingStroke, strength: 0.65, fresh: true, source: 'test' }); }
-      }
       if (this.grabStroke !== -1 && ++this.grabTicks > Math.round(0.2 / sim.dt) && !holdUntilPast) {
         out.push({ type: 'side', side: 'left', held: false, strokeId: this.grabStroke, source: 'test' });
         this.grabStroke = -1; this.airPlan = 'done';
       }
-    } else if (st.mode === 'swinging' && this.swingStroke !== -1 && st.swingPhi > 0.7 && st.swingOmega > 0) {
-      out.push({ type: 'release', dir: 'down', strokeId: this.swingStroke, source: 'test' });
-      this.swingStroke = -1;
     }
     return out;
   }
@@ -209,7 +174,7 @@ export class Autopilot {
   /** Risky rails only for a high-line rider. Other optional rails only when optionalRail is set. */
   private takes(q: Rail): boolean {
     if (q.required) return false;
-    if (q.wash) return !!this.opts.washLine;
+    if (q.wash) return false;
     if (q.risky) return !!this.opts.riskyLine || this.opts.riskyMistime === 'nodown';
     return !!this.opts.optionalRail;
   }

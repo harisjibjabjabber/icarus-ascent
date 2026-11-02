@@ -53,9 +53,9 @@ const ALLOWED: Record<MoveMode, StateName[]> = {
   grounded: ['loco', 'push', 'landClean', 'landBig', 'landFlip', 'landSketchy', 'respawn', 'fidget', 'pop'],
   heelSkim: ['skim', 'landClean', 'landBig', 'landFlip', 'landSketchy'],
   airborne: ['air', 'pop', 'float', 'grabL', 'grabR', 'flip', 'prep'],
-  grinding: ['grind'], wallRiding: ['wall'], swinging: ['air', 'prep'], flying: ['air', 'float'], failed: ['crash', 'crashSit'], finished: ['finish', 'finishIdle'],
+  grinding: ['grind'], wallRiding: ['wall'], gusting: ['air', 'prep'], flying: ['air', 'float'], failed: ['crash', 'crashSit'], finished: ['finish', 'finishIdle'],
 };
-const DEFAULT: Record<MoveMode, StateName> = { grounded: 'loco', heelSkim: 'skim', airborne: 'air', grinding: 'grind', wallRiding: 'wall', swinging: 'air', flying: 'air', failed: 'crash', finished: 'finish' };
+const DEFAULT: Record<MoveMode, StateName> = { grounded: 'loco', heelSkim: 'skim', airborne: 'air', grinding: 'grind', wallRiding: 'wall', gusting: 'air', flying: 'air', failed: 'crash', finished: 'finish' };
 
 // ---- faces: expression targets per mood (VRM0 presets + custom groups added by the optimiser) ----
 type Face = Partial<Record<string, number>>;
@@ -382,10 +382,10 @@ export class Heroine {
     // --- state corrections from the sim mode (robust even if an event was missed) ---
     if (!ALLOWED[f.mode].includes(this.state)) {
       this.wrongModeT += dt;
-      const urgent = f.mode === 'failed' || f.mode === 'grinding' || f.mode === 'wallRiding' || f.mode === 'heelSkim' || f.mode === 'swinging' || f.mode === 'flying';
+      const urgent = f.mode === 'failed' || f.mode === 'grinding' || f.mode === 'wallRiding' || f.mode === 'heelSkim' || f.mode === 'gusting' || f.mode === 'flying';
       if (urgent || this.wrongModeT > 0.12) this.go(DEFAULT[f.mode], urgent ? 0.08 : 0.15);
     } else this.wrongModeT = 0;
-    if (f.mode === 'airborne' || f.mode === 'flying' || f.mode === 'swinging') {
+    if (f.mode === 'airborne' || f.mode === 'flying' || f.mode === 'gusting') {
       if (f.air === 'flip' && this.state !== 'flip') this.go('flip', 0.05);
       else if (f.air === 'grabLeft' && this.state !== 'grabL') this.go('grabL', 0.08);
       else if (f.air === 'grabRight' && this.state !== 'grabR') this.go('grabR', 0.08);
@@ -493,7 +493,6 @@ export class Heroine {
     // --- leg IK to the deck (last) and grab-hand IK ---
     this.solveLegs();
     if (this.tier !== 'low') this.solveHands(THREE.MathUtils.clamp(ctl.x, 0, 1), THREE.MathUtils.clamp(ctl.y, 0, 1));
-    if (f.mode === 'swinging' && f.hold) this.holdRope(f.hold);
 
     // --- expressions + blink ---
     this.updateFace(dt);
@@ -563,7 +562,7 @@ export class Heroine {
 
   private placeLookTarget(f: HeroineFrame): void {
     // figure space: +X = travel. Ahead and slightly down on the ground, toward the landing in the air.
-    const air = f.mode === 'airborne' || f.mode === 'flying' || f.mode === 'swinging';
+    const air = f.mode === 'airborne' || f.mode === 'flying' || f.mode === 'gusting';
     const ahead = air ? 6 : 9;
     const down = air ? THREE.MathUtils.clamp(-f.vy * 0.35, -1.5, 3) + 0.6 : 0.2;
     this.lookTarget.position.set(ahead, this.rig.hipsRest.y + 0.6 - down, 0.6);
@@ -611,20 +610,6 @@ export class Heroine {
       const foot = H.getNormalizedBoneNode(`${s}Foot` as never)!.getWorldPosition(_w);
       this.stats.ik[side === 'L' ? 0 : 1] = foot.distanceTo(tgt);
     }
-  }
-
-  /** Both hands meet the rope. Presentation only; the pendulum is unchanged. */
-  private ropeL = new THREE.Vector3();
-  private ropeR = new THREE.Vector3();
-  private holdRope(hold: THREE.Vector3): void {
-    const H = this.vrm.humanoid;
-    // Two hands stacked on the rope, elbows out to her sides so the grip reads from behind.
-    const up = _ax.set(0, 1, 0);
-    const hint = _v2.set(1, 0, 0).transformDirection(this.object.matrixWorld);
-    this.ropeL.copy(hold).addScaledVector(up, 0.08);
-    this.ropeR.copy(hold).addScaledVector(up, -0.07);
-    solveTwoBone(H.getNormalizedBoneNode('leftUpperArm')!, H.getNormalizedBoneNode('leftLowerArm')!, H.getNormalizedBoneNode('leftHand')!, this.ropeL, hint, null, 1);
-    solveTwoBone(H.getNormalizedBoneNode('rightUpperArm')!, H.getNormalizedBoneNode('rightLowerArm')!, H.getNormalizedBoneNode('rightHand')!, this.ropeR, hint, null, 1);
   }
 
   private solveHands(gl: number, gr: number): void {
@@ -680,7 +665,7 @@ export class Heroine {
     // wind blows back along the route (world), more with speed; in the air falling lifts hair and skirt
     const travel = _v2.set(1, 0, 0).transformDirection(this.center.matrixWorld);
     const w = Math.min(1, this.sp / 25);
-    const fall = f.mode === 'airborne' || f.mode === 'flying' || f.mode === 'swinging' ? THREE.MathUtils.clamp(-f.vy / 12, -0.3, 0.6) : 0;
+    const fall = f.mode === 'airborne' || f.mode === 'flying' || f.mode === 'gusting' ? THREE.MathUtils.clamp(-f.vy / 12, -0.3, 0.6) : 0;
     const tuck = (this.stateW.get('flip') ?? 0) + (this.stateW.get('crash') ?? 0) * 0.5 + this.inner.tuck * (this.stateW.get('loco') ?? 0);
     for (let i = 0; i < this.joints.length; i++) {
       const j = this.joints[i], b = this.jointBase[i];

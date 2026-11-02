@@ -5,11 +5,11 @@
  *  airborne   – ballistic; may carry an `air` trick (flip / grab) and a landing prep
  *  grinding   – locked to a rail
  *  wallRiding – riding a right-hand wall
- *  swinging   – hooked on a rope
+ *  gusting    – fixed-path tuft lift (sky layer; workstream A)
  *  flying     – short steered flight after an updraft
  *  failed / finished – run over
  */
-export type MoveMode = 'grounded' | 'heelSkim' | 'airborne' | 'grinding' | 'wallRiding' | 'swinging' | 'flying' | 'failed' | 'finished';
+export type MoveMode = 'grounded' | 'heelSkim' | 'airborne' | 'grinding' | 'wallRiding' | 'gusting' | 'flying' | 'failed' | 'finished';
 
 /** Airborne trick sub-state (only meaningful while airborne). */
 export type AirTrick = 'none' | 'flip' | 'grabLeft' | 'grabRight';
@@ -80,10 +80,6 @@ export interface RiderState {
   // --- contacts ---
   railId: number;
   wallId: number;
-  swingId: number;
-  /** Pendulum angle (rad, 0 = hanging straight down, + = ahead of the anchor) and angular rate. */
-  swingPhi: number;
-  swingOmega: number;
   /** Updraft the rider is in, and the y where that column was entered (NaN if none). */
   updraftId: number;
   gustY: number;
@@ -103,6 +99,11 @@ export interface RiderState {
   /** What the rider last touched before the current flight. */
   lastContact: 'ground' | 'rail' | 'wall' | 'none';
   lastContactId: number;
+  /** Street vs sky layer (sky mechanics in workstream A). */
+  layer: 'street' | 'sky';
+  tuftId: number;
+  gustT: number;
+  gustFrom: { x: number; y: number };
   /** True if a catch was armed at any point during the current flight. */
   prepTriedThisAir: boolean;
   sideTriedThisAir: boolean;
@@ -125,7 +126,7 @@ export interface RiderState {
   takeoffX: number;
   takeoffY: number;
   takeoffSpeed: number;
-  leftBy: 'jump' | 'edge' | 'crest' | 'rail' | 'wall' | 'swing' | 'bounce' | 'flight' | 'none';
+  leftBy: 'jump' | 'edge' | 'crest' | 'rail' | 'wall' | 'bounce' | 'flight' | 'none';
   fail: FailInfo | null;
 }
 
@@ -143,11 +144,12 @@ export type SimEvent =
   | { type: 'grind-end'; railId: number; x: number; y: number; reason: 'end' | 'jump' }
   | { type: 'wall-start'; wallId: number; x: number; y: number; speed: number }
   | { type: 'wall-end'; wallId: number; x: number; y: number; reason: 'end' | 'release' | 'slid-off' | 'too-slow' | 'jump' }
-  | { type: 'swing-start'; swingId: number; x: number; y: number }
-  | { type: 'swing-end'; swingId: number; x: number; y: number; reason: 'release' | 'up' | 'street' | 'timeout' }
+  | { type: 'tuft-start'; tuftId: number; x: number; y: number }
+  | { type: 'tuft-end'; tuftId: number; x: number; y: number }
+  | { type: 'sky-exit'; segmentId: number; reason: 'complete' | 'fell'; x: number; y: number }
   | { type: 'flight-start'; updraftId: number; x: number; y: number }
   | { type: 'flight-end'; x: number; y: number }
-  | { type: 'bounce'; bounceId: number; kind: 'boat' | 'balloon' | 'awning'; x: number; y: number }
+  | { type: 'bounce'; bounceId: number; kind: 'balloon'; x: number; y: number }
   | { type: 'skim-start'; x: number; y: number }
   | { type: 'skim-end'; x: number; y: number; reason: 'release' | 'push' | 'jump' | 'edge' | 'stopped' }
   | { type: 'break'; obstacleId: number; kind: 'pot' | 'pillar'; by: 'heel' | 'flip' | 'grab'; x: number; y: number; vx: number; vy: number; speed: number }

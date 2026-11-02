@@ -140,17 +140,9 @@ export const TUNING = {
     /** Jumping off a rail uses this fraction of the normal jump velocity. */
     grindJumpScale: 0.9,
 
-    // --- Washing line, swing, updraft flight, bounce (optional; the street always remains) ---
+    // --- Washing line, updraft flight, bounce (optional; the street always remains) ---
     /** A washing line is above a flat jump. Catch it from a crest, a trick launch, or a takeoff this much quicker than a flat jump (m/s). */
     washLaunchExtra: 1.5,
-    /** Hook a rope when the feet are within this of its low point (m). */
-    swingCatch: 1.15,
-    /** Holding the rope never fails; it lets go on its own after this long (s). */
-    swingMax: 2.2,
-    /** Let go of a rope with Up: extra upward speed (m/s). */
-    swingPop: 4.4,
-    /** Feet this close to the street drop off the rope (m). */
-    swingStreet: 0.15,
     /** Updraft adds this much upward acceleration while the rider is in the column (m/s^2). */
     updraftLift: 48,
     /** Height gained in the column before the short flight begins (m). */
@@ -161,9 +153,16 @@ export const TUNING = {
     flightClimb: 11,
     flightDive: 18,
     flightMax: 2.35,
-    /** Bounce: boats and awnings return at least this much upward speed; a balloon pops once then lets you through. */
+    /** Bounce: boats return at least this much upward speed; a balloon pops once then lets you through. */
     bounceMinVy: 8.4,
     balloonVy: 10.4,
+    sky: {
+      gustCatchH: 2.5, gustDuration: 0.75, gustExitDx: 9, gustExitDy: 7.0,
+      gustExitVx: 12, gustExitVy: 4,
+      lineY: 6.4, speed: 14, speedTau: 0.4,
+      clusterHalf: 1.2, clusterRad: 0.7, rungRise: 1.0, landingClear: 25,
+      camGustLag: 0.12, camSkyLag: 0.45, camSkyLift: 0.8,
+    },
 
     // --- Wall ride (airborne Right held beside a valid right-hand wall) ---
     /** Minimum forward speed to stick to a wall (m/s). */
