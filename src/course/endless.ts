@@ -423,7 +423,8 @@ export const PHRASES: PhraseSpec[] = [
       const lip = b.cur();
       b.slope(12, -1.2, easeOut).flat(26);
       // Pads sit where a jump off this lip is coming back down, and still clear 2.6 m over the street.
-      for (let i = 0; i < 3; i++) b.bouncePad({ x: lip.x + 5.4 + i * 4.6, y: lip.y + 2.05, half: 1.35, lateral: 0.35, kind: 'awning' });
+      // Four in a row: the first stays 5.4 m past the lip so the autopilot's lead still meets it.
+      for (let i = 0; i < 4; i++) b.bouncePad({ x: lip.x + 5.4 + i * 4.0, y: lip.y + 2.05, half: 1.35, lateral: 0.35, kind: 'awning' });
       b.flat(12);
     },
   },

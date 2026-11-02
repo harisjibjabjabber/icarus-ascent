@@ -49,6 +49,23 @@ export function setPieceRamp(): THREE.DataTexture {
   return setRampTex;
 }
 
+/**
+ * Neutral warm light for shopfront canvas. The lavender set-piece ramp turns terracotta,
+ * teal and ochre into grey and peach; this one keeps the stripe hue.
+ */
+let awningRampTex: THREE.DataTexture | null = null;
+export function awningRamp(): THREE.DataTexture {
+  if (awningRampTex) return awningRampTex;
+  const stops = [[0xc8, 0xbe, 0xb4], [0xfa, 0xf4, 0xee], [0xff, 0xfc, 0xf8]];
+  const data = new Uint8Array(stops.length * 4);
+  stops.forEach(([r, g, b], i) => data.set([r, g, b, 255], i * 4));
+  awningRampTex = new THREE.DataTexture(data, stops.length, 1, THREE.RGBAFormat);
+  awningRampTex.minFilter = awningRampTex.magFilter = THREE.LinearFilter;
+  awningRampTex.colorSpace = THREE.SRGBColorSpace;
+  awningRampTex.needsUpdate = true;
+  return awningRampTex;
+}
+
 let ramp: THREE.DataTexture | null = null;
 function toonRamp(): THREE.DataTexture {
   if (ramp) return ramp;

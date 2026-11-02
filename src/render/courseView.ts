@@ -6,8 +6,9 @@ import { toScene, toSceneRaw, ROUTE_DIR, ROUTE_RIGHT, ROUTE_YAW } from './space'
 import { loadProps, type PropSet } from './props';
 import { townMaterial } from './town/kit';
 import type { Vector3 } from 'three';
-import { setPieceRamp, toon } from './materials';
+import { awningRamp, setPieceRamp, toon } from './materials';
 import { buildBuntingSpan } from './bunting';
+import { TOWN } from './town/town';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { GeoBuilder, blob } from './geo';
 import { SET_ASSET, poseSoft, type SoftProp } from './setSlots';
@@ -102,8 +103,8 @@ function cobbleTexture(): THREE.Texture | null {
     const cx = (i + 0.5 + (j % 2) * 0.5) * cw + (rng() - 0.5) * cw * 0.1, cy = (j + 0.5) * rh + (rng() - 0.5) * rh * 0.08;
     stone(cx, cy, cw * (0.8 + rng() * 0.14), rh * (0.78 + rng() * 0.12), 196 + rng() * 56);
   }
-  // the plain texel for kerbs/sides (COBBLE_PLAIN_UV): a small flat spot of near-white stone
-  g.fillStyle = 'rgb(242,240,236)'; g.beginPath(); g.arc(cw * 0.5, rh * 0.5, 14, 0, Math.PI * 2); g.fill();
+  // the plain texel for kerbs/sides (COBBLE_PLAIN_UV): flat stone, not a blown-out white band
+  g.fillStyle = 'rgb(158,142,128)'; g.beginPath(); g.arc(cw * 0.5, rh * 0.5, 18, 0, Math.PI * 2); g.fill();
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
@@ -150,6 +151,8 @@ export class CourseView {
   private propsGen = 0;
   /** Shared with every high line. */
   private iron = townMaterial();
+  /** Treadwheel crane: wood and iron vertex colours, set-piece ramp, no town texture wash. */
+  private craneMat = toon('#ffffff', { vertexColors: true, side: THREE.DoubleSide, rim: 0.42 });
   /** Pennants on a bunting string. Tips carry a sway weight; the cord and hooks do not. */
   private buntingCloth = toon('#ffffff', { vertexColors: true, sway: true, side: THREE.DoubleSide, rim: 0.85 });
   private beaconGlow = toon('#fff6d4', { vertexColors: true, emissive: '#ff8a2a', emissiveIntensity: 1.15, side: THREE.DoubleSide });
@@ -161,6 +164,8 @@ export class CourseView {
   private readonly sunView = new THREE.Vector3(0.25, 0.78, 0.45);
   /** Atlases: one toon material per map, with the 3-step lavender ramp. */
   private clothMats = new Map<string, THREE.MeshToonMaterial>();
+  /** Balloon shells with the floating weight removed. Shares the prop's vertex buffers. */
+  private balloonShells = new WeakMap<THREE.BufferGeometry, THREE.BufferGeometry>();
   private glintTex: THREE.Texture | null = null;
   private restRopes = new Map<number, THREE.Group>();
   private heldSwing: number | null = null;
@@ -185,6 +190,7 @@ export class CourseView {
 
   constructor(readonly course: Course) {
     this.iron.side = THREE.DoubleSide;
+    this.craneMat.gradientMap = setPieceRamp();
     this.beaconGlow.side = THREE.DoubleSide;
     this.orbView = new OrbView(this.group, course);
     loadProps().then((p) => {
@@ -254,8 +260,8 @@ export class CourseView {
       const lat = w.lat0 + (w.lat1 - w.lat0) * along + Math.cos(time * 0.28 + w.phase * 1.7) * 0.16;
       w.mesh.position.copy(toSceneRaw(x - w.chunkX, y - w.chunkY, lat));
       if (cam) w.mesh.lookAt(cam.position);
-      const size = 0.6 + 1.2 * k;
-      w.mesh.scale.set(size, size, 1);
+      const size = 1.2 + 1.55 * k;
+      w.mesh.scale.set(size * 1.12, size, 1);
       w.mesh.rotateZ(time * (0.18 + w.spin));
       let fade = age < 0.2 ? age / 0.2 : 1;
       if (k > 0.6) fade *= 1 - (k - 0.6) / 0.4;
@@ -350,6 +356,7 @@ export class CourseView {
     this.pool = { pot: [], pillar: [] };
     this.orbView.dispose();
     this.iron.dispose();
+    this.craneMat.dispose();
     this.beaconGlow.dispose();
     for (const t of this.steamTex) t.dispose();
     this.puffGeo?.dispose();
@@ -456,18 +463,25 @@ export class CourseView {
       if (sign < 0) quad(far, near, [e.x, by, W / 2], [e.x, by, -W / 2], side, under);
       else quad(near, far, [e.x, by, -W / 2], [e.x, by, W / 2], side, under);
     }
-    const g = new THREE.BufferGeometry();
-    const n0 = pos[0].length / 3, n1 = pos[1].length / 3;
-    g.setAttribute('position', new THREE.Float32BufferAttribute([...pos[0], ...pos[1]], 3));
-    g.setAttribute('color', new THREE.Float32BufferAttribute([...col[0], ...col[1]], 3));
-    g.setAttribute('uv', new THREE.Float32BufferAttribute([...uv[0], ...uv[1]], 2));
-    g.computeVertexNormals();
-    void n0; void n1;
-    // one mesh, one material (the textured street and its plain kerbs/sides share a draw call)
-    const mesh = new THREE.Mesh(g, textured ? cobbleMat() : mat('#ffffff', { vertexColors: true, side: THREE.DoubleSide, rim: 0.6, emissive: undefined }));
-    mesh.receiveShadow = true;
-    mesh.castShadow = true;
-    return mesh;
+    // Kerbs stay off the cobble atlas. A constant UV on that atlas collapses to a pale mip and
+    // reads as a white strip along the quay. Vertex colour alone keeps the stone.
+    const group = new THREE.Group();
+    const add = (p: number[], c: number[], u: number[] | null, material: THREE.Material) => {
+      if (!p.length) return;
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(p, 3));
+      geo.setAttribute('color', new THREE.Float32BufferAttribute(c, 3));
+      if (u) geo.setAttribute('uv', new THREE.Float32BufferAttribute(u, 2));
+      geo.computeVertexNormals();
+      const mesh = new THREE.Mesh(geo, material);
+      mesh.receiveShadow = true;
+      mesh.castShadow = true;
+      group.add(mesh);
+    };
+    const plain = mat('#ffffff', { vertexColors: true, side: THREE.DoubleSide, rim: 0.35 });
+    add(pos[0], col[0], uv[0], textured ? cobbleMat() : plain);
+    add(pos[1], col[1], null, plain);
+    return group;
   }
 
   /** Thin lines on both lips so the riding surface and its edges read crisply at speed. Segments are appended to
@@ -577,6 +591,28 @@ export class CourseView {
   }
 
   /**
+   * The fence boards are stored as sRGB bytes divided by 255, and the pale ones carry no wood layer.
+   * Treated as linear they blow out to a white plank. Put them back in linear space and onto the wood grain.
+   */
+  private dressRail(geo: THREE.BufferGeometry): void {
+    const col = geo.getAttribute('color');
+    const tl = geo.getAttribute('tl');
+    const toLin = (c: number) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+    for (let i = 0; i < col.count; i++) {
+      let r = toLin(col.getX(i)), g = toLin(col.getY(i)), b = toLin(col.getZ(i));
+      if (tl.getX(i) < 0) {
+        // Authored boards are nearly white (247, 207, 141). The chase camera looks down on that
+        // top face, so a mild darken still reads as a flat pale strip beside the cobbles.
+        r *= 0.32; g *= 0.32; b *= 0.32;
+        tl.setX(i, 2);
+      }
+      col.setXYZ(i, r, g, b);
+    }
+    col.needsUpdate = true;
+    tl.needsUpdate = true;
+  }
+
+  /**
    * Risky high line: a painted fence panel (the grind is its top rail) and two post lanterns
    * framing the street before it. The street mesh itself is untouched, so the safe line stays readable.
    */
@@ -593,7 +629,10 @@ export class CourseView {
       const mid = (a + b) / 2;
       const top = Course.railSample(r, mid).y;
       const gnd = this.course.groundBelow(mid, top)?.sample.y ?? top - 1.1;
-      ironParts.push(this.stamp(rail.body, (u, v, w) => ({ x: a + u * (b - a), y: gnd + v * (top - gnd), lat: r.lateral + w })));
+      const panel = this.stamp(rail.body, (u, v, w) => ({ x: a + u * (b - a), y: gnd + v * (top - gnd), lat: r.lateral + w }));
+      // The boards ship as flat sRGB bytes with no wood layer, so they render as a white strip beside the street.
+      this.dressRail(panel);
+      ironParts.push(panel);
     }
     const mouth = x0 - 5.5;
     const base = this.course.groundBelow(mouth, 1e6)?.sample.y ?? r.points[0].y - 1.1;
@@ -871,13 +910,23 @@ export class CourseView {
     if (sw.anchor === 'crane') {
       const crane = this.props?.piece('crane');
       if (crane) {
+        const P = crane.body.getAttribute('position');
+        let zMin = Infinity, zMax = -Infinity;
+        for (let i = 0; i < P.count; i++) { zMin = Math.min(zMin, P.getZ(i)); zMax = Math.max(zMax, P.getZ(i)); }
+        const zMid = (zMin + zMax) / 2;
+        // local +Z points toward the street. The inner face sits on the quay, clear of the 1.6 m lane.
+        const center = 2.05 + (zMax - zMin) / 2;
+        const place = (u: number, vv: number, w: number) => ({
+          x: sw.ax + u, y: street - 0.12 + vv, lat: center - (w - zMid),
+        });
+        const geo = this.stamp(crane.body, place);
+        this.paintCrane(geo);
+        const mesh = new THREE.Mesh(geo, this.craneMat);
+        mesh.name = 'set-crane';
+        mesh.castShadow = true;
+        g.add(mesh);
         const head = this.highest(crane.body);
-        // Jib head sits just off the rope, the treadwheel stays toward the quay.
-        const anchorLat = sw.lateral + 1.35;
-        iron.push(this.stamp(crane.body, (u, vv, w) => ({
-          x: sw.ax - (u - head.x), y: street + vv, lat: anchorLat - (w - head.z),
-        })));
-        this.rope(gb, sw.ax, street + head.y, anchorLat, sw.ax, sw.ay, sw.lateral, 0.05, rope);
+        this.rope(gb, sw.ax + head.x, street - 0.12 + head.y, center - (head.z - zMid), sw.ax, sw.ay, sw.lateral, 0.18, rope, 0.035);
       } else {
         const center = Math.max(sw.lateral + 0.4, 1.62 + 1.18);
         gb.add(new THREE.CylinderGeometry(0.16, 0.22, 6.4, 8), this.L(sw.ax, street + 3.2, center), '#6a5348', { top: '#c4a46a' });
@@ -915,7 +964,44 @@ export class CourseView {
   private balloonDress(b: Bounce, g: THREE.Group, v: ChunkView): void {
     const piece = this.props?.piece(SET_ASSET.balloon);
     if (!piece) return;
-    this.placeSoft(v, g, piece, (u, vv, w) => ({ x: b.x + u, y: b.y + vv, lat: b.lateral + w }), 'along', b.id, 0.06, 1.5, SET_ASSET.balloon, 1.7);
+    const street = this.streetY(b.x, b.y - 1);
+    // The bunch stays where the pad is. A post on the pavement replaces the floating weight.
+    const postLat = Math.min(TOWN.front - 0.85, b.lateral + 1.05);
+    const bollard = this.props?.piece('bollard');
+    if (bollard) {
+      const post = this.stamp(bollard.body, (u, vv, w) => ({ x: b.x + u, y: street + vv, lat: postLat + w }));
+      const mesh = new THREE.Mesh(post, this.iron);
+      mesh.castShadow = true;
+      g.add(mesh);
+    }
+    const gb = new GeoBuilder();
+    this.rope(gb, b.x, street + 0.95, postLat, b.x, b.y, b.lateral, 0.16, '#5c4638', 0.016);
+    const line = gb.build();
+    if (line) { const mesh = new THREE.Mesh(line, vc(0.85)); mesh.castShadow = true; g.add(mesh); }
+    const shells = { ...piece, body: this.balloonShell(piece.body) };
+    this.placeSoft(v, g, shells, (u, vv, w) => ({ x: b.x + u, y: b.y + vv, lat: b.lateral + w }), 'along', b.id, 0.06, 1.5, SET_ASSET.balloon, 1.7);
+  }
+
+  /** Drop the weight and the string that ends in it. Shells sit above a gap in the mesh. */
+  private balloonShell(src: THREE.BufferGeometry): THREE.BufferGeometry {
+    const cached = this.balloonShells.get(src);
+    if (cached) return cached;
+    const P = src.getAttribute('position');
+    const I = src.getIndex()!;
+    const keep: number[] = [];
+    for (let i = 0; i < I.count; i += 3) {
+      const a = I.getX(i), b = I.getX(i + 1), c = I.getX(i + 2);
+      if (P.getY(a) < 0.5 || P.getY(b) < 0.5 || P.getY(c) < 0.5) continue;
+      keep.push(a, b, c);
+    }
+    const g = new THREE.BufferGeometry();
+    for (const name of ['position', 'normal', 'color', 'tuv', 'tl']) {
+      const a = src.getAttribute(name);
+      if (a) g.setAttribute(name, a);
+    }
+    g.setIndex(new THREE.BufferAttribute(new Uint32Array(keep), 1));
+    this.balloonShells.set(src, g);
+    return g;
   }
 
   private boatDress(b: Bounce, g: THREE.Group, v: ChunkView): void {
@@ -938,7 +1024,7 @@ export class CourseView {
   }
 
   /** A sourced mesh, centred so a landing can squash it. No stand-in when the slot is empty. */
-  private placeSoft(v: ChunkView, parent: THREE.Group, piece: PropPiece, place: (u: number, vv: number, w: number) => { x: number; y: number; lat: number }, frame: 'along' | 'out' | 'cross', id: number, bob: number, bobRate: number, name: string, rim = 0.7, tint?: THREE.Color): void {
+  private placeSoft(v: ChunkView, parent: THREE.Group, piece: PropPiece, place: (u: number, vv: number, w: number) => { x: number; y: number; lat: number }, frame: 'along' | 'out' | 'cross', id: number, bob: number, bobRate: number, name: string, rim = 0.7, tint?: THREE.Color, ramp: 'set' | 'awning' = 'set'): void {
     const geo = this.stamp(piece.body, place, frame, undefined, tint);
     if (piece.map) geo.setAttribute('uv', geo.getAttribute('tuv').clone());
     geo.computeBoundingBox();
@@ -946,7 +1032,7 @@ export class CourseView {
     geo.translate(-c.x, -c.y, -c.z);
     const group = new THREE.Group();
     group.name = name;
-    const mat = piece.map ? this.clothMaterial(piece.map, false, rim) : this.iron;
+    const mat = piece.map ? this.clothMaterial(piece.map, false, rim, ramp) : this.iron;
     const mesh = new THREE.Mesh(geo, mat);
     mesh.castShadow = true;
     group.add(mesh);
@@ -955,14 +1041,14 @@ export class CourseView {
     v.soft.push({ id, group, hit: -1, phase: id * 0.7, baseY: group.position.y, bob, bobRate });
   }
 
-  /** Restyled atlas on the 3-step lavender ramp. Shared per map. */
-  private clothMaterial(map: THREE.Texture, sway: boolean, rim: number): THREE.MeshToonMaterial {
-    const key = `${map.uuid}|${sway ? 1 : 0}|${rim}`;
+  /** Restyled atlas. Awnings use a neutral ramp so the stripes stay terracotta, teal or ochre. */
+  private clothMaterial(map: THREE.Texture, sway: boolean, rim: number, ramp: 'set' | 'awning' = 'set'): THREE.MeshToonMaterial {
+    const key = `${map.uuid}|${sway ? 1 : 0}|${rim}|${ramp}`;
     let m = this.clothMats.get(key);
     if (!m) {
       m = toon('#ffffff', { sway, rim, side: THREE.DoubleSide });
       m.map = map;
-      m.gradientMap = setPieceRamp();
+      m.gradientMap = ramp === 'awning' ? awningRamp() : setPieceRamp();
       this.clothMats.set(key, m);
     }
     return m;
@@ -987,7 +1073,7 @@ export class CourseView {
     }
   }
 
-  /** Doorway canvas on the right facade, real size. The pad stays in the street. Empty slot draws nothing. */
+  /** Doorway canvas on the right shopfront. The pad stays in the street. Empty slot draws nothing. */
   private awningDress(b: Bounce, parent: THREE.Group, v: ChunkView): void {
     const names = SET_ASSET.awnings;
     const piece = this.props?.piece(names[b.id % names.length]);
@@ -996,14 +1082,45 @@ export class CourseView {
     let yMin = Infinity;
     for (let i = 0; i < src.count; i++) yMin = Math.min(yMin, src.getY(i));
     const street = this.streetY(b.x, b.y);
-    const doorway = street + 2.75;
-    // Valance at a real doorway when the hop is near the street; otherwise keep it in the shot.
-    const valance = Math.abs(b.y - doorway) < 4.5 ? doorway : b.y - 0.2;
+    // Hem of the valance, just over a doorway. The wall edge of the mesh is z = 0.
+    const valance = street + 2.8;
     this.placeSoft(v, parent, piece, (u, vv, w) => ({
       x: b.x + u,
       y: valance - yMin + vv,
-      lat: 4.65 - w,
-    }), 'along', b.id, 0, 0, names[b.id % names.length], 0.9);
+      lat: TOWN.front - w,
+    }), 'along', b.id, 0, 0, names[b.id % names.length], 0.55, undefined, 'awning');
+  }
+
+  /**
+   * The iron primitive shipped as flat cream (no atlas) and the town wood layer washed the planks pale.
+   * Wood verts go back onto #8a5a3a–#d9b48a; the untextured frame is iron #3b3440. `tl` stays off so the
+   * town texture array cannot tint it.
+   */
+  private paintCrane(geo: THREE.BufferGeometry): void {
+    const col = geo.getAttribute('color');
+    const tl = geo.getAttribute('tl');
+    // Hex colours are sRGB. Vertex buffers are linear, so a raw byte/255 stays a wash of pale tan.
+    const lo = new THREE.Color('#8a5a3a');
+    const hi = new THREE.Color('#d9b48a');
+    const iron = new THREE.Color('#3b3440');
+    let min = 1, max = 0;
+    for (let i = 0; i < col.count; i++) {
+      if (tl.getX(i) < 0) continue;
+      const lum = col.getX(i) * 0.3 + col.getY(i) * 0.59 + col.getZ(i) * 0.11;
+      min = Math.min(min, lum); max = Math.max(max, lum);
+    }
+    const span = Math.max(0.05, max - min);
+    for (let i = 0; i < col.count; i++) {
+      if (tl.getX(i) < 0) col.setXYZ(i, iron.r, iron.g, iron.b);
+      else {
+        const lum = col.getX(i) * 0.3 + col.getY(i) * 0.59 + col.getZ(i) * 0.11;
+        const t = Math.min(1, Math.max(0, (lum - min) / span));
+        col.setXYZ(i, lo.r + (hi.r - lo.r) * t, lo.g + (hi.g - lo.g) * t, lo.b + (hi.b - lo.b) * t);
+      }
+      tl.setX(i, -1);
+    }
+    col.needsUpdate = true;
+    tl.needsUpdate = true;
   }
 
   private updraftDress(u: Updraft, g: THREE.Group, v: ChunkView, iron: THREE.BufferGeometry[]): void {
@@ -1051,13 +1168,21 @@ export class CourseView {
           uniform sampler2D map; uniform vec3 sunDir; uniform float opacity; varying vec2 vUv;
           void main() {
             vec4 tex = texture2D(map, vUv);
-            float a = smoothstep(0.35, 0.6, tex.a);
             vec2 p = vUv * 2.0 - 1.0;
             float lum = dot(tex.rgb, vec3(0.3, 0.59, 0.11));
-            vec3 fake = normalize(vec3(p, sqrt(max(0.0, 1.0 - min(dot(p, p), 1.0)))) + vec3((lum - 0.5) * 0.45, (lum - 0.5) * 0.2, 0.0));
-            float lit = step(0.45, dot(fake, normalize(sunDir)));
-            vec3 col = mix(vec3(0.7255, 0.7020, 0.7882), vec3(1.0, 0.9725, 0.9333), lit);
-            gl_FragColor = vec4(col, a * opacity);
+            // Sheets are white puffs on black. A missing or solid alpha must not keep the black card.
+            float coverage = min(lum, tex.a);
+            float card = smoothstep(0.96, 0.42, length(p));
+            float soft = smoothstep(0.02, 0.55, coverage) * card;
+            vec3 sun = length(sunDir) > 0.001 ? normalize(sunDir) : vec3(0.25, 0.86, 0.35);
+            vec3 fake = normalize(vec3(p, sqrt(max(0.0, 1.0 - min(dot(p, p), 1.0)))) + vec3((lum - 0.35) * 0.55, (lum - 0.35) * 0.22, 0.0));
+            float lit = smoothstep(0.0, 0.72, dot(fake, sun));
+            // Edges stay lavender; the lit core is warm cream. Both sit well above black.
+            vec3 lavender = vec3(0.73, 0.64, 0.86);
+            vec3 cream = vec3(1.0, 0.90, 0.74);
+            vec3 col = mix(lavender, cream, lit * smoothstep(0.12, 0.7, coverage));
+            // Soft enough that overlapping cards stay cloudy instead of a solid wall.
+            gl_FragColor = vec4(col, soft * opacity * 0.72);
           }`,
         transparent: true, depthWrite: false, depthTest: true, fog: false,
         blending: THREE.NormalBlending, side: THREE.DoubleSide,
