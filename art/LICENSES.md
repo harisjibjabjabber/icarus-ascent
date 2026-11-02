@@ -135,7 +135,7 @@ No CC0 balloon with a tied neck and knot was a better fit than building one: the
 |---|---|---|---|---|
 | Balloon clusters (lathe teardrop, knot, string, inverted-hull outline) | `src/render/sky/balloons.ts` | project code, self-made | — | yes |
 | Tuft grate, spiral ribbons, leaves, petals, dust, lure stars | `src/render/sky/tuftFx.ts` | project code, self-made | — | yes |
-| Centre-line rope, facade brackets, poles, pegs, procedural laundry fallback | `src/render/sky/skyLines.ts` | project code, self-made | — | yes. When `props.bin` has loaded, the hanging cloth is the existing self-made laundry set instead of the fallback |
+| Sky rope (follows each anchor's lateral), facade brackets, poles, pegs, procedural laundry fallback | `src/render/sky/skyLines.ts` | project code, self-made | — | yes. When `props.bin` has loaded, the hanging cloth is the existing self-made laundry set instead of the fallback |
 | Gust pose | `src/render/heroine/clips.ts` (`gust`) | project code, self-made | — | yes |
 
 ## Vision presets (time of day + hills biome mock, ported from `spike/vision`, 2026-11-01)

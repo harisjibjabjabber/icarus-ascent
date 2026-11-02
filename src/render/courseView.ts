@@ -10,6 +10,7 @@ import { awningRamp, setPieceRamp, toon } from './materials';
 import { buildBuntingSpan } from './bunting';
 import { setSkyDressingZones, TOWN } from './town/town';
 import { SKY_FIXTURE_INTRO } from '../course/skyFixture';
+import { overlapsSkyBand } from '../course/sky';
 import type { SkySegment, Tuft } from '../course/skyTypes';
 import { BalloonCluster } from './sky/balloons';
 import { TuftFx } from './sky/tuftFx';
@@ -738,7 +739,7 @@ export class CourseView {
   private addBunting(parent: THREE.Group, r: Rail): void {
     const pts = r.points;
     const x0 = pts[0].x, x1 = pts[pts.length - 1].x;
-    if (this.skyBlocks(x0, x1)) return;
+    if (overlapsSkyBand(this.skySegments(), x0, x1)) return;
     const len = Math.max(1, x1 - x0);
     const yAt = (x: number) => Course.railSample(r, Math.min(Math.max(x, x0), x1)).y;
     const facade = 4.65;
@@ -860,14 +861,11 @@ export class CourseView {
     return best.id === here.id;
   }
 
-  private skyBlocks(x0: number, x1: number): boolean {
-    return this.skySegments().some((s) => x1 >= s.x0 - 10 && x0 <= s.x1 + 10);
-  }
-
   private dressSky(c: Chunk, g: THREE.Group, v: ChunkView): void {
     const place = (x: number, y: number, lat: number) => this.L(x, y, lat);
     const segments = this.skySegments().filter((s) => s.x1 >= c.x0 - 1 && s.x0 <= c.x1 + 1);
     const drawn = new Set<number>();
+    const clusterX: number[] = [];
     for (const seg of segments) {
       for (const tuft of this.tuftsFor(seg)) {
         const cx = (tuft.x0 + tuft.x1) / 2;
@@ -905,6 +903,7 @@ export class CourseView {
       for (const cluster of seg.clusters) {
         if (!this.ownsX(cluster.tether.x)) continue;
         drawn.add(cluster.bounceId);
+        clusterX.push(cluster.tether.x);
         const street = this.streetY(cluster.tether.x, seg.yBase);
         const knotY = cluster.tether.y - seg.yBase + street - 1.55;
         const fx = new BalloonCluster({
@@ -918,6 +917,7 @@ export class CourseView {
     for (const id of c.bounces ?? []) {
       const b = this.course.bounce(id);
       if (!b?.sky || drawn.has(b.id) || !this.ownsX(b.x)) continue;
+      if (clusterX.some((x) => Math.abs(x - b.x) < 0.75)) continue;
       const street = this.streetY(b.x, b.y - 2);
       const count = 3 + (Math.abs(b.id) % 5);
       const fx = new BalloonCluster({

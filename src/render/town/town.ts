@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GeoBuilder, blob } from '../geo';
 import { toSceneRaw, ROUTE_RIGHT, ROUTE_YAW } from '../space';
 import { Kit, MergeBuffer, TEX, type Tints } from './kit';
+import { inSkyFrontage, skyFrontRowFloors } from '../../course/sky';
 
 /**
  * Witch-town layout (Kiki-style Mediterranean seaside town). Places premade kit pieces along the route in 40 m
@@ -59,13 +60,8 @@ let notedSkyZones: { x0: number; x1: number }[] = [];
 export function setSkyDressingZones(zones: { x0: number; x1: number }[]): void {
   notedSkyZones = zones.map((z) => ({ x0: z.x0, x1: z.x1 }));
 }
-function skyPads(opts: ChunkOpts): { x0: number; x1: number }[] {
-  const src = opts.skyZones !== undefined ? opts.skyZones : notedSkyZones;
-  return src.map((z) => ({ x0: z.x0 - 10, x1: z.x1 + 10 }));
-}
-function inSky(x: number, w: number, pads: { x0: number; x1: number }[]): boolean {
-  const b = x + w;
-  return pads.some((z) => b > z.x0 && x < z.x1);
+function skySpans(opts: ChunkOpts): { x0: number; x1: number }[] {
+  return opts.skyZones !== undefined ? opts.skyZones : notedSkyZones;
 }
 
 const lin = (h: string) => new THREE.Color(h);
@@ -241,7 +237,7 @@ export function buildTownChunk(kit: Kit, k: number, seed: number, ground: Ground
 function* townChunkSteps(kit: Kit, k: number, seed: number, ground: GroundFn, opts: ChunkOpts = {}): Generator<void, TownChunk> {
   const T = TOWN, L = T.chunk, x0 = k * L, x1 = x0 + L;
   const rng = mulberry((seed ^ Math.imul(k + 7919, 0x9e3779b1)) >>> 0);
-  const pads = skyPads(opts);
+  const spans = skySpans(opts);
   const plans: HousePlan[] = [];
   const y0 = level(ground, x0);
   const P = new Placer(x0, y0);
@@ -306,8 +302,9 @@ function* townChunkSteps(kit: Kit, k: number, seed: number, ground: GroundFn, op
         const tower = opts.clockTowers?.some((tx) => row === 1 && side < 0 && tx >= x && tx < x + w);
         if (tower) { clockTower(kit, near, far, base); x += w; yield; continue; }
         const floorRoll = rng();
-        const skyFront = row === 0 && inSky(x, w, pads);
-        const floors = skyFront ? 3 : row ? 2 + Math.floor(floorRoll * 3) : 2 + (floorRoll < 0.45 ? 1 : 0);
+        const rolled = row ? 2 + Math.floor(floorRoll * 3) : 2 + (floorRoll < 0.45 ? 1 : 0);
+        const skyFront = row === 0 && inSkyFrontage(spans, x + w / 2);
+        const floors = skyFrontRowFloors(skyFront, rolled);
         const spec: HouseSpec = {
           w, floors, plaster: lin(pick(T.plaster)), shutter: lin(pick(T.shutter)), roof: 0.85 + rng() * 0.25,
           chimney: rng() < 0.45, balcony: rng() < 0.18, sign: row === 0 && rng() < 0.3 ? Math.floor(rng() * T.sign.length) : -1,
