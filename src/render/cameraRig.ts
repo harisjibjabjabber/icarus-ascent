@@ -46,7 +46,7 @@ export class CameraRig {
   get progress(): number { return this.fx; }
   get height(): number { return this.fy; }
 
-  update(dt: number, riderX: number, riderY: number, speed: number, snap = false, aheadMaxY = -Infinity): void {
+  update(dt: number, riderX: number, riderY: number, speed: number, snap = false, aheadMaxY = -Infinity, lateral = 0): void {
     const C = TUNING.camera;
     // raise the follow height to see over an upcoming crest/lip
     const targetY = Math.max(riderY, Math.min(aheadMaxY + C.lookOverClearance - C.height, riderY + C.lookOverMaxLift));
@@ -65,7 +65,7 @@ export class CameraRig {
     if (Math.abs(fov - this.camera.fov) > 0.01) { this.camera.fov = fov; this.camera.updateProjectionMatrix(); }
     const behind = (C.behind + C.behindPerSpeed * this.pull) * this.scale;
     const height = (C.height + C.heightPerSpeed * this.pull) * this.scale;
-    toScene(this.fx - behind, this.fy + height, 0, this.camera.position);
+    toScene(this.fx - behind, this.fy + height, lateral, this.camera.position);
     if (this.shakeAmp > 0) {
       const a = this.shakeAmp * decay * decay, w = this.shakeT * 70;
       this.camera.position.y += Math.sin(w) * a;

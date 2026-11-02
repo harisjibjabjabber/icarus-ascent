@@ -7,7 +7,7 @@
  * which features are *available* (milestone 2 uses it for rail/wall context).
  */
 
-import type { Orb } from './orbs';
+import type { Orb, OrbPickup } from './orbs';
 
 export type { Orb, OrbPlacement, OrbTier, OrbPickup } from './orbs';
 
@@ -51,6 +51,11 @@ export interface Rail {
    * (washing line, balcony rail, gutter or bunting) instead of a fence standing in the street.
    */
   dress?: 'wash' | 'balcony' | 'gutter' | 'bunting';
+  /**
+   * High washing line. The street stays continuous and there is no void.
+   * A flat jump cannot catch it: the rider has to arrive off a crest, another trick, or a harder launch.
+   */
+  wash?: boolean;
 }
 
 /** Rideable wall (milestone 2 mechanics). */
@@ -65,6 +70,47 @@ export interface Wall {
   required: boolean;
   /** Town shop wall, harbour warehouse, or a moored hull. Presentation only. */
   face?: 'shop' | 'warehouse' | 'hull';
+}
+
+/** A rope hung off a post, sign or crane. Gameplay is the pendulum; lateral keeps it off the street centre. */
+export interface Swing {
+  id: number;
+  ax: number;
+  ay: number;
+  length: number;
+  lateral: number;
+  anchor: 'lamp' | 'sign' | 'crane';
+}
+
+/** One bounce. Balloons are spent after a single hit; boats and awnings are one trigger per pass too. */
+export interface Bounce {
+  id: number;
+  kind: 'boat' | 'balloon' | 'awning';
+  x: number;
+  y: number;
+  /** Horizontal half-width. A balloon uses this as its radius. */
+  half: number;
+  lateral: number;
+}
+
+/** A column of lift. Once it has raised the rider, a short steered flight runs to corridorX1. */
+export interface Updraft {
+  id: number;
+  x0: number;
+  x1: number;
+  y0: number;
+  y1: number;
+  lift: number;
+  corridorX1: number;
+  source: 'chimney' | 'vent';
+  lateral: number;
+}
+
+/** Ideal line through a set piece, for the orb placer. The hardest point is also spawned as a purple orb. */
+export interface RideHook {
+  activity: 'wash' | 'swing' | 'flight' | 'bounce';
+  path: { x: number; y: number; lateral: number }[];
+  hardest: { x: number; y: number; lateral: number; pickup: OrbPickup };
 }
 
 /** An explicit gap between two ground chains. */
@@ -111,7 +157,7 @@ export interface Lesson {
 /** Something to do on the course (tests use these for spacing/approach checks). */
 export interface Feature {
   x: number;
-  kind: 'gap' | 'rail' | 'rail-optional' | 'rail-risky' | 'wall' | 'pot' | 'pillar' | 'crest' | 'rollers';
+  kind: 'gap' | 'rail' | 'rail-optional' | 'rail-risky' | 'wall' | 'pot' | 'pillar' | 'crest' | 'rollers' | 'swing' | 'updraft' | 'bounce';
   required: boolean;
   /** Where the approach to this feature starts (run-in begins), for required features. */
   approachX?: number;
@@ -150,6 +196,11 @@ export interface Chunk {
   markers: Marker[];
   /** Optional orbs owned by this chunk (endless). Recycled with it. */
   orbs?: number[];
+  swings?: number[];
+  bounces?: number[];
+  updrafts?: number[];
+  /** Ideal path and hardest point for each activity in this chunk. The placer may follow `path`. */
+  rides?: RideHook[];
 }
 
 export interface SurfaceSample {
@@ -172,6 +223,12 @@ export class Course {
   private wById = new Map<number, Wall>();
   private oById = new Map<number, Obstacle>();
   private oOrbById = new Map<number, Orb>();
+  readonly swings: Swing[] = [];
+  readonly bounces: Bounce[] = [];
+  readonly updrafts: Updraft[] = [];
+  private swById = new Map<number, Swing>();
+  private boById = new Map<number, Bounce>();
+  private upById = new Map<number, Updraft>();
   /** Optional orbs currently streamed (endless). */
   readonly orbs: Orb[] = [];
   /** Presentation hint (opening only): route x where the harbour town (quay, sea on the right) begins. */
@@ -220,6 +277,9 @@ export class Course {
   obstacle(id: number): Obstacle | undefined { return this.oById.get(id); }
   orb(id: number): Orb | undefined { return this.oOrbById.get(id); }
   hasObstacle(id: number): boolean { return this.oById.has(id); }
+  swing(id: number): Swing | undefined { return this.swById.get(id); }
+  bounce(id: number): Bounce | undefined { return this.boById.get(id); }
+  updraft(id: number): Updraft | undefined { return this.upById.get(id); }
 
   /** Static courses: one chunk owning everything (call after construction is complete). */
   sealAsSingleChunk(title: string): void {
@@ -230,6 +290,7 @@ export class Course {
       id: 0, x0, x1, y0: ys[0].y, y1: ys[ys.length - 1].y, title, cpX: this.startX, cpSpeed: 0, features: [],
       surfaces: this.surfaces.map((q) => q.id), rails: this.rails.map((q) => q.id), walls: this.walls.map((q) => q.id),
       obstacles: this.obstacles.map((q) => q.id), markers: [...this.markers],
+      swings: [], bounces: [], updrafts: [], rides: [],
     });
   }
 
@@ -238,12 +299,15 @@ export class Course {
   stream(_x: number, _active?: { surfaceId: number; railId: number; wallId: number }): void {}
 
   /** Append a chunk's content (streamed courses). */
-  protected addChunk(c: Chunk, surfaces: Surface[], rails: Rail[], walls: Wall[], obstacles: Obstacle[], gaps: Gap[], orbs: Orb[] = []): void {
+  protected addChunk(c: Chunk, surfaces: Surface[], rails: Rail[], walls: Wall[], obstacles: Obstacle[], gaps: Gap[], orbs: Orb[] = [], extra: { swings?: Swing[]; bounces?: Bounce[]; updrafts?: Updraft[] } = {}): void {
     for (const q of surfaces) { this.surfaces.push(q); this.sById.set(q.id, q); }
     for (const q of rails) { this.rails.push(q); this.rById.set(q.id, q); }
     for (const q of walls) { this.walls.push(q); this.wById.set(q.id, q); }
     for (const q of obstacles) { this.obstacles.push(q); this.oById.set(q.id, q); }
     for (const q of orbs) { this.orbs.push(q); this.oOrbById.set(q.id, q); }
+    for (const q of extra.swings ?? []) { this.swings.push(q); this.swById.set(q.id, q); }
+    for (const q of extra.bounces ?? []) { this.bounces.push(q); this.boById.set(q.id, q); }
+    for (const q of extra.updrafts ?? []) { this.updrafts.push(q); this.upById.set(q.id, q); }
     this.gaps.push(...gaps);
     this.markers.push(...c.markers);
     this.chunks.push(c);
@@ -260,6 +324,9 @@ export class Course {
     drop(this.rails, c.rails, this.rById);
     drop(this.walls, c.walls, this.wById);
     drop(this.obstacles, c.obstacles, this.oById);
+    if (c.swings?.length) drop(this.swings, c.swings, this.swById);
+    if (c.bounces?.length) drop(this.bounces, c.bounces, this.boById);
+    if (c.updrafts?.length) drop(this.updrafts, c.updrafts, this.upById);
     if (c.orbs?.length) {
       const set = new Set(c.orbs);
       for (let i = this.orbs.length - 1; i >= 0; i--) if (set.has(this.orbs[i].id)) this.orbs.splice(i, 1);
@@ -351,6 +418,34 @@ export class Course {
     this.obstacles.push(o);
     this.oById.set(o.id, o);
     if (this.chunks.length === 1) this.chunks[0].obstacles.push(o.id);
+    return o;
+  }
+
+  addSwing(s: Omit<Swing, 'id'>): Swing {
+    const swing: Swing = { id: this.swings.length ? Math.max(...this.swings.map((q) => q.id)) + 1 : 0, ...s };
+    this.swings.push(swing); this.swById.set(swing.id, swing);
+    if (this.chunks.length === 1) (this.chunks[0].swings ??= []).push(swing.id);
+    return swing;
+  }
+  addBounce(b: Omit<Bounce, 'id'>): Bounce {
+    const bounce: Bounce = { id: this.bounces.length ? Math.max(...this.bounces.map((q) => q.id)) + 1 : 0, ...b };
+    this.bounces.push(bounce); this.boById.set(bounce.id, bounce);
+    if (this.chunks.length === 1) (this.chunks[0].bounces ??= []).push(bounce.id);
+    return bounce;
+  }
+  addUpdraft(u: Omit<Updraft, 'id'>): Updraft {
+    const up: Updraft = { id: this.updrafts.length ? Math.max(...this.updrafts.map((q) => q.id)) + 1 : 0, ...u };
+    this.updrafts.push(up); this.upById.set(up.id, up);
+    if (this.chunks.length === 1) (this.chunks[0].updrafts ??= []).push(up.id);
+    return up;
+  }
+  addRide(h: RideHook): void {
+    if (this.chunks.length === 1) (this.chunks[0].rides ??= []).push(h);
+  }
+  placeOrb(p: Omit<Orb, 'id'>): Orb {
+    const o: Orb = { id: this.orbs.length ? Math.max(...this.orbs.map((q) => q.id)) + 1 : 1, ...p };
+    this.orbs.push(o); this.oOrbById.set(o.id, o);
+    if (this.chunks.length === 1) (this.chunks[0].orbs ??= []).push(o.id);
     return o;
   }
 

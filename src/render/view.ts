@@ -3,14 +3,14 @@ import type { Course, Vec2 } from '../course/course';
 import type { EndlessCourse } from '../course/endless';
 import type { RiderState, SimEvent } from '../sim/types';
 import { CameraRig } from './cameraRig';
-import { CourseView } from './courseView';
+import { CourseView, bounceRiderLateral } from './courseView';
 import { Effects, SpeedLines, Petals } from './effects';
 import { OrbPickupFx } from './orbFx';
 import type { OrbFxEvent } from '../orb/orbFxEvent';
 import { QualityManager, QUALITY, ORDER, deviceAnisotropy, type Quality } from './quality';
 import { loadLoss, recordLoss, saveLoss } from './gfxHistory';
-import { ART_UNIFORMS } from './materials';
-import { RiderView } from './riderView';
+import { ART_UNIFORMS, toon } from './materials';
+import { RiderView, ROPE_GRIP_AHEAD, ROPE_GRIP_Y } from './riderView';
 import { PostPass } from './post';
 import { Environment } from './environment';
 import { Debris } from './debris';
@@ -22,15 +22,15 @@ import { biomeName } from './biomeHills';
 /** Interpolatable slice of sim state. */
 export interface Snapshot {
   x: number; y: number; angle: number; speed: number; vy: number; mode: RiderState['mode'];
-  air: RiderState['air']; flip: number; railId: number; wallId: number;
+  air: RiderState['air']; flip: number; railId: number; wallId: number; swingId: number; bounceId: number;
   /** Landing prep armed (presentation: the heroine's catch pose). */
   prep?: boolean;
 }
 export const snap = (s: RiderState): Snapshot => ({
   x: s.x, y: s.y, angle: s.angle, vy: s.vy, mode: s.mode, air: s.air, flip: s.air === 'flip' ? s.flip : 0,
-  railId: s.railId, wallId: s.wallId,
-  prep: s.mode === 'airborne' && s.prepStrokeId !== -1 && (s.prepHeld || s.prepTimer > 0),
-  speed: s.mode === 'airborne' ? Math.hypot(s.vx, s.vy) : s.speed,
+  railId: s.railId, wallId: s.wallId, swingId: s.swingId, bounceId: s.bounceId,
+  prep: (s.mode === 'airborne' || s.mode === 'flying') && s.prepStrokeId !== -1 && (s.prepHeld || s.prepTimer > 0),
+  speed: s.mode === 'airborne' || s.mode === 'flying' || s.mode === 'swinging' ? Math.hypot(s.vx, s.vy) : s.speed,
 });
 
 /**
@@ -54,6 +54,9 @@ export class GameView {
   readonly quality: QualityManager;
   private trail: Vec2[] = [];
   private trailLine: THREE.Line;
+  private ropeLine: THREE.Mesh;
+  private ropeHook: THREE.Mesh;
+  private ropeGlint: THREE.Sprite;
   private arcLine: THREE.Line;
   private failMarker: THREE.Mesh;
   private edgeMarker: THREE.Mesh;
@@ -119,6 +122,24 @@ export class GameView {
       setTimeout(() => void this.post.prewarm(this.postCombos()), 2000);
     });
 
+    this.ropeLine = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 1, 6), toon('#4a3428'));
+    this.ropeLine.visible = false;
+    this.ropeLine.frustumCulled = false;
+    this.ropeHook = new THREE.Mesh(new THREE.TorusGeometry(0.065, 0.016, 5, 12), toon('#2c2832'));
+    this.ropeHook.visible = false;
+    this.ropeHook.frustumCulled = false;
+    const glint = document.createElement('canvas');
+    glint.width = glint.height = 64;
+    const ctx = glint.getContext('2d')!;
+    ctx.translate(32, 32);
+    ctx.fillStyle = '#fff6d4';
+    ctx.fillRect(-26, -1.1, 52, 2.2);
+    ctx.fillRect(-1.1, -26, 2.2, 52);
+    const gtex = new THREE.CanvasTexture(glint);
+    this.ropeGlint = new THREE.Sprite(new THREE.SpriteMaterial({ map: gtex, color: '#fff6d4', transparent: true, opacity: 0.8, depthWrite: false, fog: false, blending: THREE.AdditiveBlending }));
+    this.ropeGlint.visible = false;
+    this.ropeGlint.scale.set(0.16, 0.16, 1);
+    this.scene.add(this.ropeLine, this.ropeHook, this.ropeGlint);
     this.trailLine = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineDashedMaterial({ color: '#c8553d', dashSize: 0.5, gapSize: 0.35, fog: false }));
     this.trailLine.visible = false;
     this.arcLine = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: '#2f7d6d', transparent: true, opacity: 0.8, fog: false }));
@@ -399,6 +420,9 @@ export class GameView {
       case 'grab-start':
         this.rider.kick(0.1);
         break;
+      case 'bounce':
+        this.courseView?.squashPad(e.bounceId);
+        break;
       case 'fail': {
         const c = this.courseView?.course;
         const lip = c ? c.maxHeightAhead(e.info.x - 14, 18) : e.info.y;
@@ -417,6 +441,26 @@ export class GameView {
       }
       default: break;
     }
+  }
+
+  /** The live rope, from the pivot down to her hands. The chunk's rest rope hides while this shows. */
+  private syncRope(curr: Snapshot, x: number, y: number, lateral: number): void {
+    const sw = curr.mode === 'swinging' ? this.courseView?.course.swing(curr.swingId) : undefined;
+    this.courseView?.setSwingHeld(sw ? sw.id : null);
+    this.ropeLine.visible = !!sw;
+    this.ropeHook.visible = !!sw;
+    this.ropeGlint.visible = !!sw;
+    if (!sw) return;
+    const a = toScene(sw.ax, sw.ay, sw.lateral);
+    const b = toScene(x, y + ROPE_GRIP_Y, lateral + ROPE_GRIP_AHEAD);
+    const dir = b.clone().sub(a);
+    const len = Math.max(0.25, dir.length());
+    this.ropeLine.position.copy(a).add(b).multiplyScalar(0.5);
+    this.ropeLine.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
+    this.ropeLine.scale.set(1, len, 1);
+    this.ropeHook.position.copy(b);
+    this.ropeHook.rotation.set(Math.PI / 2, 0, 0);
+    this.ropeGlint.position.copy(b);
   }
 
   private showTrail(): void {
@@ -447,15 +491,21 @@ export class GameView {
     this.presentTime += Math.max(0, dt);
     this.courseView?.animate(this.presentTime, this.rig.camera, this.renderer.domElement.clientHeight || 844);
     this.env.streamScenery(x, this.courseView?.course.kind === 'endless' ? (this.courseView.course as unknown as { generatedTo: number }).generatedTo : Infinity);
-    const airborne = curr.mode === 'airborne';
+    const airborne = curr.mode === 'airborne' || curr.mode === 'flying' || curr.mode === 'swinging';
     if (airborne && (this.trail.length === 0 || Math.abs(this.trail[this.trail.length - 1].x - x) > 0.4)) this.trail.push({ x, y });
     if (this.trail.length > 400) this.trail.shift();
     const course = this.courseView?.course;
     let lateral = 0;
     if (curr.mode === 'grinding' && course) lateral = course.rail(curr.railId).lateral;
     if (curr.mode === 'wallRiding' && course) lateral = course.wall(curr.wallId).lateral - 0.3;
+    if (curr.mode === 'swinging' && course) lateral = course.swing(curr.swingId)?.lateral ?? 1.6;
+    if ((curr.mode === 'airborne' || curr.mode === 'flying') && curr.bounceId >= 0 && course) {
+      const pad = course.bounce(curr.bounceId);
+      if (pad) lateral = bounceRiderLateral(pad);
+    }
     const flip = curr.flip > 0 ? (curr.flip >= prev.flip ? lerp(prev.flip, curr.flip) : curr.flip) : 0;
     this.rider.update(dt, curr, x, y, lerp(prev.angle, curr.angle), flip, lateral);
+    this.syncRope(curr, x, y, lateral);
     // sustained contact feedback, emitted at the actual contact point
     this.contactFx -= dt;
     if (this.contactFx <= 0 && !failed) {
@@ -469,7 +519,9 @@ export class GameView {
       this.rig.update(dt, this.failCam.x, this.failCam.y, 0, false);
     } else {
       const ahead = course ? course.maxHeightAhead(x, TUNING.camera.lookOverRange) : -Infinity;
-      this.rig.update(dt, x, y, curr.speed, false, ahead);
+      // Ease toward a swing so the rope, the hook and Ao stay in frame instead of sliding off the right edge.
+      const swingLat = curr.mode === 'swinging' && course ? (course.swing(curr.swingId)?.lateral ?? 0) : 0;
+      this.rig.update(dt, x, y, curr.speed, false, ahead, swingLat * 0.72);
     }
     ART_UNIFORMS.uTime.value += dt;
     this.env.follow(toScene(x + 18, y, 0, this.focus), this.rig.camera.position, x, y);

@@ -12,9 +12,11 @@ export interface PropPiece {
   body: THREE.BufferGeometry;
   /** Candle / lamp head. Same attributes; render with the warm glow material. Null if this piece has none. */
   glow: THREE.BufferGeometry | null;
+  /** Restyled base-colour atlas. Null when the piece is vertex-coloured only. */
+  map: THREE.Texture | null;
 }
 
-interface Entry { v: number; i: number; g: number; pos: number; nrm: number; col: number; uv: number; tl: number; idx: number; gidx: number }
+interface Entry { v: number; i: number; g: number; pos: number; nrm: number; col: number; uv: number; tl: number; idx: number; gidx: number; map?: string }
 
 const BASE = (typeof import.meta !== 'undefined' && (import.meta as { env?: { BASE_URL?: string } }).env?.BASE_URL) || './';
 
@@ -52,11 +54,25 @@ async function fetchProps(): Promise<PropSet | null> {
       fetch(BASE + 'props/props.bin').then((r) => { if (!r.ok) throw new Error(String(r.status)); return r.arrayBuffer(); }),
     ]);
     const pieces = new Map<string, PropPiece>();
+    const maps: Promise<void>[] = [];
     for (const [name, e] of Object.entries(index.pieces as Record<string, Entry>)) {
       const body = e.i ? geo(bin, e, e.idx, e.i) : new THREE.BufferGeometry();
       const glow = e.g ? geo(bin, e, e.gidx, e.g) : null;
-      pieces.set(name, { body, glow });
+      const piece: PropPiece = { body, glow, map: null };
+      pieces.set(name, piece);
+      if (e.map && typeof document !== 'undefined') {
+        maps.push(new Promise((resolve) => {
+          new THREE.TextureLoader().load(BASE + 'props/' + e.map, (tex) => {
+            tex.colorSpace = THREE.SRGBColorSpace;
+            tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+            tex.anisotropy = 8;
+            piece.map = tex;
+            resolve();
+          }, undefined, () => resolve());
+        }));
+      }
     }
+    await Promise.all(maps);
     return new PropSet(pieces);
   } catch (err) {
     console.warn('course props failed to load', err);

@@ -339,7 +339,10 @@ def kenney_piece(path, colormap, foot=True):
 def activities(blob, index):
     def go(name, piece):
         pack(name, *piece, blob, index)
-    # clothes hang from y=0 (the line); posts are dropped and re-hung by the course along its own spline
+    # clothes hang from y=0 (the line); posts are dropped and re-hung by the course along its own spline.
+    # These Pixor names are not the set-piece slots. Laundry, awnings, balloons, boats and steam
+    # draw only from set-sheet/set-shirt/set-towel/set-sock, set-awning, set-balloon, set-boat
+    # and public/props/steam.png (see src/render/setSlots.ts). Leave those names absent until the files arrive.
     W = os.path.join(PIX, 'pixor-library-washing-line.glb')
     for piece, node in (('cloth-sheet', 'Washing sheet'), ('cloth-shirt', 'Washing shirt'),
                         ('cloth-sock', 'Washing sock A'), ('cloth-towel', 'Washing towel')):
@@ -369,6 +372,26 @@ def activities(blob, index):
     go('stall-red', kenney_piece(os.path.join(K, 'town', 'stall-red.glb'), os.path.join(K, 'town', 'colormap.png')))
     go('stall-green', kenney_piece(os.path.join(K, 'town', 'stall-green.glb'), os.path.join(K, 'town', 'colormap.png')))
 
+def sourced(blob, index):
+    """Grab3D / cloth-sim pieces from art/pipeline/restyle_setpieces.py. Overwrites chimney and crane."""
+    man_path = os.path.join(ROOT, 'art', 'pipeline', 'out', 'manifest.json')
+    if not os.path.exists(man_path):
+        print('no sourced manifest — set-piece slots stay empty')
+        return
+    man = json.load(open(man_path))
+    # The hot-air envelope is 21 m at 3k tris. It facets at the game camera, so it is not packed.
+    # Hot-air facets at 3k tris. The stall reads as a bare table over the water.
+    skip = {'set-hotair', 'set-stall'}
+    for name, spec in man.items():
+        if name in skip:
+            print(f'{name:18} skipped (flagged, not shipped)')
+            continue
+        z = np.load(os.path.join(ROOT, spec['npz']))
+        pack(name, z['pos'], z['nor'], z['col'], z['uv'], z['tl'], z['idx'], np.zeros(0, np.int64), blob, index)
+        if spec.get('map'):
+            index[name]['map'] = spec['map']
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
     blob = bytearray()
@@ -377,6 +400,7 @@ def main():
     pack('rail', *rail(), blob, index)
     pack('beacon', *beacon(), blob, index)
     activities(blob, index)
+    sourced(blob, index)
     open(os.path.join(OUT, 'props.bin'), 'wb').write(blob)
     json.dump({'version': 1, 'pieces': index}, open(os.path.join(OUT, 'props.json'), 'w'), separators=(',', ':'))
     print('props.bin', len(blob) // 1024, 'KiB')

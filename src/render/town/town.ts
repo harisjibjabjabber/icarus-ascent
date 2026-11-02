@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GeoBuilder, blob } from '../geo';
 import { toSceneRaw, ROUTE_RIGHT, ROUTE_YAW } from '../space';
+import { buildBuntingSpan } from '../bunting';
 import { Kit, MergeBuffer, TEX, type Tints } from './kit';
 
 /**
@@ -37,7 +38,11 @@ export interface ChunkOpts {
   clockTowers?: number[];
   endless?: boolean;
 }
-export interface TownChunk { near: THREE.BufferGeometry | null; far: THREE.BufferGeometry | null; y0: number; trisNear: number; trisFar: number }
+export interface TownChunk {
+  near: THREE.BufferGeometry | null; far: THREE.BufferGeometry | null; y0: number; trisNear: number; trisFar: number;
+  /** Swaying pennants for the street bunting. Null when this chunk has no string. */
+  flags: THREE.BufferGeometry | null;
+}
 
 const lin = (h: string) => new THREE.Color(h);
 const _m = new THREE.Matrix4(), _r = new THREE.Matrix4(), _s = new THREE.Matrix4(), _v = new THREE.Vector3();
@@ -161,18 +166,16 @@ function hangingSign(mb: MergeBuffer, base: THREE.Matrix4, x: number, y: number,
   b.add(new THREE.SphereGeometry(0.16, 8, 6), [x, y, z + 0.55], T.gold, { scale: [0.7, 0.8, 1.4] }); // a loaf / emblem
   mb.geometry(b.build()!, base);
 }
-function laundry(mb: MergeBuffer, P: Placer, x: number, y: number, rng: () => number): void {
-  const T = TOWN, b = new GeoBuilder();
-  const span = T.front * 2;
-  b.add(new THREE.BoxGeometry(0.025, 0.025, span), [0, 0, 0], T.iron);
-  const n = 5 + Math.floor(rng() * 4);
-  for (let i = 0; i < n; i++) {
-    const z = -span / 2 + 1 + (i + rng() * 0.5) * ((span - 2) / n), w = 0.4 + rng() * 0.35, h = 0.5 + rng() * 0.45;
-    b.add(new THREE.BoxGeometry(0.02, h, w), [0, -h / 2 - 0.02 - Math.sin((z / span + 0.5) * Math.PI) * 0.25, z], T.cloth[Math.floor(rng() * T.cloth.length)]);
-  }
-  const m = P.at(x, y, 0, facing(ROUTE_RIGHT) + Math.PI / 2);
-  // local z runs across the street (lateral), local x along the route
-  mb.geometry(b.build()!, m.multiply(_m.makeRotationY(Math.PI / 2)));
+/**
+ * One string across the street. Both ends are iron hooks on the facade faces, the cord sags,
+ * and the pennants (returned separately) sway. Replaces the old straight bar of flat cloth boxes.
+ */
+function laundry(mb: MergeBuffer, P: Placer, x: number, y: number, flags: THREE.BufferGeometry[]): void {
+  const T = TOWN;
+  const span = buildBuntingSpan((rx, ry, lat) => toSceneRaw(rx - P.x0, ry - P.y0, lat), x, y, -T.front, T.front, 0.78);
+  if (span.rigid) { mb.geometry(span.rigid, undefined, TEX.NONE); span.rigid.dispose(); }
+  if (span.cloth && flags.length === 0) flags.push(span.cloth);
+  else span.cloth?.dispose();
 }
 
 /** Smoothed street level near x (houses must not poke through kickers or sink into dips). */
@@ -220,6 +223,7 @@ function* townChunkSteps(kit: Kit, k: number, seed: number, ground: GroundFn, op
   const y0 = level(ground, x0);
   const P = new Placer(x0, y0);
   const near = new MergeBuffer(), far = new MergeBuffer();
+  const flags: THREE.BufferGeometry[] = [];
   const pick = <V>(a: V[]) => a[Math.floor(rng() * a.length)];
   const harbour = opts.harbourAt ? opts.harbourAt(x0 + L / 2) : opts.harbourFrom !== undefined && x0 >= opts.harbourFrom;
   // pavement/canal ribbons (both LODs share: put in far, near copies)
@@ -302,12 +306,16 @@ function* townChunkSteps(kit: Kit, k: number, seed: number, ground: GroundFn, op
     if (!harbour && clutter < 0.35) near.piece(kit, rng() < 0.5 ? 'barrel' : 'crate', P.at(x + 1.6, g.y - 0.14, s * (T.front - 0.7), rng() * 6).multiply(_m.makeScale(0.6, 0.6, 0.6)));
     yield;
   }
-  if (!harbour && rng() < 0.75) { const x = x0 + 8 + rng() * (L - 16), g = level(ground, x); laundry(near, P, x, g + 6.4, rng); laundry(far, P, x, g + 6.4, rng); }
+  if (!harbour && rng() < 0.75) {
+    const x = x0 + 8 + rng() * (L - 16), g = level(ground, x);
+    // Above the first-floor windows, low enough that the droop reads from the chase camera.
+    laundry(near, P, x, g + 5.7, flags); laundry(far, P, x, g + 5.7, flags);
+  }
   if (!harbour && rng() < 0.3) { const x = x0 + 10 + rng() * 20, g = ground(x); if (!g.gap) near.piece(kit, rng() < 0.5 ? 'stallRed' : 'stallGreen', P.at(x, g.y - 0.14, -(T.front - 0.9), TO_RIGHT).multiply(_m.makeScale(1.6, 1.6, 1.6))); }
   if (harbour) yield* harbourChunk(kit, near, far, P, x0, x1, ground);
   const gn = yield* near.buildSteps();
   const gf = yield* far.buildSteps();
-  return { near: gn, far: gf, y0, trisNear: near.triangles, trisFar: far.triangles };
+  return { near: gn, far: gf, y0, trisNear: near.triangles, trisFar: far.triangles, flags: flags[0] ?? null };
 }
 
 /**

@@ -5,9 +5,11 @@
  *  airborne   – ballistic; may carry an `air` trick (flip / grab) and a landing prep
  *  grinding   – locked to a rail
  *  wallRiding – riding a right-hand wall
+ *  swinging   – hooked on a rope
+ *  flying     – short steered flight after an updraft
  *  failed / finished – run over
  */
-export type MoveMode = 'grounded' | 'heelSkim' | 'airborne' | 'grinding' | 'wallRiding' | 'failed' | 'finished';
+export type MoveMode = 'grounded' | 'heelSkim' | 'airborne' | 'grinding' | 'wallRiding' | 'swinging' | 'flying' | 'failed' | 'finished';
 
 /** Airborne trick sub-state (only meaningful while airborne). */
 export type AirTrick = 'none' | 'flip' | 'grabLeft' | 'grabRight';
@@ -78,6 +80,22 @@ export interface RiderState {
   // --- contacts ---
   railId: number;
   wallId: number;
+  swingId: number;
+  /** Pendulum angle (rad, 0 = hanging straight down, + = ahead of the anchor) and angular rate. */
+  swingPhi: number;
+  swingOmega: number;
+  /** Updraft the rider is in, and the y where that column was entered (NaN if none). */
+  updraftId: number;
+  gustY: number;
+  /** Flying corridor ends at this x. */
+  flightX1: number;
+  flightTime: number;
+  /** Bounce pads already used this flight (one trigger each). */
+  bounced: number[];
+  /** Pad the rider last bounced on (-1 after a landing). Presentation and scoring. */
+  bounceId: number;
+  /** Vertical speed at the start of this flight. A washing line needs more than a flat jump. */
+  launchVy: number;
   /** Time in the current contact mode (grind / wall / skim) (s). */
   contactTime: number;
   /** Speed when the last wall ride began (for failure explanation). */
@@ -107,7 +125,7 @@ export interface RiderState {
   takeoffX: number;
   takeoffY: number;
   takeoffSpeed: number;
-  leftBy: 'jump' | 'edge' | 'crest' | 'rail' | 'wall' | 'none';
+  leftBy: 'jump' | 'edge' | 'crest' | 'rail' | 'wall' | 'swing' | 'bounce' | 'flight' | 'none';
   fail: FailInfo | null;
 }
 
@@ -125,6 +143,11 @@ export type SimEvent =
   | { type: 'grind-end'; railId: number; x: number; y: number; reason: 'end' | 'jump' }
   | { type: 'wall-start'; wallId: number; x: number; y: number; speed: number }
   | { type: 'wall-end'; wallId: number; x: number; y: number; reason: 'end' | 'release' | 'slid-off' | 'too-slow' | 'jump' }
+  | { type: 'swing-start'; swingId: number; x: number; y: number }
+  | { type: 'swing-end'; swingId: number; x: number; y: number; reason: 'release' | 'up' | 'street' | 'timeout' }
+  | { type: 'flight-start'; updraftId: number; x: number; y: number }
+  | { type: 'flight-end'; x: number; y: number }
+  | { type: 'bounce'; bounceId: number; kind: 'boat' | 'balloon' | 'awning'; x: number; y: number }
   | { type: 'skim-start'; x: number; y: number }
   | { type: 'skim-end'; x: number; y: number; reason: 'release' | 'push' | 'jump' | 'edge' | 'stopped' }
   | { type: 'break'; obstacleId: number; kind: 'pot' | 'pillar'; by: 'heel' | 'flip' | 'grab'; x: number; y: number; vx: number; vy: number; speed: number }

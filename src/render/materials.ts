@@ -35,6 +35,37 @@ export const ART_UNIFORMS = {
   uWind: { value: 1 },
 };
 
+/** Three-step ramp for sourced set pieces. Shadow is lavender, not black. */
+let setRampTex: THREE.DataTexture | null = null;
+export function setPieceRamp(): THREE.DataTexture {
+  if (setRampTex) return setRampTex;
+  const stops = [[0x8a, 0x7f, 0xa0], [0xe4, 0xd0, 0xc2], [0xff, 0xf6, 0xea]];
+  const data = new Uint8Array(stops.length * 4);
+  stops.forEach(([r, g, b], i) => data.set([r, g, b, 255], i * 4));
+  setRampTex = new THREE.DataTexture(data, stops.length, 1, THREE.RGBAFormat);
+  setRampTex.minFilter = setRampTex.magFilter = THREE.LinearFilter;
+  setRampTex.colorSpace = THREE.SRGBColorSpace;
+  setRampTex.needsUpdate = true;
+  return setRampTex;
+}
+
+/**
+ * Neutral warm light for shopfront canvas. The lavender set-piece ramp turns terracotta,
+ * teal and ochre into grey and peach; this one keeps the stripe hue.
+ */
+let awningRampTex: THREE.DataTexture | null = null;
+export function awningRamp(): THREE.DataTexture {
+  if (awningRampTex) return awningRampTex;
+  const stops = [[0xc8, 0xbe, 0xb4], [0xfa, 0xf4, 0xee], [0xff, 0xfc, 0xf8]];
+  const data = new Uint8Array(stops.length * 4);
+  stops.forEach(([r, g, b], i) => data.set([r, g, b, 255], i * 4));
+  awningRampTex = new THREE.DataTexture(data, stops.length, 1, THREE.RGBAFormat);
+  awningRampTex.minFilter = awningRampTex.magFilter = THREE.LinearFilter;
+  awningRampTex.colorSpace = THREE.SRGBColorSpace;
+  awningRampTex.needsUpdate = true;
+  return awningRampTex;
+}
+
 let ramp: THREE.DataTexture | null = null;
 function toonRamp(): THREE.DataTexture {
   if (ramp) return ramp;

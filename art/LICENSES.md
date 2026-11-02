@@ -91,7 +91,7 @@ No new accounts or purchases. Poly Pizza and kenney.nl direct downloads were blo
 
 Bake: `node art/orb/process-assets.mjs` (requires `sharp` for atlas; `ffmpeg` for audio).
 
-The risky high line is no longer a lone fence panel. It is a facade-anchored washing line, balcony rail, gutter or bunting (see the next section). `rail` remains in `props.bin` unused by that mesh.
+Street bunting is a catenary of cloth pennants hooked to both facades (the old straight bar of flat boxes is gone). A high line dressed as bunting uses the same string, with a hook on each facade; the grind itself stays on its rail. `rail` is the risky grind's fence panel.
 
 ## Wall rides and dressed lines (2026-11-01)
 
@@ -99,15 +99,33 @@ Downloaded for this pass. Kenney zips from OpenGameArt (CC0 stated on each pack 
 
 | Asset | Where | Licence | Evidence | Ships? |
 |---|---|---|---|---|
-| `art/props/kenney/pirate/` (`boat-row-small.glb`, `boat-row-large.glb`, `mast-ropes.glb`, `flag-pennant.glb`, `flag-pirate-pennant.glb`, `colormap.png`, `License.txt`) | Kenney Pirate Kit 2.1. https://opengameart.org/content/pirate-kit — zip `kenney_pirate-kit_2.1.zip` | **CC0 1.0** | `License.txt` ("Creative Commons Zero, CC0", created 17-02-2026); OpenGameArt page lists CC0 | source; baked into `props.bin` (`boat-small`, `boat-large`, `crane`, `pennant`, `pennant-dark`), not instanced yet |
+| `art/props/kenney/pirate/` (`boat-row-small.glb`, `boat-row-large.glb`, `mast-ropes.glb`, `flag-pennant.glb`, `flag-pirate-pennant.glb`, `colormap.png`, `License.txt`) | Kenney Pirate Kit 2.1. https://opengameart.org/content/pirate-kit — zip `kenney_pirate-kit_2.1.zip` | **CC0 1.0** | `License.txt` ("Creative Commons Zero, CC0", created 17-02-2026); OpenGameArt page lists CC0 | source; baked (`boat-small`, `boat-large`, `pennant`, `pennant-dark`). The mast is no longer the harbour crane |
 | `art/props/kenney/town/` (`stall-red.glb`, `stall-green.glb`, `colormap.png`, `License.txt`) | Kenney Fantasy Town Kit 2.0. https://opengameart.org/content/fantasy-town-kit — zip `kenney_fantasy-town-kit_2.0.zip` | **CC0 1.0** | `License.txt` (CC0, created 03-08-2025) | source; baked (`stall-red`, `stall-green`), not instanced yet |
 | `art/props/kenney/holiday/` (`lights-colored.glb`, `colormap.png`, `License.txt`) | Kenney Holiday Kit 2.0. https://opengameart.org/content/holiday-kit — zip `kenney_holiday-kit.zip` | **CC0 1.0** | `License.txt` (CC0, created 11-12-2024) | source; baked (`lights`), not instanced yet |
 | `art/props/kenney/city/` (`detail-awning.glb`, `detail-awning-wide.glb`, `colormap.png`, `License.txt`) | Kenney City Kit Commercial 2.1. https://opengameart.org/content/city-kit-commercial — zip `kenney_city-kit-commercial_2.1.zip` | **CC0 1.0** | `License.txt` (CC0, created 21-07-2025) | source; baked (`awning`, `awning-wide`), not instanced yet |
-| `art/props/pixor/pixor-library-washing-line.glb` | https://pixor.art/library/files/washing-line/pixor-library-washing-line.glb | **CC0** | Pixor library licence page | source; clothes (`cloth-sheet`, `cloth-shirt`, `cloth-sock`, `cloth-towel`) **placed** on dressed washing lines. Posts dropped |
+| `art/props/pixor/pixor-library-washing-line.glb` | https://pixor.art/library/files/washing-line/pixor-library-washing-line.glb | **CC0** | Pixor library licence page | source; `cloth-*` kept in the bin, not used for the set-piece line |
 | `art/props/pixor/pixor-library-sign-inn.glb` | https://pixor.art/library/files/sign-inn/pixor-library-sign-inn.glb | **CC0** | same | source; iron arm baked as `bracket` and **placed** from the line out to the facade. Post dropped |
-| `art/props/pixor/pixor-library-fishing-boat.glb`, `pier-post.glb`, `hot-air-balloon.glb`, `street-lamp-oil.glb`, `lamp-post.glb`, `sign-shop.glb`, `banner-street.glb`, `chimney-pot.glb`, `steam-vent.glb`, `windmill.glb`, `pinwheel.glb` | `https://pixor.art/library/files/<name>/pixor-library-<name>.glb` | **CC0** | same | source; baked (`boat-fish`, `bollard`, `balloon`, `lamp-oil`, `lamp-post`, `sign-shop`, `banner`, `chimney`, `vent`, `windmill`, `pinwheel`), not instanced yet |
+| `art/props/pixor/pixor-library-fishing-boat.glb`, `pier-post.glb`, `hot-air-balloon.glb`, `street-lamp-oil.glb`, `lamp-post.glb`, `sign-shop.glb`, `banner-street.glb`, `chimney-pot.glb`, `steam-vent.glb`, `windmill.glb`, `pinwheel.glb` | `https://pixor.art/library/files/<name>/pixor-library-<name>.glb` | **CC0** | same | source; lamp, signs, vent, pinwheel and pennant still placed. The chimney pot and the fishing boat are not the set-piece props |
 
 Harbour wall rides are drawn in code (warehouse bays, planked hulls), not from these meshes. Town shop walls stay the existing azulejo wall. Gold orb trails along a wall ride use the orb meshes already in the game (pickup `wall`, so a pass on the street does not take them).
+
+## Sourced set pieces (2026-11-02)
+
+CC0 1.0. Grab3D models are the GLB on each model page (no login). Restyle drops normal, roughness and metallic maps, repaints the base colour, and writes WebP atlases. Decimate and the laundry cloth sim run in Blender: `art/pipeline/decimate_setpieces.py`, `art/pipeline/laundry_sim.py` (`pip install bpy` if Blender is not installed). `art/pipeline/restyle_setpieces.py` then `art/pipeline/bake_props.py`.
+
+| Asset | Where | Licence | Evidence | Ships? |
+|---|---|---|---|---|
+| `art/props/grab3d/awning.glb` | CC0 1.0, Grab3D, https://grab3d.com/models/buildings/awning/ | **CC0 1.0** | model page (CC0, no login) | yes — `set-awning`, `set-awning-teal`, `set-awning-ochre` |
+| `art/props/grab3d/market-stall.glb` | CC0 1.0, Grab3D, https://grab3d.com/models/buildings/market-stall/ | **CC0 1.0** | model page | baked as `set-stall`, **not placed** — at real size it reads as a bare table over the water |
+| `art/props/grab3d/hot-air-balloon.glb` | CC0 1.0, Grab3D, https://grab3d.com/models/vehicles/hot-air-balloon/ | **CC0 1.0** | model page | **no** — restyled, not packed. A 21 m envelope at 3k tris facets in game |
+| `art/props/grab3d/balloon.glb` | CC0 1.0, Grab3D, https://grab3d.com/models/props/balloon/ | **CC0 1.0** | model page | yes — `set-balloon` |
+| `art/props/grab3d/rowboat.glb` | CC0 1.0, Grab3D, https://grab3d.com/models/vehicles/rowboat/ | **CC0 1.0** | model page | yes — `set-boat` (oars dropped) |
+| `art/props/grab3d/chimney.glb` | CC0 1.0, Grab3D, https://grab3d.com/models/buildings/chimney/ | **CC0 1.0** | model page | yes — replaces the `chimney` piece |
+| `art/props/grab3d/treadwheel-crane.glb` | CC0 1.0, Grab3D, https://grab3d.com/models/buildings/treadwheel-crane/ | **CC0 1.0** | model page | yes — replaces the `crane` piece |
+| `art/props/smoke/smoke1.png`, `smoke3.png` | CC0 1.0, OpenGameArt, https://opengameart.org/content/smoke-vapor-particles (fupi) | **CC0 1.0** | OpenGameArt page lists CC0 | yes — `public/props/steam/smoke1.webp`, `smoke3.webp` |
+| `art/props/smoke/smoke_04.png`, `smoke_07.png` | CC0 1.0, Kenney, https://opengameart.org/content/particle-pack-80-sprites | **CC0 1.0** | same pack as the orb atlas | yes — `public/props/steam/smoke_04.webp`, `smoke_07.webp` |
+| `art/props/fabric/Fabric019_Color.jpg` | CC0 1.0, ambientCG, https://ambientcg.com/view?id=Fabric019 | **CC0 1.0** | ambientCG lists CC0 1.0 | weave baked into cloth atlases, not shipped as its own file |
+| Laundry garments | no sourced mesh; cloth sim in `art/pipeline/laundry_sim.py` | project | — | yes — `set-sheet`, `set-shirt`, `set-towel`, `set-dress`, `set-sock`, `set-sock-b` |
 
 ## Vision presets (time of day + hills biome mock, ported from `spike/vision`, 2026-11-01)
 
